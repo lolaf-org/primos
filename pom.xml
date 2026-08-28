@@ -314,6 +314,7 @@
                                 <exclude>**/mvnw</exclude>
                                 <exclude>**/.mvn/**</exclude>
                                 <exclude>**/pom.xml</exclude>
+                                <exclude>**/lombok.config</exclude>
                                 <exclude>**/src/main/resources/**</exclude>
                                 <exclude>**/src/test/resources/**</exclude>
                             </excludes>

@@ -1,0 +1,228 @@
+/*
+ * Copyright © 2026 Lolaf.org
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.lolaf.primos;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
+
+/**
+ * The shape of one cluster: who is in it, which member this node is, and how fast it ticks.
+ *
+ * <p>Membership is static. Peers are never added or removed at runtime, and quorum is always
+ * computed from the configured voter set rather than from who happens to be reachable, so a
+ * cluster of five with two down still needs three votes. Reading an unreachable peer as "the
+ * cluster shrank" is how a split brain gets talked into existence.
+ */
+@Getter
+@EqualsAndHashCode
+@ToString
+public final class ClusterConfig {
+
+    /**
+     * The application name travels in a fixed 32-byte field on every datagram, so it is bounded
+     * here rather than truncated later: a name truncated to a colliding prefix would defeat the
+     * point of having it.
+     */
+    public static final int APPLICATION_NAME_MAX_BYTES = 32;
+
+    private final String applicationName;
+    private final int nodeId;
+    private final String nodeName;
+    private final List<Peer> peers;
+
+    @Getter(AccessLevel.NONE)
+    private final Peer witness;
+
+    private final Timings timings;
+
+    private ClusterConfig(Builder builder) {
+        this.applicationName = requireApplicationName(builder.applicationName);
+        this.nodeId = Peer.requireValidId(builder.nodeId, "nodeId");
+        this.nodeName = (builder.nodeName == null || builder.nodeName.trim().isEmpty())
+                ? "node-" + this.nodeId
+                : builder.nodeName.trim();
+        this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
+        this.witness = builder.witness;
+        this.timings = Objects.requireNonNull(builder.timings, "timings");
+        validate();
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** The witness, if this cluster has one. Most clusters do not. */
+    public Optional<Peer> witness() {
+        return Optional.ofNullable(witness);
+    }
+
+    /** Whether a witness is configured. */
+    public boolean hasWitness() {
+        return witness != null;
+    }
+
+    /**
+     * Every peer this node exchanges messages with, the witness included. Excludes this node.
+     */
+    public List<Peer> allPeers() {
+        if (witness == null) {
+            return peers;
+        }
+        List<Peer> all = new ArrayList<>(peers.size() + 1);
+        all.addAll(peers);
+        all.add(witness);
+        return Collections.unmodifiableList(all);
+    }
+
+    /**
+     * How many instances of the application are in the cluster, this node included and the
+     * witness excluded. The witness does not run the application, so it is not one of them.
+     */
+    public int applicationNodeCount() {
+        return peers.size() + 1;
+    }
+
+    /** How many voters the cluster has: the application nodes plus the witness, if any. */
+    public int voterCount() {
+        return applicationNodeCount() + (hasWitness() ? 1 : 0);
+    }
+
+    private void validate() {
+        Set<Integer> seen = new HashSet<>();
+        seen.add(nodeId);
+
+        for (Peer peer : peers) {
+            if (peer.type() != PeerType.APPLICATION) {
+                throw new IllegalArgumentException(
+                        "peer " + peer.id() + " is a " + peer.type()
+                                + "; configure a witness with witness(...) rather than as a peer");
+            }
+            requireDistinctId(seen, peer.id());
+        }
+        if (witness != null) {
+            if (witness.type() != PeerType.WITNESS) {
+                throw new IllegalArgumentException(
+                        "the configured witness has type " + witness.type()
+                                + "; build it with Peer.witness(...)");
+            }
+            requireDistinctId(seen, witness.id());
+        }
+    }
+
+    private void requireDistinctId(Set<Integer> seen, int id) {
+        if (!seen.add(id)) {
+            throw new IllegalArgumentException(
+                    "duplicate node id " + id + ": ids must be unique within an application,"
+                            + " and this node's own id may not be repeated among its peers");
+        }
+    }
+
+    private static String requireApplicationName(String name) {
+        Objects.requireNonNull(name, "applicationName");
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("applicationName must not be blank");
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                throw new IllegalArgumentException(
+                        "applicationName must be printable ASCII without spaces, but '" + trimmed
+                                + "' contains a character at index " + i + " that is not");
+            }
+        }
+        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
+        if (bytes > APPLICATION_NAME_MAX_BYTES) {
+            throw new IllegalArgumentException(
+                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
+                            + " bytes, but '" + trimmed + "' is " + bytes);
+        }
+        return trimmed;
+    }
+
+    /** Builder for {@link ClusterConfig}. Validation happens in {@link #build()}. */
+    public static final class Builder {
+
+        private String applicationName;
+        private int nodeId;
+        private String nodeName;
+        private final List<Peer> peers = new ArrayList<>();
+        private Peer witness;
+        private Timings timings = Timings.lan();
+
+        private Builder() {
+        }
+
+        /** Which clustered application this is. Every node of one cluster must agree on it. */
+        public Builder applicationName(String applicationName) {
+            this.applicationName = applicationName;
+            return this;
+        }
+
+        /** This node's id, unique within the application. */
+        public Builder nodeId(int nodeId) {
+            this.nodeId = nodeId;
+            return this;
+        }
+
+        /** A human-readable name for this node, used in logs. Defaults to {@code node-<id>}. */
+        public Builder nodeName(String nodeName) {
+            this.nodeName = nodeName;
+            return this;
+        }
+
+        /** The other application instances. This node must not be among them. */
+        public Builder peers(Peer... peers) {
+            return peers(java.util.Arrays.asList(peers));
+        }
+
+        /** The other application instances. This node must not be among them. */
+        public Builder peers(List<Peer> peers) {
+            this.peers.clear();
+            this.peers.addAll(Objects.requireNonNull(peers, "peers"));
+            return this;
+        }
+
+        /**
+         * The witness, at most one. Two would give a two-node pair four voters needing three,
+         * which is strictly worse than one.
+         */
+        public Builder witness(Peer witness) {
+            this.witness = witness;
+            return this;
+        }
+
+        public Builder timings(Timings timings) {
+            this.timings = timings;
+            return this;
+        }
+
+        public ClusterConfig build() {
+            return new ClusterConfig(this);
+        }
+    }
+}
