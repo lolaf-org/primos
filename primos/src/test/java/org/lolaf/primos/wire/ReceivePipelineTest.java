@@ -25,7 +25,7 @@ import org.lolaf.primos.DropReason;
 /** One test per step of the pipeline, each asserting its own counter moved and nothing dispatched. */
 class ReceivePipelineTest {
 
-    private static final String APP = "orders";
+    private static final String APP = "test-app";
     private static final int SENDER = 3;
     private static final byte[] SECRET = "shared-cluster-secret".getBytes();
 
@@ -92,8 +92,8 @@ class ReceivePipelineTest {
     }
 
     @Test
-    void step_4_a_neighbouring_cluster_is_dropped_and_named() {
-        MessageEncoder neighbour = new MessageEncoder("ordres", SENDER,
+    void step_4_a_one_character_typo_is_a_different_cluster() {
+        MessageEncoder neighbour = new MessageEncoder("tset-app", SENDER,
                 MessageAuthenticator.disabled());
 
         assertDropped(neighbour.appendEntries(buffer, 1), DropReason.WRONG_APPLICATION);
@@ -101,7 +101,15 @@ class ReceivePipelineTest {
 
     @Test
     void step_4_a_name_that_is_a_prefix_of_ours_is_still_a_different_cluster() {
-        MessageEncoder neighbour = new MessageEncoder("order", SENDER,
+        MessageEncoder neighbour = new MessageEncoder("test-ap", SENDER,
+                MessageAuthenticator.disabled());
+
+        assertDropped(neighbour.appendEntries(buffer, 1), DropReason.WRONG_APPLICATION);
+    }
+
+    @Test
+    void step_4_a_name_that_extends_ours_is_still_a_different_cluster() {
+        MessageEncoder neighbour = new MessageEncoder("test-application", SENDER,
                 MessageAuthenticator.disabled());
 
         assertDropped(neighbour.appendEntries(buffer, 1), DropReason.WRONG_APPLICATION);

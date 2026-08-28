@@ -134,8 +134,7 @@ class GoldenVectorsTest {
     void the_largest_authenticated_message_leaves_the_datagram_budget_untroubled() {
         int largest = MessageType.PING.messageBytes() + WireFormat.TAG_BYTES;
 
-        assertThat(largest).isEqualTo(92);
-        assertThat(largest).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
+        assertThat(largest).isEqualTo(92).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
     }
 
     @Test

@@ -35,7 +35,7 @@ import org.junit.jupiter.api.Test;
  */
 class ParserFuzzTest {
 
-    private static final String APP = "orders";
+    private static final String APP = "test-app";
     private static final int SENDER = 3;
     private static final int ITERATIONS = 20_000;
 
