@@ -100,6 +100,7 @@ public final class ElectionNode implements MessageHandler {
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
+    private Throwable failureCause;
 
     private long preVotesStarted;
     private long electionsStarted;
@@ -163,9 +164,58 @@ public final class ElectionNode implements MessageHandler {
      */
     public void runOnce(long maxWaitNanos) {
         requireStarted();
-        long wait = Math.min(maxWaitNanos, Math.max(0L, nextDeadlineNanos() - clock.nanoTime()));
-        transport.poll(wait, this::onDatagram);
-        fireDueTimers();
+        if (role == Role.FAILED) {
+            return;
+        }
+        try {
+            long wait = Math.min(maxWaitNanos, Math.max(0L, nextDeadlineNanos() - clock.nanoTime()));
+            transport.poll(wait, this::onDatagram);
+            fireDueTimers();
+        } catch (Throwable failure) {
+            fail(failure);
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+        }
+    }
+
+    /**
+     * Marks the node permanently failed.
+     *
+     * <p>This exists for one reason: an uncaught exception that killed the loop while leaving a
+     * volatile {@code LEADER} behind would be a split-brain generator. The application would go on
+     * believing it is in charge, doing whatever leaders do, while the cluster elected somebody
+     * else and moved on. A dead node has to look dead.
+     *
+     * <p>The state is set <em>before</em> anything is rethrown, so by the time a caller sees the
+     * failure {@link #role()} is already safe.
+     *
+     * <p>Terminal on purpose. The realistic cause is a store that can no longer make a vote
+     * durable, and continuing after that means voting on state this node may forget — the very
+     * thing the store exists to prevent. There is no recovery in place; the process is restarted.
+     */
+    private void fail(Throwable cause) {
+        Role previous = role;
+        role = Role.FAILED;
+        leaderId = -1;
+        failureCause = cause;
+        abandonPreVote();
+        votesGranted.clear();
+        lastRoundTripNanos.clear();
+
+        log.error("cluster '{}': node {} has failed while {} in term {} and will not lead again."
+                        + " Restart the process; this node cannot recover in place.",
+                config.applicationName(), config.nodeId(), previous, currentTerm, cause);
+    }
+
+    /** Whether this node has failed permanently. */
+    public boolean isFailed() {
+        return role == Role.FAILED;
+    }
+
+    /** What killed the node, if anything has. */
+    public Throwable failureCause() {
+        return failureCause;
     }
 
     /**
@@ -175,6 +225,9 @@ public final class ElectionNode implements MessageHandler {
      * and nothing to do until someone talks to it.
      */
     public long nextDeadlineNanos() {
+        if (role == Role.FAILED) {
+            return Long.MAX_VALUE;
+        }
         if (role == Role.LEADER) {
             return heartbeatDeadlineNanos;
         }
