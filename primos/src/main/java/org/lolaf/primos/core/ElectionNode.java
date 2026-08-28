@@ -332,7 +332,7 @@ public final class ElectionNode implements MessageHandler {
         listener.onLeaderChanged(leaderId(), currentTerm);
     }
 
-    /** An immutable snapshot of this node's counters, for {@link PrimosNode#stats()}. */
+    /** An immutable snapshot of this node's counters, for {@link org.lolaf.primos.PrimosNode#stats()}. */
     public PrimosStats stats() {
         return new PrimosStats(role, currentTerm,
                 java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
