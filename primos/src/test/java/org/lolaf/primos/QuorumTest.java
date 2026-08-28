@@ -151,6 +151,21 @@ class QuorumTest {
     }
 
     @Test
+    void a_witness_and_an_application_node_compute_the_same_quorum_for_one_cluster() {
+        Quorum fromApplicationNode = quorum(2, true);
+        Quorum fromWitness = Quorum.of(ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(99)
+                .asWitness()
+                .peers(Peer.application(1, "host-1", 7000), Peer.application(2, "host-2", 7000))
+                .build());
+
+        assertThat(fromWitness.voters()).isEqualTo(fromApplicationNode.voters());
+        assertThat(fromWitness.required()).isEqualTo(fromApplicationNode.required());
+        assertThat(fromWitness.summary()).isEqualTo(fromApplicationNode.summary());
+    }
+
+    @Test
     void quorum_is_a_majority_of_configured_voters_not_of_reachable_ones() {
         Quorum q = quorum(5, false);
 

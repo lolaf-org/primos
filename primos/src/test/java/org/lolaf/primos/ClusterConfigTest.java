@@ -125,6 +125,46 @@ class ClusterConfigTest {
     }
 
     @Test
+    void a_witness_counts_itself_as_the_witness_rather_than_as_an_application_node() {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(99)
+                .asWitness()
+                .peers(Peer.application(1, "host-a", 7000), Peer.application(2, "host-b", 7000))
+                .build();
+
+        assertThat(config.isWitness()).isTrue();
+        assertThat(config.hasWitness()).isTrue();
+        assertThat(config.applicationNodeCount()).isEqualTo(2);
+        assertThat(config.voterCount()).isEqualTo(3);
+        assertThat(config.nodeName()).isEqualTo("witness-99");
+    }
+
+    @Test
+    void a_witness_cannot_also_be_given_a_witness() {
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(99)
+                .asWitness()
+                .peers(Peer.application(1, "host-a", 7000))
+                .witness(Peer.witness(98, "other", 7000))
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("this node is the witness");
+    }
+
+    @Test
+    void a_witness_with_nothing_to_witness_is_rejected() {
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(99)
+                .asWitness()
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nothing to witness");
+    }
+
+    @Test
     void the_peer_list_is_immutable_once_built() {
         ClusterConfig config = valid().build();
 

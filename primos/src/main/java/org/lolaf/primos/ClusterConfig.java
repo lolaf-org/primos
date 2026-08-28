@@ -52,6 +52,7 @@ public final class ClusterConfig {
     private final String applicationName;
     private final int nodeId;
     private final String nodeName;
+    private final PeerType nodeType;
     private final List<Peer> peers;
 
     @Getter(AccessLevel.NONE)
@@ -62,8 +63,9 @@ public final class ClusterConfig {
     private ClusterConfig(Builder builder) {
         this.applicationName = requireApplicationName(builder.applicationName);
         this.nodeId = Peer.requireValidId(builder.nodeId, "nodeId");
+        this.nodeType = Objects.requireNonNull(builder.nodeType, "nodeType");
         this.nodeName = (builder.nodeName == null || builder.nodeName.trim().isEmpty())
-                ? "node-" + this.nodeId
+                ? (this.nodeType.isWitness() ? "witness-" : "node-") + this.nodeId
                 : builder.nodeName.trim();
         this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
         this.witness = builder.witness;
@@ -80,9 +82,16 @@ public final class ClusterConfig {
         return Optional.ofNullable(witness);
     }
 
-    /** Whether a witness is configured. */
+    /**
+     * Whether the cluster has a witness — either configured as a peer, or this node being it.
+     */
     public boolean hasWitness() {
-        return witness != null;
+        return witness != null || nodeType.isWitness();
+    }
+
+    /** Whether this node is itself the witness, and so must never campaign. */
+    public boolean isWitness() {
+        return nodeType.isWitness();
     }
 
     /**
@@ -103,7 +112,7 @@ public final class ClusterConfig {
      * witness excluded. The witness does not run the application, so it is not one of them.
      */
     public int applicationNodeCount() {
-        return peers.size() + 1;
+        return peers.size() + (nodeType.isWitness() ? 0 : 1);
     }
 
     /** How many voters the cluster has: the application nodes plus the witness, if any. */
@@ -122,6 +131,15 @@ public final class ClusterConfig {
                                 + "; configure a witness with witness(...) rather than as a peer");
             }
             requireDistinctId(seen, peer.id());
+        }
+        if (witness != null && nodeType.isWitness()) {
+            throw new IllegalArgumentException(
+                    "this node is the witness, so it cannot also have one: a cluster has at most"
+                            + " one, and two would give a pair four voters needing three");
+        }
+        if (peers.isEmpty() && nodeType.isWitness()) {
+            throw new IllegalArgumentException(
+                    "a witness with no peers has nothing to witness");
         }
         if (witness != null) {
             if (witness.type() != PeerType.WITNESS) {
@@ -170,6 +188,7 @@ public final class ClusterConfig {
         private String applicationName;
         private int nodeId;
         private String nodeName;
+        private PeerType nodeType = PeerType.APPLICATION;
         private final List<Peer> peers = new ArrayList<>();
         private Peer witness;
         private Timings timings = Timings.lan();
@@ -192,6 +211,15 @@ public final class ClusterConfig {
         /** A human-readable name for this node, used in logs. Defaults to {@code node-<id>}. */
         public Builder nodeName(String nodeName) {
             this.nodeName = nodeName;
+            return this;
+        }
+
+        /**
+         * Declares this node to be the witness rather than an application instance: it votes, but
+         * never campaigns and never leads. Its peers are the application nodes.
+         */
+        public Builder asWitness() {
+            this.nodeType = PeerType.WITNESS;
             return this;
         }
 

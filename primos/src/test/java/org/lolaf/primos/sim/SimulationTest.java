@@ -175,8 +175,7 @@ class SimulationTest {
         simulation.crash(1);
         simulation.restart(1);
 
-        assertThat(simulation.traceDigest()).contains("crash n1").contains("restart n1");
-        assertThat(simulation.recentTrace()).contains("restart n1");
+        assertThat(simulation.recentTrace()).contains("crash n1").contains("restart n1");
     }
 
     @Test

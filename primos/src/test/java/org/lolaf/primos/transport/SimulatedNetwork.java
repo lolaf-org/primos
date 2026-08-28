@@ -154,6 +154,34 @@ public final class SimulatedNetwork {
         return earliest;
     }
 
+    /**
+     * When the next datagram queued <em>for one node</em> comes due, or {@link Long#MAX_VALUE} if
+     * none is. The scheduler asks per node rather than globally, because a node that is down will
+     * never drain its mailbox and a stalled queue must not stop the clock.
+     */
+    public long nextDeliveryNanos(int nodeId) {
+        PriorityQueue<InFlight> mailbox = mailboxes.get(nodeId);
+        InFlight head = mailbox == null ? null : mailbox.peek();
+        return head == null ? Long.MAX_VALUE : head.dueNanos;
+    }
+
+    /**
+     * Throws away everything queued for a node, as a crashed machine does.
+     *
+     * <p>Without this a restarted node would be handed a burst of datagrams from before it died,
+     * which no real node ever sees: those packets were dropped by a host that was not listening.
+     */
+    public int discardPendingFor(int nodeId) {
+        PriorityQueue<InFlight> mailbox = mailboxes.get(nodeId);
+        if (mailbox == null) {
+            return 0;
+        }
+        int discarded = mailbox.size();
+        droppedByLoss += discarded;
+        mailbox.clear();
+        return discarded;
+    }
+
     /** How many datagrams are queued but not yet delivered. */
     public int inFlight() {
         int total = 0;

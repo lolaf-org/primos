@@ -49,6 +49,13 @@ public final class Simulation {
 
     private static final int TRACE_TAIL = 40;
 
+    /**
+     * A run this long is a bug in the test, not a slow cluster: a deadline that never advances
+     * would otherwise spin forever without the clock moving. Failing loudly beats exhausting
+     * memory and leaving no clue why.
+     */
+    private static final long MAX_STEPS = 2_000_000L;
+
     private final long seed;
     private final Random random;
     private final VirtualClock clock = new VirtualClock();
@@ -56,8 +63,8 @@ public final class Simulation {
     private final List<SimNode> nodes = new ArrayList<>();
     private final List<Invariant> invariants = new ArrayList<>();
     private final Deque<String> trace = new ArrayDeque<>();
-    private final StringBuilder digest = new StringBuilder();
 
+    private long digest = 1469598103934665603L;
     private long steps;
 
     public Simulation(long seed) {
@@ -165,6 +172,7 @@ public final class Simulation {
     public void crash(int nodeId) {
         SimNode node = requireNode(nodeId);
         node.crash();
+        network.discardPendingFor(nodeId);
         record("crash n" + nodeId);
     }
 
@@ -183,7 +191,7 @@ public final class Simulation {
      * crept in, and every regression seed in the suite has quietly stopped meaning anything.
      */
     public String traceDigest() {
-        return digest.toString();
+        return Long.toHexString(digest);
     }
 
     /** The last few events, for a failure message. */
@@ -202,15 +210,28 @@ public final class Simulation {
             }
         }
         steps++;
+        if (steps > MAX_STEPS) {
+            throw new IllegalStateException("simulation ran " + steps + " steps at t="
+                    + clock.nanoTime() + "ns without finishing, which means some node's deadline"
+                    + " is not advancing. Seed " + seed + "L.");
+        }
         snapshot();
         checkInvariants();
     }
 
+    /**
+     * The earliest thing that will happen: a running node's deadline, or a datagram queued for a
+     * running node.
+     *
+     * <p>Only running nodes count. A crashed node never drains its mailbox, so including its
+     * queue would leave an event permanently due in the past and the clock would stop advancing.
+     */
     private long nextEventNanos() {
-        long earliest = network.nextDeliveryNanos();
+        long earliest = Long.MAX_VALUE;
         for (SimNode node : nodes) {
             if (node.isRunning()) {
                 earliest = Math.min(earliest, node.nextDeadlineNanos());
+                earliest = Math.min(earliest, network.nextDeliveryNanos(node.id()));
             }
         }
         return earliest;
@@ -233,7 +254,9 @@ public final class Simulation {
     }
 
     private void record(String event) {
-        digest.append(event).append('\n');
+        // A rolling hash rather than an accumulated string: a long run would otherwise grow the
+        // digest without bound, and the only thing needed of it is that identical runs match.
+        digest = (digest ^ event.hashCode()) * 1099511628211L;
         trace.addLast(event);
         while (trace.size() > TRACE_TAIL) {
             trace.removeFirst();
