@@ -31,6 +31,7 @@ import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PeerStats;
 import org.lolaf.primos.PrimosListener;
+import org.lolaf.primos.PrimosStats;
 import org.lolaf.primos.Quorum;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.RoleAndTerm;
@@ -104,6 +105,7 @@ public final class ElectionNode implements MessageHandler {
     private long lastLeaderContactNanos;
     private long probeDeadlineNanos;
     private long probeSequence;
+    private long roleChangedAtNanos;
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
@@ -165,6 +167,7 @@ public final class ElectionNode implements MessageHandler {
         currentTerm = state.currentTerm();
         votedFor = state.votedFor();
         role = Role.FOLLOWER;
+        roleChangedAtNanos = clock.nanoTime();
 
         log.info("{}", quorum.summary());
         for (String warning : quorum.warnings()) {
@@ -222,8 +225,8 @@ public final class ElectionNode implements MessageHandler {
      */
     private void fail(Throwable cause) {
         Role previous = role;
-        role = Role.FAILED;
-        leaderId = -1;
+        setRole(Role.FAILED);
+        setLeader(-1);
         failureCause = cause;
         abandonPreVote();
         votesGranted.clear();
@@ -304,6 +307,36 @@ public final class ElectionNode implements MessageHandler {
 
     public long electionsWon() {
         return electionsWon;
+    }
+
+    /**
+     * The single place the role changes, so every transition is reported exactly once and the
+     * time-in-role clock cannot drift out of step with it.
+     */
+    private void setRole(Role next) {
+        if (role == next) {
+            return;
+        }
+        Role previous = role;
+        role = next;
+        roleChangedAtNanos = clock.nanoTime();
+        listener.onRoleChanged(previous, next, currentTerm);
+    }
+
+    /** The single place the believed leader changes. */
+    private void setLeader(int next) {
+        if (leaderId == next) {
+            return;
+        }
+        leaderId = next;
+        listener.onLeaderChanged(leaderId(), currentTerm);
+    }
+
+    /** An immutable snapshot of this node's counters, for {@link PrimosNode#stats()}. */
+    public PrimosStats stats() {
+        return new PrimosStats(role, currentTerm,
+                java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
+                electionsStarted, electionsWon, drops.snapshot(), peerStats());
     }
 
     private void onDatagram(ByteBuffer datagram) {
@@ -402,8 +435,8 @@ public final class ElectionNode implements MessageHandler {
         votedFor = config.nodeId();
         persist();
 
-        role = Role.CANDIDATE;
-        leaderId = -1;
+        setRole(Role.CANDIDATE);
+        setLeader(-1);
         votesGranted.clear();
         votesGranted.add(config.nodeId());
         electionsStarted++;
@@ -422,8 +455,8 @@ public final class ElectionNode implements MessageHandler {
 
     private void becomeLeader() {
         abandonPreVote();
-        role = Role.LEADER;
-        leaderId = config.nodeId();
+        setRole(Role.LEADER);
+        setLeader(config.nodeId());
         electionsWon++;
 
         // Start the contact clock now, or a new leader would step down before its first heartbeat
@@ -453,8 +486,8 @@ public final class ElectionNode implements MessageHandler {
         persist();
 
         Role previous = role;
-        role = Role.FOLLOWER;
-        leaderId = -1;
+        setRole(Role.FOLLOWER);
+        setLeader(-1);
         votesGranted.clear();
         resetElectionTimer();
 
@@ -537,8 +570,8 @@ public final class ElectionNode implements MessageHandler {
         }
         // A leader exists in this term, so stop campaigning and stop counting down to an election.
         abandonPreVote();
-        role = Role.FOLLOWER;
-        leaderId = senderId;
+        setRole(Role.FOLLOWER);
+        setLeader(senderId);
         votesGranted.clear();
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
@@ -705,8 +738,8 @@ public final class ElectionNode implements MessageHandler {
                 config.applicationName(), config.nodeId(), currentTerm,
                 timings.electionTimeoutMin().toMillis());
 
-        role = Role.FOLLOWER;
-        leaderId = -1;
+        setRole(Role.FOLLOWER);
+        setLeader(-1);
         votesGranted.clear();
         lastRoundTripNanos.clear();
         resetElectionTimer();

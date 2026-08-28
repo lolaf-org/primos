@@ -36,6 +36,11 @@ import java.util.OptionalInt;
  */
 public interface PrimosNode extends AutoCloseable {
 
+    /** Starts building a node. */
+    static PrimosNodeBuilder builder() {
+        return new PrimosNodeBuilder();
+    }
+
     /**
      * Binds the socket, reads back the persisted term and vote, and starts the node thread.
      *
