@@ -44,3 +44,8 @@ build/
 /profile.jfr
 /.profileconfig.json
 /.claude/
+
+### Working design document ###
+# The primos design record, deliberately kept out of git: the published history carries code,
+# not the working document. Present in the working tree, never committed.
+PLAN.md
