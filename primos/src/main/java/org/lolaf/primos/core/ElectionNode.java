@@ -22,12 +22,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.LinkedHashMap;
 import java.util.OptionalInt;
 import java.util.Random;
 import java.util.Set;
 
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerStats;
+import org.lolaf.primos.PrimosListener;
 import org.lolaf.primos.Quorum;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.RoleAndTerm;
@@ -83,6 +86,8 @@ public final class ElectionNode implements MessageHandler {
     private final DropCounters drops = new DropCounters();
 
     private final List<Peer> peers;
+    private final Map<Integer, Probe> probes = new LinkedHashMap<>();
+    private final PrimosListener listener;
     private final Set<Integer> peerIds = new HashSet<>();
     private final Set<Integer> votesGranted = new HashSet<>();
     private final Set<Integer> preVotesGranted = new HashSet<>();
@@ -97,6 +102,8 @@ public final class ElectionNode implements MessageHandler {
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
     private long lastLeaderContactNanos;
+    private long probeDeadlineNanos;
+    private long probeSequence;
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
@@ -113,6 +120,22 @@ public final class ElectionNode implements MessageHandler {
                         MonotonicClock clock,
                         Random random,
                         MessageAuthenticator authenticator) {
+        this(config, store, transport, clock, random, authenticator, new PrimosListener() {
+        });
+    }
+
+    /**
+     * @param listener a single sink for events. Phase 8's dispatcher implements this and fans out
+     *                 to the application's listeners, so nothing here needs to know how many there
+     *                 are or which thread they want.
+     */
+    public ElectionNode(ClusterConfig config,
+                        StateStore store,
+                        Transport transport,
+                        MonotonicClock clock,
+                        Random random,
+                        MessageAuthenticator authenticator,
+                        PrimosListener listener) {
         this.config = Objects.requireNonNull(config, "config");
         this.timings = config.timings();
         this.quorum = Quorum.of(config);
@@ -120,9 +143,11 @@ public final class ElectionNode implements MessageHandler {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
+        this.listener = Objects.requireNonNull(listener, "listener");
         this.peers = config.allPeers();
         for (Peer peer : peers) {
             peerIds.add(peer.id());
+            probes.put(peer.id(), new Probe(peer));
         }
         this.encoder = new MessageEncoder(config.applicationName(), config.nodeId(), authenticator);
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
@@ -152,6 +177,7 @@ public final class ElectionNode implements MessageHandler {
                     config.applicationName(), config.nodeId());
         }
         lastLeaderContactNanos = clock.nanoTime();
+        probeDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
         resetElectionTimer();
     }
 
@@ -228,10 +254,13 @@ public final class ElectionNode implements MessageHandler {
         if (role == Role.FAILED) {
             return Long.MAX_VALUE;
         }
+        long deadline = probeDeadlineNanos;
         if (role == Role.LEADER) {
-            return heartbeatDeadlineNanos;
+            deadline = Math.min(deadline, heartbeatDeadlineNanos);
+        } else if (!config.isWitness()) {
+            deadline = Math.min(deadline, electionDeadlineNanos);
         }
-        return config.isWitness() ? Long.MAX_VALUE : electionDeadlineNanos;
+        return deadline;
     }
 
     public Role role() {
@@ -283,6 +312,10 @@ public final class ElectionNode implements MessageHandler {
 
     private void fireDueTimers() {
         long now = clock.nanoTime();
+        if (now >= probeDeadlineNanos) {
+            probeRound(now);
+            probeDeadlineNanos = now + timings.probeInterval().toNanos();
+        }
         if (role == Role.LEADER) {
             if (!hasQuorumContact(now)) {
                 relinquishLeadership();
@@ -539,9 +572,91 @@ public final class ElectionNode implements MessageHandler {
         if (term > currentTerm) {
             stepDown(term);
         }
+        Probe probe = probes.get(senderId);
+        if (probe == null || sequence != probe.outstandingSequence) {
+            // A reply to a probe we have already given up on. Counting it would let one badly
+            // delayed datagram keep a peer that is long gone looking alive.
+            return;
+        }
+        long now = clock.nanoTime();
+        probe.awaitingReply = false;
+        probe.consecutiveMisses = 0;
+        probe.lastRoundTripNanos = now - probe.sentAtNanos;
+        probe.lastHeardNanos = now;
+        if (!probe.reachable) {
+            probe.reachable = true;
+            notifyPeerUp(probe.peer);
+        }
     }
 
     // ---------------------------------------------------------------- plumbing
+
+    /**
+     * Probes every peer, and calls down anything that has missed too many in a row.
+     *
+     * <p>Every node probes every peer, rather than the leader reporting who it can see. The
+     * obvious cheaper design — piggybacking a reachability bitmap on the heartbeat — was rejected
+     * because it goes blind exactly when there is no leader, which is precisely the outage during
+     * which somebody is asking who is up. It also costs nothing to say honestly: each node reports
+     * what <em>it</em> can reach, rather than relaying an opinion formed elsewhere.
+     *
+     * <p>Probing is separate from the heartbeat and much slower. Heartbeats are fast because they
+     * suppress election timers; reachability reporting is not, and a witness on another network
+     * would otherwise pay for a 50ms heartbeat it does not need.
+     */
+    private void probeRound(long now) {
+        for (Probe probe : probes.values()) {
+            if (probe.awaitingReply) {
+                probe.consecutiveMisses++;
+                if (probe.reachable && probe.consecutiveMisses >= timings.failureThreshold()) {
+                    probe.reachable = false;
+                    notifyPeerDown(probe.peer);
+                }
+            }
+            probe.outstandingSequence = ++probeSequence;
+            probe.sentAtNanos = now;
+            probe.awaitingReply = true;
+            send(probe.peer.id(), encoder.ping(sendBuffer, currentTerm, probe.outstandingSequence));
+        }
+    }
+
+    private void notifyPeerUp(Peer peer) {
+        log.info("cluster '{}': {} {} is reachable",
+                config.applicationName(), peer.isWitness() ? "witness" : "peer", peer.id());
+        listener.onPeerUp(peer);
+    }
+
+    private void notifyPeerDown(Peer peer) {
+        if (peer.isWitness()) {
+            log.warn("cluster '{}': the witness ({}) is unreachable. Nothing looks broken, but"
+                            + " this cluster can no longer survive a partition.",
+                    config.applicationName(), peer.id());
+        } else {
+            log.warn("cluster '{}': peer {} is unreachable", config.applicationName(), peer.id());
+        }
+        listener.onPeerDown(peer);
+    }
+
+    /** What this node has observed about each peer, for {@link org.lolaf.primos.PrimosStats}. */
+    public Map<Integer, PeerStats> peerStats() {
+        long now = clock.nanoTime();
+        Map<Integer, PeerStats> snapshot = new LinkedHashMap<>();
+        for (Probe probe : probes.values()) {
+            snapshot.put(probe.peer.id(), new PeerStats(
+                    probe.peer.id(),
+                    probe.peer.type(),
+                    probe.reachable,
+                    probe.lastRoundTripNanos < 0 ? null : java.time.Duration.ofNanos(probe.lastRoundTripNanos),
+                    probe.lastHeardNanos < 0 ? null : java.time.Duration.ofNanos(now - probe.lastHeardNanos)));
+        }
+        return snapshot;
+    }
+
+    /** Whether a peer is currently answering probes. */
+    public boolean isReachable(int peerId) {
+        Probe probe = probes.get(peerId);
+        return probe != null && probe.reachable;
+    }
 
     /**
      * Whether this leader has completed a round trip with a majority recently enough.
@@ -644,5 +759,23 @@ public final class ElectionNode implements MessageHandler {
     /** Peers this node exchanges messages with, the witness included. */
     List<Peer> peers() {
         return new ArrayList<>(peers);
+    }
+
+    /** What this node knows about reaching one peer. */
+    private static final class Probe {
+
+        private final Peer peer;
+
+        private long outstandingSequence = -1;
+        private long sentAtNanos;
+        private boolean awaitingReply;
+        private int consecutiveMisses;
+        private boolean reachable;
+        private long lastRoundTripNanos = -1;
+        private long lastHeardNanos = -1;
+
+        private Probe(Peer peer) {
+            this.peer = peer;
+        }
     }
 }

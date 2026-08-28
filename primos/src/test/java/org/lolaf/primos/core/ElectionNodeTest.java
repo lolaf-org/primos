@@ -179,13 +179,20 @@ class ElectionNodeTest {
                 new Random(1L), MessageAuthenticator.disabled());
         witness.start();
 
-        assertThat(witness.nextDeadlineNanos()).isEqualTo(Long.MAX_VALUE);
-
         clock.advance(Duration.ofMinutes(10));
         witness.runOnce(0L);
 
         assertThat(witness.role()).isEqualTo(Role.FOLLOWER);
-        assertThat(witness.electionsStarted()).isZero();
+        assertThat(witness.electionsStarted())
+                .as("ten minutes without a leader and it still has not campaigned")
+                .isZero();
+        assertThat(witness.preVotesStarted())
+                .as("it does not even ask whether it could")
+                .isZero();
+        assertThat(witness.nextDeadlineNanos())
+                .as("it still probes its peers, so it has a deadline; what it lacks is an"
+                        + " election timer")
+                .isLessThan(Long.MAX_VALUE);
     }
 
     @Test

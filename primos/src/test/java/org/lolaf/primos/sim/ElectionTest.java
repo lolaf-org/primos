@@ -73,9 +73,10 @@ class ElectionTest {
         ElectionCluster.NodeUnderTest witness = cluster.node(ElectionCluster.WITNESS_ID);
         assertThat(witness.role()).isEqualTo(Role.FOLLOWER);
         assertThat(witness.votedFor()).isNotNegative();
-        assertThat(witness.nextDeadlineNanos())
-                .as("a witness has no election timer, so it waits only on the network")
-                .isEqualTo(Long.MAX_VALUE);
+        assertThat(witness.election().electionsStarted())
+                .as("a witness has no election timer, so it never campaigns")
+                .isZero();
+        assertThat(witness.election().preVotesStarted()).isZero();
     }
 
     @Test
