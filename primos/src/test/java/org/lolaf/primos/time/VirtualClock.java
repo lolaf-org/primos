@@ -48,6 +48,19 @@ public final class VirtualClock implements MonotonicClock {
         advanceNanos(by.toNanos());
     }
 
+    /**
+     * Moves time forward to an absolute instant, which is how the scheduler jumps straight to the
+     * next thing that happens rather than ticking through the gaps. Already being at or past the
+     * instant is not an error; going backwards is.
+     */
+    public void advanceTo(long instantNanos) {
+        if (instantNanos < nanos) {
+            throw new IllegalArgumentException(
+                    "a monotonic clock cannot go backwards: at " + nanos + ", asked for " + instantNanos);
+        }
+        nanos = instantNanos;
+    }
+
     /** Moves time forward by nanoseconds. */
     public void advanceNanos(long by) {
         if (by < 0) {
