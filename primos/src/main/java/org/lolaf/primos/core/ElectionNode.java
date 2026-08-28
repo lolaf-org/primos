@@ -340,7 +340,11 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void onDatagram(ByteBuffer datagram) {
-        decoder.decode(datagram, this);
+        if (decoder.decode(datagram, this)) {
+            // Only now, with the tag verified and the sender known, may the transport learn where
+            // that peer is speaking from.
+            transport.confirmSender(decoder.lastSenderId());
+        }
     }
 
     private void fireDueTimers() {

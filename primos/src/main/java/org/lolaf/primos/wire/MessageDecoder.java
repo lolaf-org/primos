@@ -57,6 +57,8 @@ public final class MessageDecoder {
     private final IntPredicate knownSender;
     private final DropCounters drops;
 
+    private int lastSenderId = -1;
+
     /**
      * @param knownSender whether a sender id belongs to this cluster. A node answers only its
      *                    configured peers; a witness server may accept ids it has not seen before,
@@ -114,8 +116,20 @@ public final class MessageDecoder {
             return drop(DropReason.UNKNOWN_PEER, "sender {}", senderId);
         }
 
+        lastSenderId = senderId;
         dispatch(datagram, type, senderId, handler);
         return true;
+    }
+
+    /**
+     * The sender of the last datagram that passed every check, or -1.
+     *
+     * <p>Exists so a transport can be told where a peer is speaking from, but only once the
+     * message has been authenticated — learning an address from an unverified datagram would let
+     * one spoofed packet redirect a peer's traffic.
+     */
+    public int lastSenderId() {
+        return lastSenderId;
     }
 
     private void dispatch(ByteBuffer datagram, MessageType type, int senderId, MessageHandler handler) {

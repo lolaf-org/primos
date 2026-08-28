@@ -112,6 +112,32 @@ class PrimosNodeTest {
     }
 
     @Test
+    void a_stopped_node_stops_claiming_leadership() {
+        PrimosNode node = start(builder(1));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+
+        node.stop();
+
+        assertThat(node.role())
+                .as("an application that checks after shutdown must not be told it is in charge")
+                .isNotEqualTo(Role.LEADER);
+        assertThat(node.roleAndTerm().isLeader()).isFalse();
+        assertThat(node.leaderId()).isEmpty();
+    }
+
+    @Test
+    void stopping_tells_the_listeners_that_leadership_is_over() {
+        Recording events = new Recording();
+        PrimosNode node = start(builder(1).listener(events));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+
+        node.stop();
+
+        assertThat(events.roles).endsWith("LEADER->FOLLOWER");
+        assertThat(events.leaders).endsWith("none");
+    }
+
+    @Test
     void it_can_be_closed_in_try_with_resources() {
         PrimosNode node = builder(1).build();
         node.start();

@@ -132,6 +132,7 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
+            standDown();
             closeQuietly();
         }
         log.info("cluster '{}': node {} stopped", config.applicationName(), config.nodeId());
@@ -213,6 +214,25 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
             }
         }
         publish();
+    }
+
+    /**
+     * Makes a stopped node stop claiming leadership.
+     *
+     * <p>Without this, {@link #role()} would go on returning whatever the node was doing when it
+     * was stopped, and an application that checked it after shutdown would believe it was still in
+     * charge — the same lie as a partitioned leader that never stands down, arrived at by being
+     * switched off. A stopped node reports {@code FOLLOWER}: it leads nothing, and being terminal,
+     * it never will again.
+     */
+    private void standDown() {
+        RoleAndTerm last = roleAndTerm;
+        leaderId = -1;
+        roleAndTerm = new RoleAndTerm(Role.FOLLOWER, last.term());
+        if (last.role() != Role.FOLLOWER) {
+            dispatcher.onRoleChanged(last.role(), Role.FOLLOWER, last.term());
+        }
+        dispatcher.onLeaderChanged(OptionalInt.empty(), last.term());
     }
 
     private void publish() {
