@@ -85,6 +85,7 @@ public final class ElectionNode implements MessageHandler {
     private final List<Peer> peers;
     private final Set<Integer> peerIds = new HashSet<>();
     private final Set<Integer> votesGranted = new HashSet<>();
+    private final Set<Integer> preVotesGranted = new HashSet<>();
     private final Map<Integer, Long> lastRoundTripNanos = new HashMap<>();
     private final ByteBuffer sendBuffer =
             ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
@@ -95,8 +96,12 @@ public final class ElectionNode implements MessageHandler {
     private int leaderId = -1;
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
+    private long lastLeaderContactNanos;
+    private boolean preVoting;
+    private long preVoteTerm;
     private boolean started;
 
+    private long preVotesStarted;
     private long electionsStarted;
     private long electionsWon;
     private long leadershipsRelinquished;
@@ -145,6 +150,7 @@ public final class ElectionNode implements MessageHandler {
                             + " elect two leaders. Use this only for tests.",
                     config.applicationName(), config.nodeId());
         }
+        lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
     }
 
@@ -205,6 +211,11 @@ public final class ElectionNode implements MessageHandler {
         return drops;
     }
 
+    /** How many pre-vote rounds this node has run, whether or not they led to an election. */
+    public long preVotesStarted() {
+        return preVotesStarted;
+    }
+
     public long electionsStarted() {
         return electionsStarted;
     }
@@ -231,11 +242,67 @@ public final class ElectionNode implements MessageHandler {
             return;
         }
         if (!config.isWitness() && now >= electionDeadlineNanos) {
-            startElection();
+            startPreVote();
         }
     }
 
     // ---------------------------------------------------------------- elections
+
+    /**
+     * Asks whether a campaign would succeed, without starting one.
+     *
+     * <p>This is what stops a node that has been away from disrupting a healthy cluster. Without
+     * it, a node partitioned for a while keeps timing out and incrementing its term — 5, 6, 7, …
+     * 50 — and the moment the partition heals it sends a vote request carrying that inflated term.
+     * The healthy leader sees a higher term, steps down, and the cluster holds a pointless
+     * election. For an active/passive pair that is a failover nobody asked for.
+     *
+     * <p>So nothing is incremented and nothing is written here: the node asks peers whether they
+     * <em>would</em> vote for it in the next term, and only if a majority say yes does it start a
+     * real election. A node with no route to the cluster therefore never advances its term at all,
+     * and rejoining is silent.
+     *
+     * <p>Costs no fsync, on either side of the exchange.
+     */
+    private void startPreVote() {
+        preVoting = true;
+        preVoteTerm = currentTerm + 1;
+        preVotesGranted.clear();
+        preVotesGranted.add(config.nodeId());
+        preVotesStarted++;
+        resetElectionTimer();
+
+        log.debug("node {} is asking whether term {} would elect it", config.nodeId(), preVoteTerm);
+
+        if (quorum.isReached(preVotesGranted.size())) {
+            startElection();
+            return;
+        }
+        for (Peer peer : peers) {
+            send(peer.id(), encoder.requestVote(sendBuffer, preVoteTerm, true));
+        }
+    }
+
+    /**
+     * Whether this node would vote for a candidate proposing {@code proposedTerm}.
+     *
+     * <p>Refused while a leader is being heard from, which is the whole point: a cluster that is
+     * working says no, and the returning node's term never moves.
+     */
+    private boolean wouldGrantVote(long proposedTerm, long now) {
+        if (role == Role.LEADER) {
+            return false;
+        }
+        if (proposedTerm < currentTerm) {
+            return false;
+        }
+        return now - lastLeaderContactNanos >= timings.electionTimeoutMin().toNanos();
+    }
+
+    private void abandonPreVote() {
+        preVoting = false;
+        preVotesGranted.clear();
+    }
 
     /**
      * Becomes a candidate for the next term.
@@ -244,6 +311,7 @@ public final class ElectionNode implements MessageHandler {
      * it the other way round would let a node campaign in a term it might forget.
      */
     private void startElection() {
+        abandonPreVote();
         currentTerm++;
         votedFor = config.nodeId();
         persist();
@@ -267,6 +335,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void becomeLeader() {
+        abandonPreVote();
         role = Role.LEADER;
         leaderId = config.nodeId();
         electionsWon++;
@@ -292,6 +361,7 @@ public final class ElectionNode implements MessageHandler {
      * this node answers anything in the new one.
      */
     private void stepDown(long term) {
+        abandonPreVote();
         currentTerm = term;
         votedFor = PersistentState.NO_VOTE;
         persist();
@@ -318,6 +388,14 @@ public final class ElectionNode implements MessageHandler {
 
     @Override
     public void onRequestVote(int senderId, long term, boolean preVote) {
+        if (preVote) {
+            // Deliberately no step-down, no persistence and no timer reset. A pre-vote must be
+            // answerable without changing anything, or it would inflate terms exactly as the real
+            // vote it is meant to avoid, and a node could suppress elections by spamming them.
+            boolean would = wouldGrantVote(term, clock.nanoTime());
+            send(senderId, encoder.requestVoteReply(sendBuffer, term, would, true));
+            return;
+        }
         if (term > currentTerm) {
             stepDown(term);
         }
@@ -334,6 +412,17 @@ public final class ElectionNode implements MessageHandler {
 
     @Override
     public void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote) {
+        if (preVote) {
+            // The reply echoes the term that was proposed, not the responder's own, so a reply
+            // from an abandoned round cannot be counted in this one.
+            if (!preVoting || term != preVoteTerm || !granted) {
+                return;
+            }
+            if (preVotesGranted.add(senderId) && quorum.isReached(preVotesGranted.size())) {
+                startElection();
+            }
+            return;
+        }
         if (term > currentTerm) {
             stepDown(term);
             return;
@@ -361,9 +450,11 @@ public final class ElectionNode implements MessageHandler {
             stepDown(term);
         }
         // A leader exists in this term, so stop campaigning and stop counting down to an election.
+        abandonPreVote();
         role = Role.FOLLOWER;
         leaderId = senderId;
         votesGranted.clear();
+        lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
         send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true));
