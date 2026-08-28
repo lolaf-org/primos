@@ -199,6 +199,55 @@ class InvariantsTest {
     }
 
     @Test
+    void a_leader_that_never_stands_down_while_partitioned_is_caught() {
+        ScriptedNode stubborn = add(1);
+        add(2);
+        add(3);
+        simulation.checking(Invariants.leaderStandsDownWithoutQuorum(java.time.Duration.ofMillis(50)));
+
+        stubborn.forceTerm(4);
+        stubborn.becomeLeader();
+        simulation.network().partition(new int[] {1}, new int[] {2, 3});
+
+        assertThatThrownBy(() -> simulation.run(java.time.Duration.ofMillis(200)))
+                .isInstanceOf(SimulationFailure.class)
+                .hasMessageContaining("has claimed leadership of term 4")
+                .hasMessageContaining("both would be active");
+    }
+
+    @Test
+    void a_leader_that_still_reaches_a_majority_is_left_alone() {
+        ScriptedNode leader = add(1);
+        add(2);
+        add(3);
+        simulation.checking(Invariants.leaderStandsDownWithoutQuorum(java.time.Duration.ofMillis(50)));
+
+        leader.forceTerm(4);
+        leader.becomeLeader();
+        simulation.network().partition(new int[] {1, 2}, new int[] {3});
+
+        assertThatCode(() -> simulation.run(java.time.Duration.ofMillis(200)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void a_leader_that_stands_down_in_time_is_left_alone() {
+        ScriptedNode leader = add(1);
+        add(2);
+        add(3);
+        simulation.checking(Invariants.leaderStandsDownWithoutQuorum(java.time.Duration.ofMillis(100)));
+
+        leader.forceTerm(4);
+        leader.becomeLeader();
+        simulation.network().partition(new int[] {1}, new int[] {2, 3});
+        simulation.run(java.time.Duration.ofMillis(50));
+        leader.becomeFollower();
+
+        assertThatCode(() -> simulation.run(java.time.Duration.ofMillis(500)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void a_failure_names_the_seed_so_it_can_be_replayed() {
         Simulation seeded = new Simulation(123456789L);
         ScriptedNode one = ScriptedNode.idle(1, seeded.clock(), new MemoryStateStore());

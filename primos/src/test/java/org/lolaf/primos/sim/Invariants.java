@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.sim;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -39,6 +40,7 @@ public final class Invariants {
                 termNeverDecreases(),
                 atMostOneVotePerTerm(),
                 witnessNeverLeads(),
+                leaderStandsDownWithoutQuorum(Duration.ofSeconds(2)),
         };
     }
 
@@ -143,6 +145,75 @@ public final class Invariants {
                         voteFor.put(node.id(), node.votedFor());
                     }
                 }
+            }
+        };
+    }
+
+    /**
+     * No node keeps claiming leadership once it can no longer reach a majority.
+     *
+     * <p>The invariant that makes primos safe to answer <em>am I the leader?</em> at all. Without
+     * it a partitioned leader keeps saying yes while the other side elects a replacement, and both
+     * applications go active — which is the failure the library exists to prevent, produced by the
+     * library itself.
+     *
+     * <p>Reachability is judged from the simulated network rather than from anything the node
+     * says: a peer counts only if it is running and the link works in both directions, since a
+     * leader needs its heartbeats to arrive as much as it needs the replies.
+     *
+     * @param bound how long a leader may go on claiming leadership after losing quorum contact.
+     *              Generous on purpose — the point is that the window is bounded, not that it is
+     *              any particular length.
+     */
+    public static Invariant leaderStandsDownWithoutQuorum(Duration bound) {
+        return new Invariant() {
+
+            private final Map<Integer, Long> lostContactAt = new HashMap<>();
+
+            @Override
+            public String name() {
+                return "a leader stands down once it cannot reach a majority";
+            }
+
+            @Override
+            public void check(Simulation simulation) {
+                long now = simulation.clock().nanoTime();
+                int voters = simulation.nodes().size();
+                int required = voters / 2 + 1;
+
+                for (SimNode node : simulation.nodes()) {
+                    if (!node.isRunning() || node.role() != Role.LEADER) {
+                        lostContactAt.remove(node.id());
+                        continue;
+                    }
+                    if (reachable(simulation, node) >= required) {
+                        lostContactAt.remove(node.id());
+                        continue;
+                    }
+                    Long since = lostContactAt.putIfAbsent(node.id(), now);
+                    if (since != null && now - since > bound.toNanos()) {
+                        throw new AssertionError("node " + node.id() + " has claimed leadership of"
+                                + " term " + node.currentTerm() + " for "
+                                + Duration.ofNanos(now - since).toMillis()
+                                + "ms while unable to reach a majority, so another node may already"
+                                + " have replaced it and both would be active");
+                    }
+                }
+            }
+
+            private int reachable(Simulation simulation, SimNode leader) {
+                int count = 1;
+                for (SimNode peer : simulation.nodes()) {
+                    if (peer.id() == leader.id() || !peer.isRunning()) {
+                        continue;
+                    }
+                    boolean outbound = !simulation.network().isSevered(leader.id(), peer.id());
+                    boolean inbound = !simulation.network().isSevered(peer.id(), leader.id());
+                    if (outbound && inbound) {
+                        count++;
+                    }
+                }
+                return count;
             }
         };
     }

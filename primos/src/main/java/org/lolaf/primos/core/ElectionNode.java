@@ -17,8 +17,10 @@ package org.lolaf.primos.core;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Random;
@@ -83,6 +85,7 @@ public final class ElectionNode implements MessageHandler {
     private final List<Peer> peers;
     private final Set<Integer> peerIds = new HashSet<>();
     private final Set<Integer> votesGranted = new HashSet<>();
+    private final Map<Integer, Long> lastRoundTripNanos = new HashMap<>();
     private final ByteBuffer sendBuffer =
             ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
@@ -96,6 +99,7 @@ public final class ElectionNode implements MessageHandler {
 
     private long electionsStarted;
     private long electionsWon;
+    private long leadershipsRelinquished;
 
     public ElectionNode(ClusterConfig config,
                         StateStore store,
@@ -216,6 +220,10 @@ public final class ElectionNode implements MessageHandler {
     private void fireDueTimers() {
         long now = clock.nanoTime();
         if (role == Role.LEADER) {
+            if (!hasQuorumContact(now)) {
+                relinquishLeadership();
+                return;
+            }
             if (now >= heartbeatDeadlineNanos) {
                 broadcastHeartbeat();
                 heartbeatDeadlineNanos = now + timings.heartbeatInterval().toNanos();
@@ -262,6 +270,14 @@ public final class ElectionNode implements MessageHandler {
         role = Role.LEADER;
         leaderId = config.nodeId();
         electionsWon++;
+
+        // Start the contact clock now, or a new leader would step down before its first heartbeat
+        // had a chance to be answered.
+        long now = clock.nanoTime();
+        for (Peer peer : peers) {
+            lastRoundTripNanos.put(peer.id(), now);
+        }
+
         log.info("cluster '{}': node {} became leader for term {}",
                 config.applicationName(), config.nodeId(), currentTerm);
 
@@ -357,6 +373,12 @@ public final class ElectionNode implements MessageHandler {
     public void onAppendEntriesReply(int senderId, long term, boolean success) {
         if (term > currentTerm) {
             stepDown(term);
+            return;
+        }
+        // This is the only thing that proves a round trip: the peer received a heartbeat this node
+        // sent, and answered it. See hasQuorumContact.
+        if (role == Role.LEADER && term == currentTerm) {
+            lastRoundTripNanos.put(senderId, clock.nanoTime());
         }
     }
 
@@ -376,6 +398,65 @@ public final class ElectionNode implements MessageHandler {
     }
 
     // ---------------------------------------------------------------- plumbing
+
+    /**
+     * Whether this leader has completed a round trip with a majority recently enough.
+     *
+     * <p><strong>Without this a partitioned leader would report {@code LEADER} forever.</strong>
+     * Plain Raft lets it: an isolated leader keeps sending heartbeats into the void and never
+     * learns of the term that replaced it. That is safe in real Raft, where the log defends
+     * itself — nothing can be committed without a majority. primos has no log, so the only thing
+     * a leader produces is the answer to <em>am I the leader?</em>, and an isolated node answering
+     * yes while the other side elects a new one is precisely the split brain this library exists
+     * to prevent. So the leader stands itself down.
+     *
+     * <p>Contact means an {@code AppendEntriesReply}, and nothing else, deliberately. Counting any
+     * inbound message would let a **one-way** partition keep a leader alive: it would hear the
+     * peers fine while none of its own heartbeats arrived. A reply proves the peer received
+     * something this node sent.
+     *
+     * <p>The window is the minimum election timeout, so a leader gives up its claim no later than
+     * the earliest moment any follower could start campaigning for a replacement.
+     *
+     * <p>This bounds the stale-leader window; it cannot close it. Between losing contact and
+     * noticing, this node still answers yes. That residue is what the fencing token is for.
+     */
+    private boolean hasQuorumContact(long now) {
+        long window = timings.electionTimeoutMin().toNanos();
+        int inContact = 1;
+        for (Peer peer : peers) {
+            Long lastHeard = lastRoundTripNanos.get(peer.id());
+            if (lastHeard != null && now - lastHeard <= window) {
+                inContact++;
+            }
+        }
+        return quorum.isReached(inContact);
+    }
+
+    /**
+     * Gives up leadership without advancing the term.
+     *
+     * <p>Nothing durable changes: the term is the same and the vote this node cast for itself in
+     * it still stands. So there is nothing to persist and no fsync on this path.
+     */
+    private void relinquishLeadership() {
+        leadershipsRelinquished++;
+        log.warn("cluster '{}': node {} stood down as leader of term {}: no round trip with a"
+                        + " majority within {}ms, so it may be partitioned from the cluster",
+                config.applicationName(), config.nodeId(), currentTerm,
+                timings.electionTimeoutMin().toMillis());
+
+        role = Role.FOLLOWER;
+        leaderId = -1;
+        votesGranted.clear();
+        lastRoundTripNanos.clear();
+        resetElectionTimer();
+    }
+
+    /** How many times this node has stood itself down for lack of quorum contact. */
+    public long leadershipsRelinquished() {
+        return leadershipsRelinquished;
+    }
 
     /**
      * A fresh timeout drawn from the configured range on every reset.
