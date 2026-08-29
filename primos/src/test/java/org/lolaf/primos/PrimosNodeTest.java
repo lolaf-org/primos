@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -300,6 +301,39 @@ class PrimosNodeTest {
     }
 
     @Test
+    void stats_are_taken_when_they_are_asked_for() throws Exception {
+        PrimosNode node = start(builder(1));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+
+        PrimosStats first = node.stats();
+        Thread.sleep(100);
+        PrimosStats second = node.stats();
+
+        // Snapshots are no longer taken after every turn of the loop, so this is the assertion that
+        // asking still gets a fresh one rather than whatever the loop last happened to publish.
+        assertThat(second.timeInRole()).isGreaterThan(first.timeInRole());
+    }
+
+    @Test
+    void stats_can_be_read_from_inside_a_callback() {
+        AtomicReference<Role> seen = new AtomicReference<>();
+        PrimosNode[] node = new PrimosNode[1];
+        node[0] = start(builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                if (current == Role.LEADER) {
+                    // A callback runs on the node thread, mid-turn. Reading stats there is allowed
+                    // and reports what the node is doing now, not what it was doing last turn.
+                    seen.set(node[0].stats().role());
+                }
+            }
+        }));
+
+        await().atMost(5, TimeUnit.SECONDS).until(() -> seen.get() != null);
+        assertThat(seen.get()).isEqualTo(Role.LEADER);
+    }
+
+    @Test
     void stats_include_every_peer_once_a_cluster_is_running() {
         PrimosNode one = start(builder(1, 2, 3));
         start(builder(2, 1, 3));
@@ -322,6 +356,34 @@ class PrimosNodeTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("state store is required")
                 .hasMessageContaining("elect two leaders");
+    }
+
+    @Test
+    void an_unknown_mac_algorithm_is_refused_at_build_time() {
+        // Better here than as a cluster that comes up, talks to nobody, and counts BAD_TAG.
+        assertThatThrownBy(() -> PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .transport(network.transportFor(1))
+                .store(new MemoryStateStore())
+                .clusterSecret("a-secret".getBytes())
+                .macAlgorithm("HmacNoSuchThing")
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("HmacNoSuchThing");
+    }
+
+    @Test
+    void a_cluster_can_authenticate_with_another_algorithm() {
+        byte[] secret = "a-shared-cluster-secret".getBytes();
+        PrimosNode one = start(builder(1, 2)
+                .clusterSecret(secret).macAlgorithm("HmacSHA512"));
+        start(builder(2, 1).clusterSecret(secret).macAlgorithm("HmacSHA512"));
+
+        await().atMost(10, TimeUnit.SECONDS).until(() -> one.roleAndTerm().term() > 0);
+
+        assertThat(one.stats().totalDrops())
+                .as("a 64-byte tag is longer, and otherwise no different")
+                .isZero();
     }
 
     @Test

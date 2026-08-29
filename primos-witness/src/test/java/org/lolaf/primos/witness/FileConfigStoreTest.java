@@ -28,6 +28,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.wire.MessageAuthenticator;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.time.VirtualClock;
 
@@ -98,6 +99,34 @@ class FileConfigStoreTest {
             assertThat(new String(orders.secret(), StandardCharsets.UTF_8)).isEqualTo("new-one");
             assertThat(new String(orders.previousSecret(), StandardCharsets.UTF_8))
                     .isEqualTo("old-one");
+        }
+    }
+
+    @Test
+    void an_application_may_name_its_own_mac_algorithm() throws IOException {
+        // Per application, because a witness serves clusters it does not own: one of them moving
+        // to another algorithm must not be a flag day for every other tenant.
+        settings("secret=shared-by-everything");
+        application("orders", "secret=its-own\nsecret.algorithm=HmacSHA512");
+        application("billing", "secret=its-own");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().application("orders").macAlgorithm())
+                    .isEqualTo("HmacSHA512");
+            assertThat(store.current().application("billing").macAlgorithm())
+                    .as("silence means the same default the library has")
+                    .isEqualTo(MessageAuthenticator.DEFAULT_ALGORITHM);
+        }
+    }
+
+    @Test
+    void the_witness_wide_algorithm_covers_applications_that_do_not_name_one() throws IOException {
+        settings("secret=shared-by-everything\nsecret.algorithm=HmacSHA512");
+        application("orders", "");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().application("orders").macAlgorithm())
+                    .isEqualTo("HmacSHA512");
         }
     }
 

@@ -35,7 +35,7 @@ package org.lolaf.primos.wire;
  *     40     8  term
  *     48     4  senderId
  *     52     -  payload, per message type
- *      -    32  HMAC-SHA256 tag, when authentication is enabled
+ *      -     -  authentication tag, when enabled: 32 bytes for the default HMAC-SHA256
  * </pre>
  *
  * <p>Big-endian throughout, which is both network byte order and {@link java.nio.ByteBuffer}'s
@@ -74,9 +74,14 @@ public final class WireFormat {
     public static final int APPLICATION_BYTES = 32;
 
     /**
-     * Length of an HMAC-SHA256 tag.
+     * Length of a tag from the default HMAC-SHA256.
+     *
+     * <p>Not a property of the format: the tag length follows whichever {@code Mac} a cluster is
+     * configured with, and everything that measures a datagram asks
+     * {@link MessageAuthenticator#tagBytes()} rather than this. It is here because the layout above
+     * has to show a number, and this is the one almost every cluster will see.
      */
-    public static final int TAG_BYTES = 32;
+    public static final int DEFAULT_TAG_BYTES = 32;
 
     /**
      * The largest datagram primos will send or accept.

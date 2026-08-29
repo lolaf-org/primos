@@ -53,6 +53,12 @@ public final class ElectionNode implements MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ElectionNode.class);
 
+    /**
+     * No round trip has been recorded with a peer. {@link Long#MIN_VALUE} rather than -1 because
+     * these are {@link MonotonicClock#nanoTime()} readings, which may legitimately be negative.
+     */
+    private static final long NO_CONTACT = Long.MIN_VALUE;
+
     private final ClusterConfig config;
     private final Timings timings;
     private final Quorum quorum;
@@ -62,6 +68,7 @@ public final class ElectionNode implements MessageHandler {
     private final Random random;
     private final MessageEncoder encoder;
     private final MessageDecoder decoder;
+    private final MessageAuthenticator authenticator;
     private final DropCounters drops = new DropCounters();
 
     private final List<Peer> peers = new ArrayList<>();
@@ -70,7 +77,6 @@ public final class ElectionNode implements MessageHandler {
     private final Set<Integer> peerIds = new HashSet<>();
     private final Set<Integer> votesGranted = new HashSet<>();
     private final Set<Integer> preVotesGranted = new HashSet<>();
-    private final Map<Integer, Long> lastRoundTripNanos = new HashMap<>();
     private final ByteBuffer sendBuffer =
             ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
@@ -132,6 +138,7 @@ public final class ElectionNode implements MessageHandler {
             peerIds.add(peer.id());
             probes.put(peer.id(), new Probe(peer));
         }
+        this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
         this.encoder = new MessageEncoder(config.applicationName(), config.nodeId(), authenticator);
         // A node answers only its configured peers, by id. A witness server cannot: its members
         // are not configured, so it has nothing to compare an id against and the authentication
@@ -197,6 +204,13 @@ public final class ElectionNode implements MessageHandler {
                 log.warn("{}", warning);
             }
         }
+        if (authenticator.isEnabled()) {
+            // Named at startup because nothing on the wire carries it: a node configured with the
+            // wrong algorithm is silent in exactly the way a node with the wrong secret is, and
+            // this line is what tells the two apart from a log rather than a packet capture.
+            log.info("cluster '{}': node {} authenticates datagrams with {}",
+                    config.applicationName(), config.nodeId(), authenticator.algorithm());
+        }
         if (!store.isDurable()) {
             log.warn("cluster '{}': node {} is using a state store that does not survive a crash."
                             + " After any restart this node may vote twice in one term, which can"
@@ -254,7 +268,7 @@ public final class ElectionNode implements MessageHandler {
         failureCause = cause;
         abandonPreVote();
         votesGranted.clear();
-        lastRoundTripNanos.clear();
+        forgetQuorumContact();
 
         log.error("cluster '{}': node {} has failed while {} in term {} and will not lead again."
                         + " Restart the process; this node cannot recover in place.",
@@ -311,6 +325,15 @@ public final class ElectionNode implements MessageHandler {
      */
     public OptionalInt leaderId() {
         return leaderId < 0 ? OptionalInt.empty() : OptionalInt.of(leaderId);
+    }
+
+    /**
+     * Which node is believed to be leader, or -1 when none is, without the {@link OptionalInt}
+     * that {@link #leaderId()} allocates. The production loop reads this after every turn, and a
+     * turn that changed nothing should allocate nothing.
+     */
+    public int leaderIdOrNone() {
+        return leaderId;
     }
 
     /**
@@ -505,8 +528,8 @@ public final class ElectionNode implements MessageHandler {
         // Start the contact clock now, or a new leader would step down before its first heartbeat
         // had a chance to be answered.
         long now = clock.nanoTime();
-        for (Peer peer : peers) {
-            lastRoundTripNanos.put(peer.id(), now);
+        for (Probe probe : probes.values()) {
+            probe.lastRoundTripNanos = now;
         }
 
         log.info("cluster '{}': node {} became leader for term {}",
@@ -631,7 +654,10 @@ public final class ElectionNode implements MessageHandler {
         // This is the only thing that proves a round trip: the peer received a heartbeat this node
         // sent, and answered it. See hasQuorumContact.
         if (role == Role.LEADER && term == currentTerm) {
-            lastRoundTripNanos.put(senderId, clock.nanoTime());
+            Probe probe = probes.get(senderId);
+            if (probe != null) {
+                probe.lastRoundTripNanos = clock.nanoTime();
+            }
         }
     }
 
@@ -834,20 +860,19 @@ public final class ElectionNode implements MessageHandler {
         Peer best = null;
         long bestContactNanos = Long.MIN_VALUE;
 
-        for (Peer peer : peers) {
-            if (peer.isWitness()) {
+        for (Probe probe : probes.values()) {
+            if (probe.peer.isWitness()) {
                 continue;
             }
-            Probe probe = probes.get(peer.id());
-            if (probe != null && probe.consecutiveMisses >= timings.failureThreshold()) {
+            if (probe.consecutiveMisses >= timings.failureThreshold()) {
                 continue;
             }
-            Long lastContact = lastRoundTripNanos.get(peer.id());
-            if (lastContact == null || now - lastContact > window) {
+            long lastContact = probe.lastRoundTripNanos;
+            if (lastContact == NO_CONTACT || now - lastContact > window) {
                 continue;
             }
             if (best == null || lastContact > bestContactNanos) {
-                best = peer;
+                best = probe.peer;
                 bestContactNanos = lastContact;
             }
         }
@@ -882,7 +907,7 @@ public final class ElectionNode implements MessageHandler {
         long now = clock.nanoTime();
         probe.awaitingReply = false;
         probe.consecutiveMisses = 0;
-        probe.lastRoundTripNanos = now - probe.sentAtNanos;
+        probe.lastProbeRoundTripNanos = now - probe.sentAtNanos;
         probe.lastHeardNanos = now;
         if (!probe.reachable) {
             probe.reachable = true;
@@ -949,7 +974,9 @@ public final class ElectionNode implements MessageHandler {
                     probe.peer.id(),
                     probe.peer.type(),
                     probe.reachable,
-                    probe.lastRoundTripNanos < 0 ? null : java.time.Duration.ofNanos(probe.lastRoundTripNanos),
+                    probe.lastProbeRoundTripNanos < 0
+                            ? null
+                            : java.time.Duration.ofNanos(probe.lastProbeRoundTripNanos),
                     probe.lastHeardNanos < 0 ? null : java.time.Duration.ofNanos(now - probe.lastHeardNanos)));
         }
         return snapshot;
@@ -988,9 +1015,9 @@ public final class ElectionNode implements MessageHandler {
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
         int inContact = 1;
-        for (Peer peer : peers) {
-            Long lastHeard = lastRoundTripNanos.get(peer.id());
-            if (lastHeard != null && now - lastHeard <= window) {
+        for (Probe probe : probes.values()) {
+            long lastHeard = probe.lastRoundTripNanos;
+            if (lastHeard != NO_CONTACT && now - lastHeard <= window) {
                 inContact++;
             }
         }
@@ -1013,8 +1040,20 @@ public final class ElectionNode implements MessageHandler {
         setRole(Role.FOLLOWER);
         setLeader(-1);
         votesGranted.clear();
-        lastRoundTripNanos.clear();
+        forgetQuorumContact();
         resetElectionTimer();
+    }
+
+    /**
+     * Forgets every round trip this node recorded while it was leading.
+     *
+     * <p>Called only where leadership has just ended, so the next one starts from a clean slate
+     * instead of inheriting contact the previous term established.
+     */
+    private void forgetQuorumContact() {
+        for (Probe probe : probes.values()) {
+            probe.lastRoundTripNanos = NO_CONTACT;
+        }
     }
 
     /**
@@ -1082,8 +1121,20 @@ public final class ElectionNode implements MessageHandler {
         private boolean awaitingReply;
         private int consecutiveMisses;
         private boolean reachable;
-        private long lastRoundTripNanos = -1;
+        private long lastProbeRoundTripNanos = -1;
         private long lastHeardNanos = -1;
+
+        /**
+         * When this node, while leading, last completed a round trip with this peer — the arrival
+         * of an {@code AppendEntriesReply}, and nothing else ever. CheckQuorum decides from it
+         * whether a leader may keep leading, so anything else writing it becomes a way to depose a
+         * healthy leader with a forged datagram. It lives here, one long per peer, rather than in a
+         * map of boxed values the leader would rewrite on every heartbeat reply.
+         *
+         * <p>Not {@link #lastProbeRoundTripNanos} above, which is how long a probe took rather than
+         * when contact last happened.
+         */
+        private long lastRoundTripNanos = NO_CONTACT;
 
         private Probe(Peer peer) {
             this.peer = peer;

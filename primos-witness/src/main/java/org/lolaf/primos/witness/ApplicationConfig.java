@@ -17,6 +17,8 @@ package org.lolaf.primos.witness;
 
 import java.util.Objects;
 
+import org.lolaf.primos.wire.MessageAuthenticator;
+
 /**
  * One clustered application this witness serves.
  *
@@ -29,13 +31,17 @@ public final class ApplicationConfig {
     private final String name;
     private final byte[] secret;
     private final byte[] previousSecret;
+    private final String macAlgorithm;
     private final boolean autoRegistered;
 
     public ApplicationConfig(String name, byte[] secret, byte[] previousSecret,
-                             boolean autoRegistered) {
+                             String macAlgorithm, boolean autoRegistered) {
         this.name = Objects.requireNonNull(name, "name");
         this.secret = secret == null ? null : secret.clone();
         this.previousSecret = previousSecret == null ? null : previousSecret.clone();
+        this.macAlgorithm = macAlgorithm == null
+                ? MessageAuthenticator.DEFAULT_ALGORITHM
+                : macAlgorithm;
         this.autoRegistered = autoRegistered;
     }
 
@@ -59,6 +65,19 @@ public final class ApplicationConfig {
         return previousSecret == null ? null : previousSecret.clone();
     }
 
+    /**
+     * The {@link javax.crypto.Mac} algorithm this application's datagrams are tagged with.
+     *
+     * <p>Per application rather than per witness, because a witness serves clusters it does not
+     * own: one of them moving to a different algorithm must not be a flag day for every other
+     * tenant. Never null — an application that says nothing gets
+     * {@link MessageAuthenticator#DEFAULT_ALGORITHM}, which is what the library defaults to, so
+     * the two agree without anybody configuring anything.
+     */
+    public String macAlgorithm() {
+        return macAlgorithm;
+    }
+
     public boolean hasSecret() {
         return secret != null;
     }
@@ -79,13 +98,14 @@ public final class ApplicationConfig {
         ApplicationConfig that = (ApplicationConfig) other;
         return autoRegistered == that.autoRegistered
                 && name.equals(that.name)
+                && macAlgorithm.equals(that.macAlgorithm)
                 && java.util.Arrays.equals(secret, that.secret)
                 && java.util.Arrays.equals(previousSecret, that.previousSecret);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, autoRegistered, java.util.Arrays.hashCode(secret),
+        return Objects.hash(name, autoRegistered, macAlgorithm, java.util.Arrays.hashCode(secret),
                 java.util.Arrays.hashCode(previousSecret));
     }
 
@@ -94,6 +114,7 @@ public final class ApplicationConfig {
     public String toString() {
         return "ApplicationConfig(" + name + ", secret=" + (secret != null ? "set" : "none")
                 + ", previousSecret=" + (previousSecret != null ? "set" : "none")
+                + ", " + macAlgorithm
                 + (autoRegistered ? ", auto-registered" : "") + ")";
     }
 }

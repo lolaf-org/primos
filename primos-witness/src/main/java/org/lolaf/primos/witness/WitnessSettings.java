@@ -24,6 +24,8 @@ import org.lolaf.primos.Timings;
 
 import lombok.Setter;
 
+import org.lolaf.primos.wire.MessageAuthenticator;
+
 /** The witness server's own settings, as opposed to the applications it serves. */
 public final class WitnessSettings {
 
@@ -31,6 +33,7 @@ public final class WitnessSettings {
     private final Path stateDirectory;
     private final RegistrationMode registrationMode;
     private final byte[] defaultSecret;
+    private final String defaultMacAlgorithm;
     private final int autoRegistrationLimit;
     private final Duration reloadDebounce;
     private final Duration rescanInterval;
@@ -42,6 +45,8 @@ public final class WitnessSettings {
         this.registrationMode = Objects.requireNonNull(builder.registrationMode, "registrationMode");
         // Copied rather than kept, because it is a secret and the caller's array is theirs.
         this.defaultSecret = builder.defaultSecret == null ? null : builder.defaultSecret.clone();
+        this.defaultMacAlgorithm = Objects.requireNonNull(
+                builder.defaultMacAlgorithm, "defaultMacAlgorithm");
         this.autoRegistrationLimit = builder.autoRegistrationLimit;
         this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
@@ -74,6 +79,17 @@ public final class WitnessSettings {
      */
     public byte[] defaultSecret() {
         return defaultSecret == null ? null : defaultSecret.clone();
+    }
+
+    /**
+     * The algorithm used for any application that does not name one, auto-registered ones included.
+     *
+     * <p>Defaults to what the library defaults to, so a witness and a cluster that have both said
+     * nothing still agree. An application file may override it; nothing on the wire carries the
+     * algorithm, so whatever is set here has to match what the cluster's nodes were built with.
+     */
+    public String defaultMacAlgorithm() {
+        return defaultMacAlgorithm;
     }
 
     /** How many applications may auto-register, so an open witness cannot be filled up. */
@@ -127,6 +143,10 @@ public final class WitnessSettings {
         /** The witness-wide secret, used for any application without one of its own. */
         @Setter
         private byte[] defaultSecret;
+
+        /** The algorithm for any application that does not name one. Cluster-wide policy. */
+        @Setter
+        private String defaultMacAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
 
         /** How many applications may auto-register, so an open witness cannot be filled up. */
         @Setter

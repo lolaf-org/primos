@@ -73,25 +73,50 @@ public class ClusterConfig {
         return new Builder();
     }
 
+    /**
+     * Whether a character may appear in an application name: printable ASCII with no space, which
+     * is {@code '!'} through {@code '~'}.
+     *
+     * <p>Public because three places have to agree on it — names are validated here, read back off
+     * the wire by the decoder, and taken from filenames by the witness's config store — and a name
+     * one of them accepted and another refused would be a cluster that can be configured and not
+     * reached.
+     *
+     * <p>Both bounds earn their place. Below {@code '!'} lie the space and the control characters:
+     * a space would make {@code "orders "} and {@code "orders"} two different clusters that look
+     * identical in a log line, and a control character would put escape sequences into every log
+     * line that names the cluster, since the name is printed as it arrived. Above {@code '~'} is
+     * everything non-ASCII, which the fixed 32-byte wire field measures in bytes rather than
+     * characters, so a name that looked comfortably short could still fail to fit.
+     */
+    public static boolean isApplicationNameCharacter(char c) {
+        return c >= '!' && c <= '~';
+    }
+
     private static String requireApplicationName(String name) {
         Objects.requireNonNull(name, "applicationName");
+        String trimmed = getTrimmed(name);
+        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
+        if (bytes > APPLICATION_NAME_MAX_BYTES) {
+            throw new IllegalArgumentException(
+                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
+                            + " bytes, but '" + trimmed + "' is " + bytes);
+        }
+        return trimmed;
+    }
+
+    private static String getTrimmed(String name) {
         String trimmed = name.trim();
         if (trimmed.isEmpty()) {
             throw new IllegalArgumentException("applicationName must not be blank");
         }
         for (int i = 0; i < trimmed.length(); i++) {
             char c = trimmed.charAt(i);
-            if (c < 0x21 || c > 0x7E) {
+            if (!isApplicationNameCharacter(c)) {
                 throw new IllegalArgumentException(
                         "applicationName must be printable ASCII without spaces, but '" + trimmed
                                 + "' contains a character at index " + i + " that is not");
             }
-        }
-        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
-        if (bytes > APPLICATION_NAME_MAX_BYTES) {
-            throw new IllegalArgumentException(
-                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
-                            + " bytes, but '" + trimmed + "' is " + bytes);
         }
         return trimmed;
     }

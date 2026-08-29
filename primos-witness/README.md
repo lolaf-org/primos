@@ -190,6 +190,7 @@ which one shared file makes impossible.
 | `registration.mode` | `strict` | yes |
 | `registration.limit` | `64` | yes |
 | `secret` | none | yes |
+| `secret.algorithm` | `HmacSHA256` | yes |
 | `timings.profile` | `lan` | yes |
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
@@ -219,8 +220,16 @@ silently truncated.
 |---|---|
 | `secret` | falls back to the witness-wide `secret` if absent |
 | `secret.previous` | also accepted, for rotation |
+| `secret.algorithm` | the JCE `Mac` name, e.g. `HmacSHA512`; falls back to the witness-wide one, which defaults to `HmacSHA256` |
 
 An empty file is valid and means "serve this cluster with the witness-wide secret".
+
+`secret.algorithm` is per application because a witness serves clusters it does not own: one of
+them moving to another algorithm must not be a flag day for every other tenant. **It has to match
+what that cluster's nodes were built with** — nothing on the wire says which algorithm produced a
+tag, so a mismatch looks exactly like a wrong secret: every datagram fails verification and is
+counted under `BAD_TAG`. Almost nobody should set this; it is here for a deployment whose policy
+names something else, and for the day SHA-256 stops being above suspicion.
 
 ### Secrets
 

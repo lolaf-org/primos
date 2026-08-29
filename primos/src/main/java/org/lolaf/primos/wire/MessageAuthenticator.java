@@ -18,11 +18,17 @@ package org.lolaf.primos.wire;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 
 /**
- * Appends and verifies the HMAC-SHA256 tag that proves a datagram came from a cluster member.
+ * Appends and verifies the tag that proves a datagram came from a cluster member.
+ *
+ * <p>HMAC-SHA256 unless a cluster chooses otherwise — see {@link #hmac(String, byte[], byte[])},
+ * and note that the choice is local policy every member has to share, because nothing on the wire
+ * says which algorithm was used.
  *
  * <p>The threat this closes is off-path injection. UDP source addresses are freely spoofable, so
  * "is this from a configured peer?" is not a security control on its own: an attacker who guesses
@@ -47,18 +53,36 @@ import java.util.Objects;
  */
 public final class MessageAuthenticator {
 
-    private static final String ALGORITHM = "HmacSha256";
+    /**
+     * What a cluster authenticates with unless it says otherwise. Every Java platform has it, its
+     * tag is the 32 bytes the wire format was drawn around, and nothing has been found wrong with
+     * it — a cluster that has no opinion should keep this one.
+     */
+    public static final String DEFAULT_ALGORITHM = "HmacSHA256";
 
+    /**
+     * The shortest tag this will accept, whatever the algorithm produces.
+     *
+     * <p>128 bits. A tag is the whole of what stops a forged datagram, and a forged reply here does
+     * not merely corrupt a message — it manufactures a leader. No standard {@code Mac} is below
+     * this; the check exists for the exotic provider that is.
+     */
+    private static final int MIN_TAG_BYTES = 16;
+
+    private final String algorithm;
     private final Mac mac;
     private final Mac previousMac;
+    private final int tagBytes;
     private final byte[] computed;
     private final byte[] received;
 
-    private MessageAuthenticator(Mac mac, Mac previousMac) {
+    private MessageAuthenticator(String algorithm, Mac mac, Mac previousMac) {
+        this.algorithm = algorithm;
         this.mac = mac;
         this.previousMac = previousMac;
-        this.computed = mac == null ? null : new byte[WireFormat.TAG_BYTES];
-        this.received = mac == null ? null : new byte[WireFormat.TAG_BYTES];
+        this.tagBytes = mac == null ? 0 : mac.getMacLength();
+        this.computed = mac == null ? null : new byte[tagBytes];
+        this.received = mac == null ? null : new byte[tagBytes];
     }
 
     /**
@@ -67,7 +91,7 @@ public final class MessageAuthenticator {
      * nuisance.
      */
     public static MessageAuthenticator disabled() {
-        return new MessageAuthenticator(null, null);
+        return new MessageAuthenticator(null, null, null);
     }
 
     /**
@@ -78,7 +102,7 @@ public final class MessageAuthenticator {
      * milliseconds.
      */
     public static MessageAuthenticator hmacSha256(byte[] secret) {
-        return hmacSha256(secret, null);
+        return hmac(DEFAULT_ALGORITHM, secret, null);
     }
 
     /**
@@ -100,6 +124,36 @@ public final class MessageAuthenticator {
      * @param previousSecret the secret being rotated out, or null when none is
      */
     public static MessageAuthenticator hmacSha256(byte[] secret, byte[] previousSecret) {
+        return hmac(DEFAULT_ALGORITHM, secret, previousSecret);
+    }
+
+    /**
+     * Authentication with a chosen {@link Mac} algorithm — any name the platform's JCE knows, such
+     * as {@code HmacSHA256} or {@code HmacSHA512}.
+     *
+     * <p><strong>The algorithm is not on the wire, and deliberately so.</strong> A datagram that
+     * announced how it was authenticated would let an attacker rewrite that field and pick the
+     * weakest thing both ends accept, which is the downgrade attack the absent
+     * "authentication present" flag already avoids. It is local policy instead, exactly like the
+     * secret: <em>every node of a cluster, its witness included, must be configured with the same
+     * one</em>. A cluster that disagrees with itself here behaves precisely as though it disagreed
+     * about the secret — every datagram fails verification and is counted under
+     * {@link org.lolaf.primos.DropReason#BAD_TAG}, which is the number to look at when a cluster
+     * that should be talking is silent.
+     *
+     * <p>The tag length follows the algorithm rather than the wire format: 32 bytes for the
+     * default, 64 for {@code HmacSHA512}, 20 for {@code HmacSHA1}. Everything that measures a
+     * datagram asks {@link #tagBytes()}, so a longer tag costs bytes on the wire and nothing else.
+     *
+     * @param algorithm      a JCE {@code Mac} algorithm name; {@link #DEFAULT_ALGORITHM} unless
+     *                       there is a reason to differ
+     * @param secret         the cluster secret, which this tags with
+     * @param previousSecret the secret being rotated out and still accepted, or null when none is
+     * @throws IllegalArgumentException if the platform has no such algorithm, or its tag is too
+     *                                  short or too long to carry
+     */
+    public static MessageAuthenticator hmac(String algorithm, byte[] secret, byte[] previousSecret) {
+        Objects.requireNonNull(algorithm, "algorithm");
         Objects.requireNonNull(secret, "secret");
         if (secret.length == 0) {
             throw new IllegalArgumentException("the cluster secret must not be empty");
@@ -107,17 +161,70 @@ public final class MessageAuthenticator {
         if (previousSecret != null && previousSecret.length == 0) {
             throw new IllegalArgumentException("the previous cluster secret must not be empty");
         }
-        return new MessageAuthenticator(keyed(secret), previousSecret == null ? null : keyed(previousSecret));
+        Mac mac = keyed(algorithm, secret);
+        requireCarriableTag(algorithm, mac.getMacLength());
+        return new MessageAuthenticator(algorithm, mac,
+                previousSecret == null ? null : keyed(algorithm, previousSecret));
     }
 
-    private static Mac keyed(byte[] secret) {
+    /**
+     * Authentication with a chosen algorithm and no rotation window. See
+     * {@link #hmac(String, byte[], byte[])}.
+     */
+    public static MessageAuthenticator hmac(String algorithm, byte[] secret) {
+        return hmac(algorithm, secret, null);
+    }
+
+    private static Mac keyed(String algorithm, byte[] secret) {
+        Mac mac;
         try {
-            Mac mac = Mac.getInstance(ALGORITHM);
-            mac.init(new SecretKeySpec(secret, ALGORITHM));
-            return mac;
-        } catch (java.security.GeneralSecurityException e) {
-            throw new IllegalStateException("HmacSha256 is required by every Java platform", e);
+            mac = Mac.getInstance(algorithm);
+        } catch (NoSuchAlgorithmException e) {
+            // A configuration error, not a platform failure: the name came from whoever built the
+            // node, so it is named back to them.
+            throw new IllegalArgumentException("this Java platform has no Mac algorithm named '"
+                    + algorithm + "'; " + DEFAULT_ALGORITHM + " is always available", e);
         }
+        try {
+            mac.init(new SecretKeySpec(secret, algorithm));
+        } catch (InvalidKeyException e) {
+            throw new IllegalArgumentException(
+                    "the cluster secret is not a usable key for " + algorithm, e);
+        }
+        return mac;
+    }
+
+    /**
+     * Refuses a tag that is too short to be worth having or too long to fit beside the largest
+     * message, so both are a configuration error at startup rather than a cluster that cannot talk.
+     */
+    private static void requireCarriableTag(String algorithm, int tagBytes) {
+        if (tagBytes < MIN_TAG_BYTES) {
+            throw new IllegalArgumentException(algorithm + " produces a " + tagBytes
+                    + "-byte tag, and primos requires at least " + MIN_TAG_BYTES
+                    + ": a forged datagram here manufactures a leader, so the tag is the whole of"
+                    + " the defence");
+        }
+        int largestMessage = 0;
+        for (MessageType type : MessageType.values()) {
+            largestMessage = Math.max(largestMessage, type.messageBytes());
+        }
+        int budget = WireFormat.MAX_DATAGRAM_BYTES - largestMessage;
+        if (tagBytes > budget) {
+            throw new IllegalArgumentException(algorithm + " produces a " + tagBytes
+                    + "-byte tag, and only " + budget + " bytes are left beside the largest message"
+                    + " within the " + WireFormat.MAX_DATAGRAM_BYTES
+                    + "-byte datagram primos keeps under to avoid IP fragmentation");
+        }
+    }
+
+    /**
+     * The algorithm datagrams are tagged with, or null when authentication is disabled. Worth
+     * logging at startup: nothing on the wire carries it, so a cluster that disagrees about it
+     * looks exactly like one that disagrees about the secret.
+     */
+    public String algorithm() {
+        return algorithm;
     }
 
     /**
@@ -152,10 +259,10 @@ public final class MessageAuthenticator {
     }
 
     /**
-     * Bytes this adds to every datagram: 32 when enabled, 0 when not.
+     * Bytes this adds to every datagram: the algorithm's tag length when enabled, 0 when not.
      */
     public int tagBytes() {
-        return mac == null ? 0 : WireFormat.TAG_BYTES;
+        return tagBytes;
     }
 
     /**
@@ -186,7 +293,7 @@ public final class MessageAuthenticator {
             return true;
         }
         int limit = datagram.limit();
-        int bodyEnd = limit - WireFormat.TAG_BYTES;
+        int bodyEnd = limit - tagBytes;
         if (bodyEnd < 0) {
             return false;
         }

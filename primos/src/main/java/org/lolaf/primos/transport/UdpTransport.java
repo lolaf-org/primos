@@ -16,11 +16,10 @@
 package org.lolaf.primos.transport;
 
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.wire.WireFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -56,9 +55,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * routing table rather than by us. Filtering therefore happens above, on the id and the
  * authentication tag; this class only learns where a known peer is currently speaking from.
  */
+@Slf4j
 public final class UdpTransport implements Transport {
-
-    private static final Logger log = LoggerFactory.getLogger(UdpTransport.class);
 
     /**
      * One byte more than a datagram may legitimately be, so an oversized one is truncated into

@@ -125,6 +125,19 @@ public final class PrimosNodeBuilder {
     @Setter
     private byte[] clusterSecret;
 
+    /**
+     * Which {@link javax.crypto.Mac} algorithm signs the datagrams. Defaults to HMAC-SHA256, which
+     * is the right answer for almost everyone; the setting exists for a deployment whose policy
+     * names something else, and for the day SHA-256 stops being above suspicion.
+     *
+     * <p>Nothing on the wire says which algorithm was used, so this is local policy that every node
+     * of the cluster and its witness must share. Disagreeing about it looks exactly like
+     * disagreeing about the secret: every datagram fails verification and is counted under
+     * {@link org.lolaf.primos.DropReason#BAD_TAG}.
+     */
+    @Setter
+    private String macAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
+
     PrimosNodeBuilder() {
     }
 
@@ -158,6 +171,7 @@ public final class PrimosNodeBuilder {
         if (transport == null) {
             throw new IllegalStateException("a transport is required");
         }
+        Objects.requireNonNull(macAlgorithm, "macAlgorithm");
         Objects.requireNonNull(stopTimeout, "stopTimeout");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(random, "random");
@@ -172,7 +186,7 @@ public final class PrimosNodeBuilder {
                 // that clears its own secret after building cannot blank this node's key.
                 // SecretKeySpec copies too, but that is the JCE's business; the promise on the
                 // setter is ours.
-                : MessageAuthenticator.hmacSha256(clusterSecret.clone());
+                : MessageAuthenticator.hmac(macAlgorithm, clusterSecret.clone());
 
         RunningPrimosNode node = new RunningPrimosNode(clusterConfig, store, transport, clock,
                 random, authenticator, listenerExecutor, slowCallback.toNanos(),

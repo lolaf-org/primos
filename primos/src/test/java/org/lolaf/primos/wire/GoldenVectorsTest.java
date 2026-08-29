@@ -15,11 +15,11 @@
  */
 package org.lolaf.primos.wire;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Byte-for-byte encodings, frozen.
@@ -36,35 +36,54 @@ class GoldenVectorsTest {
 
     private static final String REQUEST_VOTE =
             "50524d53010100006f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a00000003";
+                    + "0000000000000000000000000000002a00000003";
 
     private static final String REQUEST_VOTE_PRE =
             "50524d53010100016f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a00000003";
+                    + "0000000000000000000000000000002a00000003";
 
     private static final String REQUEST_VOTE_REPLY =
             "50524d53010200016f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a0000000301";
+                    + "0000000000000000000000000000002a0000000301";
 
     private static final String APPEND_ENTRIES =
             "50524d53010300006f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a00000003";
+                    + "0000000000000000000000000000002a00000003";
 
     private static final String APPEND_ENTRIES_REPLY =
             "50524d53010400006f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a0000000301";
+                    + "0000000000000000000000000000002a0000000301";
 
     private static final String PING =
             "50524d53010500006f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a000000030000000000000007";
+                    + "0000000000000000000000000000002a000000030000000000000007";
 
     private static final String PING_REPLY =
             "50524d53010600006f7264657273000000000000000000000000000000000000"
-            + "0000000000000000000000000000002a000000030000000000000007";
+                    + "0000000000000000000000000000002a000000030000000000000007";
 
     private final MessageEncoder encoder =
             new MessageEncoder("orders", 3, MessageAuthenticator.disabled());
     private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+    private static String hex(ByteBuffer buffer) {
+        StringBuilder out = new StringBuilder(buffer.remaining() * 2);
+        for (int i = buffer.position(); i < buffer.limit(); i++) {
+            out.append(String.format("%02x", buffer.get(i)));
+        }
+        return out.toString();
+    }
+
+    private static int differingBytes(String left, String right) {
+        assertThat(left).hasSameSizeAs(right);
+        int differences = 0;
+        for (int i = 0; i < left.length(); i += 2) {
+            if (!left.regionMatches(i, right, i, 2)) {
+                differences++;
+            }
+        }
+        return differences;
+    }
 
     @Test
     void request_vote_is_pure_header() {
@@ -115,8 +134,8 @@ class GoldenVectorsTest {
         String field = encoded.substring(WireFormat.OFFSET_APPLICATION * 2,
                 (WireFormat.OFFSET_APPLICATION + WireFormat.APPLICATION_BYTES) * 2);
 
-        assertThat(field).startsWith("6f7264657273").endsWith("0000000000");
-        assertThat(field).hasSize(WireFormat.APPLICATION_BYTES * 2);
+        assertThat(field).startsWith("6f7264657273").endsWith("0000000000")
+                .hasSize(WireFormat.APPLICATION_BYTES * 2);
     }
 
     @Test
@@ -134,7 +153,7 @@ class GoldenVectorsTest {
 
     @Test
     void the_largest_authenticated_message_leaves_the_datagram_budget_untroubled() {
-        int largest = MessageType.PING.messageBytes() + WireFormat.TAG_BYTES;
+        int largest = MessageType.PING.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
 
         assertThat(largest).isEqualTo(92).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
     }
@@ -157,24 +176,5 @@ class GoldenVectorsTest {
         assertThat(MessageType.forCode(0x07)).isEqualTo(MessageType.TIMEOUT_NOW);
         assertThat(MessageType.forCode(0x08)).isEqualTo(MessageType.LEAVING);
         assertThat(MessageType.forCode(0x09)).isNull();
-    }
-
-    private static String hex(ByteBuffer buffer) {
-        StringBuilder out = new StringBuilder(buffer.remaining() * 2);
-        for (int i = buffer.position(); i < buffer.limit(); i++) {
-            out.append(String.format("%02x", buffer.get(i)));
-        }
-        return out.toString();
-    }
-
-    private static int differingBytes(String left, String right) {
-        assertThat(left).hasSameSizeAs(right);
-        int differences = 0;
-        for (int i = 0; i < left.length(); i += 2) {
-            if (!left.regionMatches(i, right, i, 2)) {
-                differences++;
-            }
-        }
-        return differences;
     }
 }

@@ -15,29 +15,7 @@
  */
 package org.lolaf.primos.witness;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.net.SocketOption;
-import java.net.StandardSocketOptions;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-
 import lombok.Setter;
-
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosStats;
@@ -49,6 +27,19 @@ import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageDecoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.SocketOption;
+import java.net.StandardSocketOptions;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The standalone witness: one socket, one thread, and an ordinary voter per served application.
@@ -114,7 +105,9 @@ public final class WitnessServer implements AutoCloseable {
      */
     private static final int MAX_REMEMBERED_NAMES = 1024;
 
-    /** An upper bound on one blocking select, so {@link #stop()} is never waited out for long. */
+    /**
+     * An upper bound on one blocking select, so {@link #stop()} is never waited out for long.
+     */
     private static final long MAX_WAIT_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private final ConfigStore configStore;
@@ -193,7 +186,9 @@ public final class WitnessServer implements AutoCloseable {
         return new Builder();
     }
 
-    /** The address actually bound, useful when the port was left to the operating system. */
+    /**
+     * The address actually bound, useful when the port was left to the operating system.
+     */
     public InetSocketAddress boundAddress() {
         try {
             return (InetSocketAddress) channel.getLocalAddress();
@@ -202,7 +197,9 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** Runs until {@link #stop()}. */
+    /**
+     * Runs until {@link #stop()}.
+     */
     public void run() {
         log.info("witness {} is serving {} application(s)", nodeId, served.size());
         while (!stopped) {
@@ -237,13 +234,17 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** Makes a blocked {@link #run} return promptly. The one method another thread may call. */
+    /**
+     * Makes a blocked {@link #run} return promptly. The one method another thread may call.
+     */
     public void stop() {
         stopped = true;
         selector.wakeup();
     }
 
-    /** The applications being served right now, auto-registered ones included. */
+    /**
+     * The applications being served right now, auto-registered ones included.
+     */
     public Set<String> servedApplications() {
         return Collections.unmodifiableSet(new LinkedHashSet<>(served.keySet()));
     }
@@ -262,7 +263,9 @@ public final class WitnessServer implements AutoCloseable {
         return Collections.unmodifiableMap(snapshot);
     }
 
-    /** Why datagrams were not handed to any application, and what could not be answered. */
+    /**
+     * Why datagrams were not handed to any application, and what could not be answered.
+     */
     public RoutingStats routing() {
         long overflowed = 0;
         long undeliverable = 0;
@@ -275,13 +278,17 @@ public final class WitnessServer implements AutoCloseable {
                 undeliverable);
     }
 
-    /** The term and vote one application currently holds, for tests and diagnostics. */
+    /**
+     * The term and vote one application currently holds, for tests and diagnostics.
+     */
     public long currentTerm(String application) {
         Served found = require(application);
         return found.node.currentTerm();
     }
 
-    /** Which node this application's vote is currently spent on, or -1. */
+    /**
+     * Which node this application's vote is currently spent on, or -1.
+     */
     public int votedFor(String application) {
         Served found = require(application);
         return found.node.votedFor();
@@ -330,7 +337,7 @@ public final class WitnessServer implements AutoCloseable {
                 log.debug("witness {}: receive failed: {}", nodeId, e.toString());
                 return;
             }
-            if (source == null || !(source instanceof InetSocketAddress)) {
+            if (!(source instanceof InetSocketAddress)) {
                 return;
             }
             receiveBuffer.flip();
@@ -402,7 +409,7 @@ public final class WitnessServer implements AutoCloseable {
 
         String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
         log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
-                        + " permissive mode is serving it anyway.", application, source);
+                + " permissive mode is serving it anyway.", application, source);
         if (nearMiss != null) {
             log.warn("application '{}' is one or two characters from '{}', which this witness"
                             + " already serves. If that is a typo, the two clusters cannot see each"
@@ -412,16 +419,17 @@ public final class WitnessServer implements AutoCloseable {
                     application, nearMiss);
         }
         autoRegistrations++;
-        return open(new ApplicationConfig(application, settings.defaultSecret(), null, true));
+        return open(new ApplicationConfig(application, settings.defaultSecret(), null,
+                settings.defaultMacAlgorithm(), true));
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
         String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
         if (nearMiss != null) {
             log.warn("dropping traffic for unserved application '{}' from {}, which is one or two"
-                            + " characters from '{}'. That is very likely a typo in one cluster's"
-                            + " configuration; strict mode is refusing it rather than granting it a"
-                            + " vote of its own.", application, source, nearMiss);
+                    + " characters from '{}'. That is very likely a typo in one cluster's"
+                    + " configuration; strict mode is refusing it rather than granting it a"
+                    + " vote of its own.", application, source, nearMiss);
         } else {
             log.warn("dropping traffic for unserved application '{}' from {}. Add"
                             + " applications/{}.properties to serve it.",
@@ -429,7 +437,9 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** @return whether this name had not been seen before, so it is worth a log line */
+    /**
+     * @return whether this name had not been seen before, so it is worth a log line
+     */
     private boolean rememberName(String application) {
         if (namesSeen.size() >= MAX_REMEMBERED_NAMES) {
             // Full. Stop logging rather than stop working: the counters still tell the story, and
@@ -545,7 +555,8 @@ public final class WitnessServer implements AutoCloseable {
                     + " own vote is a majority in a three-voter cluster.", application.name());
             return MessageAuthenticator.disabled();
         }
-        return MessageAuthenticator.hmacSha256(secret, application.previousSecret());
+        return MessageAuthenticator.hmac(application.macAlgorithm(), secret,
+                application.previousSecret());
     }
 
     /**
@@ -610,7 +621,9 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** One served application: its configuration, its socket view, its state and its voter. */
+    /**
+     * One served application: its configuration, its socket view, its state and its voter.
+     */
     private static final class Served {
 
         private final String name;
@@ -649,7 +662,9 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** Why datagrams did not reach an application. */
+    /**
+     * Why datagrams did not reach an application.
+     */
     public static final class RoutingStats {
 
         private final long unroutable;
@@ -674,32 +689,44 @@ public final class WitnessServer implements AutoCloseable {
             this.undeliverableReplies = undeliverableReplies;
         }
 
-        /** Datagrams too short or too malformed to carry a readable application name. */
+        /**
+         * Datagrams too short or too malformed to carry a readable application name.
+         */
         public long unroutable() {
             return unroutable;
         }
 
-        /** Datagrams naming an application this witness does not serve. */
+        /**
+         * Datagrams naming an application this witness does not serve.
+         */
         public long unservedApplication() {
             return unservedApplication;
         }
 
-        /** Datagrams refused because the auto-registration limit was reached. */
+        /**
+         * Datagrams refused because the auto-registration limit was reached.
+         */
         public long autoRegistrationsRefused() {
             return autoRegistrationsRefused;
         }
 
-        /** Datagrams naming something that could not be a directory name. */
+        /**
+         * Datagrams naming something that could not be a directory name.
+         */
         public long unusableName() {
             return unusableName;
         }
 
-        /** Datagrams for an application whose node has failed and been quarantined. */
+        /**
+         * Datagrams for an application whose node has failed and been quarantined.
+         */
         public long droppedForFailedApplication() {
             return droppedForFailedApplication;
         }
 
-        /** Applications that appeared by themselves. On a strict witness this is always zero. */
+        /**
+         * Applications that appeared by themselves. On a strict witness this is always zero.
+         */
         public long autoRegistrations() {
             return autoRegistrations;
         }
@@ -740,10 +767,14 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /** Builds a {@link WitnessServer}. */
+    /**
+     * Builds a {@link WitnessServer}.
+     */
     public static final class Builder {
 
-        /** Where the served set and the secrets come from. Required. */
+        /**
+         * Where the served set and the secrets come from. Required.
+         */
         @Setter
         private ConfigStore configStore;
 
@@ -778,7 +809,9 @@ public final class WitnessServer implements AutoCloseable {
         @Setter
         private StateStoreFactory stateStores;
 
-        /** Overrides the bind address from the configuration. */
+        /**
+         * Overrides the bind address from the configuration.
+         */
         @Setter
         private InetSocketAddress bindAddress;
 
@@ -792,13 +825,17 @@ public final class WitnessServer implements AutoCloseable {
         private Builder() {
         }
 
-        /** Only for tests: the deterministic simulation supplies a virtual clock. */
+        /**
+         * Only for tests: the deterministic simulation supplies a virtual clock.
+         */
         public Builder clock(MonotonicClock clock) {
             this.clock = Objects.requireNonNull(clock, "clock");
             return this;
         }
 
-        /** Only for tests: a seeded source makes a run reproducible. */
+        /**
+         * Only for tests: a seeded source makes a run reproducible.
+         */
         public Builder random(Random random) {
             this.random = Objects.requireNonNull(random, "random");
             return this;

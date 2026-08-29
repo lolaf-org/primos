@@ -49,9 +49,8 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
     private final ElectionNode election;
     private final long stopTimeoutNanos;
 
-    private volatile RoleAndTerm roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
+    private volatile RoleAndTerm roleAndTerm;
     private volatile int leaderId = -1;
-    private volatile PrimosStats stats;
     private volatile boolean running;
 
     private Thread thread;
@@ -73,8 +72,8 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
         this.stopTimeoutNanos = stopTimeoutNanos;
         this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock,
                 listenerExecutor, slowCallbackNanos);
-        this.election = new ElectionNode(config, store, transport, clock, random, authenticator,
-                this);
+        this.election = new ElectionNode(config, store, transport, clock, random, authenticator, this);
+        this.roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
     }
 
     @Override
@@ -158,10 +157,33 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
         }
     }
 
+    /**
+     * A snapshot of the counters, built on the calling thread when it asks for one.
+     *
+     * <p>On demand rather than after every turn of the loop, because a snapshot is a good handful
+     * of objects — a map of per-peer observations, the drop counters, two durations per peer — and
+     * a leader turns its loop several times per heartbeat. Building all of that on the chance that
+     * somebody might ask was most of what a node thread allocated; nobody reads stats at heartbeat
+     * rate.
+     *
+     * <p><strong>Read without synchronisation, so the numbers are best-effort.</strong> Everything
+     * here is written by the node thread, and this method deliberately does not co-ordinate with
+     * it: a caller can therefore see values from slightly different instants — a role from just
+     * before an election beside a term from just after — and, on a 32-bit JVM, a torn long. That
+     * is a trade this method may make and nothing else in this class may: these are monitoring
+     * counters, and the alternatives were allocating a snapshot nobody asked for on every turn of
+     * the loop, or a handshake with the node thread costing more than the numbers are worth.
+     * Nothing the algorithm depends on is read this way — the fencing token comes from
+     * {@link #roleAndTerm()}, which is published as one immutable object.
+     *
+     * <p>What keeps this benign rather than merely cheap is that a node's peer set is fixed when it
+     * is built, so the map behind the per-peer stats is never structurally modified while it is
+     * read. Only the standalone witness server learns peers as it runs, and it drives its own
+     * {@link ElectionNode} from its own thread.
+     */
     @Override
     public PrimosStats stats() {
-        PrimosStats current = stats;
-        return current != null ? current : election.stats();
+        return election.stats();
     }
 
     @Override
@@ -257,10 +279,21 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
         dispatcher.onLeaderChanged(OptionalInt.empty(), last.term());
     }
 
+    /**
+     * Republishes what an application thread may read, after every turn of the loop.
+     *
+     * <p>Every turn, so it has to be cheap: a turn that changed nothing allocates nothing. The
+     * role and term are only re-boxed into a {@link RoleAndTerm} when one of them has actually
+     * moved, and stats are not published at all — {@link #stats()} builds those when asked.
+     */
     private void publish() {
-        roleAndTerm = election.roleAndTerm();
-        leaderId = election.leaderId().orElse(-1);
-        stats = election.stats();
+        RoleAndTerm published = roleAndTerm;
+        Role role = election.role();
+        long term = election.currentTerm();
+        if (published.role() != role || published.term() != term) {
+            roleAndTerm = new RoleAndTerm(role, term);
+        }
+        leaderId = election.leaderIdOrNone();
     }
 
     private void closeQuietly() {

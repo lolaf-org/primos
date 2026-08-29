@@ -314,8 +314,11 @@ flapping), a `failureThreshold` below 1, and any non-positive duration.
   and recovers from all of it with its own timers, so TCP's retransmission is duplicated work.
   Eight message types, all fixed-size, the largest 92 bytes including its authentication tag —
   every one fits an unfragmented datagram.
-- **Optional HMAC-SHA256 on every datagram**, verified before anything is parsed. There is
-  deliberately no "authenticated" flag in the header, because an attacker would clear it.
+- **Optional HMAC on every datagram**, verified before anything is parsed. HMAC-SHA256 by
+  default; `.macAlgorithm("HmacSHA512")` on the builder chooses another. There is deliberately no
+  "authenticated" flag in the header, and nothing on the wire naming the algorithm, because an
+  attacker would clear one and downgrade the other — both are local policy every member of a
+  cluster has to share.
 - **One thread per node.** A single NIO `Selector` loop is the only blocking point for both
   datagrams and timers.
 - **Persist before acting.** `currentTerm` and `votedFor` are fsync'd before any message that

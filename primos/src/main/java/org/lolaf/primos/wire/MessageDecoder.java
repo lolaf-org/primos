@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.wire;
 
+import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,7 +104,7 @@ public final class MessageDecoder {
         }
         for (int i = 0; i < name.length(); i++) {
             char c = name.charAt(i);
-            if (c < 0x21 || c > 0x7E) {
+            if (!ClusterConfig.isApplicationNameCharacter(c)) {
                 // Not a name any encoder would have produced, so there is nothing to route it to.
                 // Returning it would put arbitrary bytes into a log line and a map lookup.
                 return null;
@@ -245,7 +246,7 @@ public final class MessageDecoder {
     private boolean drop(DropReason reason, String detail, Object argument) {
         drops.record(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): " + detail, reason, argument);
+            log.debug("dropped datagram ({}): {},{}", reason, detail, argument);
         }
         return false;
     }
@@ -253,7 +254,7 @@ public final class MessageDecoder {
     private boolean drop(DropReason reason, String detail, Object first, Object second) {
         drops.record(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): " + detail, reason, first, second);
+            log.debug("dropped datagram ({}): {},{},{}", reason, detail, first, second);
         }
         return false;
     }

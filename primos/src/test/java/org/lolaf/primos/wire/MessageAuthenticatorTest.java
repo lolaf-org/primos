@@ -15,18 +15,43 @@
  */
 package org.lolaf.primos.wire;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MessageAuthenticatorTest {
 
     private static final byte[] SECRET = "a-shared-cluster-secret-value".getBytes();
 
     private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+    private static int indexOf(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i + needle.length <= haystack.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    private static byte[] secret(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * A freshly tagged datagram, positioned and limited the way a received one would be.
+     */
+    private static java.nio.ByteBuffer tagged(MessageAuthenticator authenticator) {
+        return new MessageEncoder("orders", 1, authenticator).requestVote(
+                java.nio.ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 3L, false);
+    }
 
     @Test
     void disabled_adds_nothing_and_accepts_anything() {
@@ -36,6 +61,8 @@ class MessageAuthenticatorTest {
         assertThat(authenticator.tagBytes()).isZero();
         assertThat(authenticator.verify(ByteBuffer.allocate(52))).isTrue();
     }
+
+    // ---------------------------------------------------------------- the algorithm
 
     @Test
     void the_secret_never_appears_in_the_datagram_it_authenticates() {
@@ -70,6 +97,57 @@ class MessageAuthenticatorTest {
     }
 
     @Test
+    void another_algorithm_tags_with_its_own_length() {
+        MessageAuthenticator sha512 = MessageAuthenticator.hmac("HmacSHA512", SECRET);
+        MessageEncoder encoder = new MessageEncoder("orders", 3,
+                MessageAuthenticator.hmac("HmacSHA512", SECRET));
+
+        assertThat(sha512.tagBytes()).isEqualTo(64);
+        assertThat(sha512.algorithm()).isEqualTo("HmacSHA512");
+        assertThat(sha512.verify(encoder.ping(buffer, 7, 1))).isTrue();
+    }
+
+    @Test
+    void the_algorithm_must_match_across_the_cluster() {
+        // Nothing on the wire says which algorithm produced a tag, so a node configured with the
+        // wrong one is indistinguishable from a node with the wrong secret: everything is dropped.
+        MessageEncoder theirs = new MessageEncoder("orders", 3,
+                MessageAuthenticator.hmac("HmacSHA512", SECRET));
+
+        assertThat(MessageAuthenticator.hmacSha256(SECRET).verify(theirs.ping(buffer, 7, 1)))
+                .isFalse();
+    }
+
+    @Test
+    void the_default_is_hmac_sha256() {
+        MessageAuthenticator authenticator = MessageAuthenticator.hmacSha256(SECRET);
+
+        assertThat(authenticator.algorithm()).isEqualTo(MessageAuthenticator.DEFAULT_ALGORITHM);
+        assertThat(authenticator.tagBytes()).isEqualTo(WireFormat.DEFAULT_TAG_BYTES);
+    }
+
+    @Test
+    void an_algorithm_this_platform_does_not_have_is_refused_by_name() {
+        assertThatThrownBy(() -> MessageAuthenticator.hmac("HmacSHA3-512-ish", SECRET))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("HmacSHA3-512-ish");
+    }
+
+    @Test
+    void a_tag_too_short_to_defend_anything_is_refused() {
+        // No standard Mac is this short, so the guard needs a provider that is: without one the
+        // check would be a rule nothing can break, which is no rule at all.
+        java.security.Security.addProvider(new StubProvider());
+        try {
+            assertThatThrownBy(() -> MessageAuthenticator.hmac(StubProvider.ALGORITHM, SECRET))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("8-byte tag");
+        } finally {
+            java.security.Security.removeProvider(StubProvider.NAME);
+        }
+    }
+
+    @Test
     void verification_survives_being_called_repeatedly_on_the_same_instance() {
         MessageAuthenticator authenticator = MessageAuthenticator.hmacSha256(SECRET);
         MessageEncoder encoder = new MessageEncoder("orders", 3,
@@ -91,19 +169,6 @@ class MessageAuthenticatorTest {
         assertThatThrownBy(() -> MessageAuthenticator.hmacSha256(new byte[0]))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not be empty");
-    }
-
-    private static int indexOf(byte[] haystack, byte[] needle) {
-        outer:
-        for (int i = 0; i + needle.length <= haystack.length; i++) {
-            for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) {
-                    continue outer;
-                }
-            }
-            return i;
-        }
-        return -1;
     }
 
     // --------------------------------------------------------- secret rotation
@@ -163,15 +228,53 @@ class MessageAuthenticatorTest {
                 .hasMessageContaining("must not be empty");
     }
 
-    private static byte[] secret(String value) {
-        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    /**
+     * A Mac with a tag far too short to be worth having, so the floor has something to refuse.
+     */
+    private static final class StubProvider extends java.security.Provider {
+
+        private static final String NAME = "primos-test-stub";
+        private static final String ALGORITHM = "HmacTruncated64";
+
+        private StubProvider() {
+            super(NAME, "1.0", "an eight-byte Mac, for testing the tag-length floor");
+            put("Mac." + ALGORITHM, ShortMac.class.getName());
+        }
     }
 
-    /** A freshly tagged datagram, positioned and limited the way a received one would be. */
-    private static java.nio.ByteBuffer tagged(MessageAuthenticator authenticator) {
-        java.nio.ByteBuffer datagram =
-                new MessageEncoder("orders", 1, authenticator).requestVote(
-                        java.nio.ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 3L, false);
-        return datagram;
+    /**
+     * Public and with a public constructor because the JCE instantiates it reflectively.
+     */
+    public static final class ShortMac extends javax.crypto.MacSpi {
+
+        public ShortMac() {
+        }
+
+        @Override
+        protected int engineGetMacLength() {
+            return 8;
+        }
+
+        @Override
+        protected void engineInit(java.security.Key key,
+                                  java.security.spec.AlgorithmParameterSpec params) {
+        }
+
+        @Override
+        protected void engineUpdate(byte input) {
+        }
+
+        @Override
+        protected void engineUpdate(byte[] input, int offset, int length) {
+        }
+
+        @Override
+        protected byte[] engineDoFinal() {
+            return new byte[8];
+        }
+
+        @Override
+        protected void engineReset() {
+        }
     }
 }

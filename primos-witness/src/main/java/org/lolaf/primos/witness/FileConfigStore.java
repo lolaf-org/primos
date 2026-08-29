@@ -72,7 +72,6 @@ public final class FileConfigStore implements ConfigStore {
 
     private final Path directory;
     private final Path applicationsDirectory;
-    private final MonotonicClock clock;
     private final List<ConfigChangeListener> listeners = new CopyOnWriteArrayList<>();
 
     private WatchService watcher;
@@ -84,13 +83,16 @@ public final class FileConfigStore implements ConfigStore {
     /**
      * Reads the directory once and starts watching it.
      *
+     * <p>The clock is read here and not kept: every later question about time arrives as an
+     * argument, because {@link ConfigStore#poll(long)} is called from the server's own loop and
+     * takes that loop's reading. Only the first rescan deadline has nobody to be given one by.
+     *
      * @throws IllegalArgumentException if the initial configuration cannot be read at all — a
      *                                  server that cannot be configured must not start
      */
     public FileConfigStore(Path directory, MonotonicClock clock) {
         this.directory = directory;
         this.applicationsDirectory = directory.resolve(APPLICATIONS_DIRECTORY);
-        this.clock = clock;
         this.current = read();
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
         startWatching();
@@ -272,6 +274,10 @@ public final class FileConfigStore implements ConfigStore {
         builder.registrationMode(RegistrationMode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)));
         builder.autoRegistrationLimit(intValue(properties, "registration.limit", 64));
         builder.defaultSecret(secretValue(properties, "secret", directory));
+        String algorithm = properties.getProperty("secret.algorithm");
+        if (algorithm != null && !algorithm.trim().isEmpty()) {
+            builder.defaultMacAlgorithm(algorithm.trim());
+        }
         builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
         builder.timings(timingsProfile(properties.getProperty("timings.profile", "lan")));
@@ -310,7 +316,13 @@ public final class FileConfigStore implements ConfigStore {
             // application nobody configured has nowhere to have had one set.
             secret = settings.defaultSecret();
         }
-        return new ApplicationConfig(name, secret, previous, false);
+        // Per application rather than per witness, because a witness serves clusters it does not
+        // own: one of them changing algorithm must not be a flag day for every other tenant.
+        String algorithm = properties.getProperty("secret.algorithm");
+        if (algorithm == null || algorithm.trim().isEmpty()) {
+            algorithm = settings.defaultMacAlgorithm();
+        }
+        return new ApplicationConfig(name, secret, previous, algorithm.trim(), false);
     }
 
     /**
@@ -325,7 +337,7 @@ public final class FileConfigStore implements ConfigStore {
         }
         for (int i = 0; i < name.length(); i++) {
             char c = name.charAt(i);
-            if (c < 0x21 || c > 0x7E) {
+            if (!ClusterConfig.isApplicationNameCharacter(c)) {
                 throw new IllegalArgumentException(
                         "application name '" + name + "' from " + file + " must be printable ASCII"
                                 + " without spaces, because it travels in a fixed field on every"
