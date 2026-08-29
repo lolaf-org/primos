@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lolaf.primos.core;
+package org.lolaf.primos;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -32,12 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.lolaf.primos.DropReason;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.PrimosNode;
-import org.lolaf.primos.Role;
-import org.lolaf.primos.Timings;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.transport.LoopbackNetwork;
 

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lolaf.primos.core;
+package org.lolaf.primos;
 
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -21,13 +21,7 @@ import java.util.Random;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
-import org.lolaf.primos.ClusterConfig;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.PrimosNode;
-import org.lolaf.primos.PrimosStats;
-import org.lolaf.primos.Role;
-import org.lolaf.primos.RoleAndTerm;
+import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.Transport;

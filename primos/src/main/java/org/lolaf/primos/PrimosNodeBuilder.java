@@ -24,10 +24,10 @@ import java.util.concurrent.Executor;
 
 import lombok.Setter;
 
-import org.lolaf.primos.core.PrimosNodes;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.Transport;
+import org.lolaf.primos.wire.MessageAuthenticator;
 
 /**
  * Builds a {@link PrimosNode}.
@@ -193,7 +193,16 @@ public final class PrimosNodeBuilder {
                 ? slowCallbackThreshold
                 : config.timings().heartbeatInterval().dividedBy(2);
 
-        return PrimosNodes.create(config, store, transport, clock, random, secret, listeners,
-                listenerExecutor, slowCallback, stopTimeout);
+        MessageAuthenticator authenticator = secret == null
+                ? MessageAuthenticator.disabled()
+                : MessageAuthenticator.hmacSha256(secret);
+
+        RunningPrimosNode node = new RunningPrimosNode(config, store, transport, clock, random,
+                authenticator, listenerExecutor, slowCallback.toNanos(), stopTimeout.toNanos());
+        for (PrimosListener listener : listeners) {
+            // Added before the node starts, so none of them can miss the first transition.
+            node.addListener(listener);
+        }
+        return node;
     }
 }

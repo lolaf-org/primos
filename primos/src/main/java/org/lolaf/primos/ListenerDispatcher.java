@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lolaf.primos.core;
+package org.lolaf.primos;
 
 import java.util.List;
 import java.util.OptionalInt;
@@ -21,9 +21,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.Role;
 import org.lolaf.primos.time.MonotonicClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
