@@ -49,3 +49,8 @@ build/
 # The primos design record, deliberately kept out of git: the published history carries code,
 # not the working document. Present in the working tree, never committed.
 PLAN.md
+
+### Agent guidance ###
+# Kept out of git for the same reason as PLAN.md: it is working material about how to work on this
+# repository, not part of what the repository publishes.
+CLAUDE.md
