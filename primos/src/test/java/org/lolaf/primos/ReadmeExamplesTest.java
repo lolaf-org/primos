@@ -124,6 +124,67 @@ class ReadmeExamplesTest {
     }
 
     @Test
+    void the_derived_profile_the_readme_shows_is_accepted() {
+        Timings custom = Timings.builder()
+                .heartbeatInterval(java.time.Duration.ofMillis(200))
+                .electionTimeout(java.time.Duration.ofMillis(1_500), java.time.Duration.ofMillis(3_000))
+                .probeInterval(java.time.Duration.ofSeconds(2))
+                .failureThreshold(3)
+                .build();
+
+        assertThat(custom).isEqualTo(Timings.wan());
+    }
+
+    @Test
+    void build_rejects_exactly_what_the_readme_says_it_rejects() {
+        // Each of these is a line in the README's "Deriving your own" section. If a rule changes,
+        // the documentation is wrong and this fails rather than the reader finding out later.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
+                        .heartbeatInterval(java.time.Duration.ofMillis(100))
+                        .electionTimeout(java.time.Duration.ofMillis(400), java.time.Duration.ofMillis(800))
+                        .build())
+                .as("an election timeout under five heartbeats")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("5 heartbeat intervals");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
+                        .electionTimeout(java.time.Duration.ofMillis(300), java.time.Duration.ofMillis(320))
+                        .build())
+                .as("a randomisation range narrower than one heartbeat")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("split the vote");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
+                        .probeInterval(java.time.Duration.ofSeconds(16))
+                        .build())
+                .as("a probe interval past the NAT pinhole ceiling")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("NAT pinhole");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
+                        .failureThreshold(0)
+                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("failureThreshold must be at least 1");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
+                        .heartbeatInterval(java.time.Duration.ZERO)
+                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be positive");
+    }
+
+    @Test
+    void a_wan_witness_in_a_lan_cluster_is_five_times_slower_to_agree_to_a_failover() {
+        // The README tells operators to use one profile cluster-wide. This is the number behind
+        // that: a node refuses a pre-vote while it has heard from a leader within
+        // electionTimeoutMin, so the witness's own profile decides when it will agree to a
+        // failover — which, for a two-node pair, is the vote everything is waiting on.
+        assertThat(Timings.wan().electionTimeoutMin())
+                .isEqualTo(Timings.lan().electionTimeoutMin().multipliedBy(5));
+    }
+
+    @Test
     void a_node_without_a_store_or_a_transport_is_refused_as_the_readme_says() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> PrimosNode.builder()
                         .applicationName("orders")

@@ -194,9 +194,19 @@ which one shared file makes impossible.
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
 
-`timings.profile` is `lan` or `wan` — a named profile rather than seven separate intervals,
+`timings.profile` is `lan` or `wan` — a named profile rather than several separate intervals,
 because it is the *relationships* between them that have to hold. A witness genuinely on a third
-network wants `wan`: a 50ms WAN round trip makes the LAN election timeout marginal.
+network wants `wan`: a 50ms WAN round trip against a 300ms election timeout is only 6×, where Raft
+wants an order of magnitude.
+
+**Set the same profile on the witness and on every node of the clusters it serves.** A node refuses
+to grant a *pre-vote* while it has heard from a leader within `electionTimeoutMin`, so a `wan`
+witness among `lan` nodes is five times more reluctant to agree to a failover than its peers — and
+for a two-node pair, the witness's vote is the one everything is waiting on. Nothing is corrupted
+by a mismatch; failover just gets slower in a way that is very hard to see from either side.
+
+The full derivation, including the garbage-collection floor that matters more than the network on
+a JVM, is in the [project README](../README.md#timing).
 
 ### `applications/<name>.properties`
 
