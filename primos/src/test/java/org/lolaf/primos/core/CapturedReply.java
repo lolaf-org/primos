@@ -100,4 +100,9 @@ final class CapturedReply implements MessageHandler {
     public void onPingReply(int senderId, long term, long sequence) {
         messages.add("pingReply/" + sequence);
     }
+
+    @Override
+    public void onTimeoutNow(int senderId, long term) {
+        messages.add("timeoutNow(" + senderId + "," + term + ")");
+    }
 }

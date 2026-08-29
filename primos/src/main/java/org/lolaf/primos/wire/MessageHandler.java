@@ -47,4 +47,13 @@ public interface MessageHandler {
 
     /** A probe reply. Ignore it if the sequence is older than the failure threshold allows. */
     void onPingReply(int senderId, long term, long sequence);
+
+    /**
+     * A leader that is shutting down cleanly, telling this node to campaign immediately.
+     *
+     * <p>Raft thesis §3.10. The alternative is silence: a leader that simply stops leaves the
+     * cluster without one until somebody's election timeout expires, and this turns that wait into
+     * about one round trip.
+     */
+    void onTimeoutNow(int senderId, long term);
 }

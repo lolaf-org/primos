@@ -60,4 +60,9 @@ final class RecordingHandler implements MessageHandler {
         }
         return received.get(0);
     }
+
+    @Override
+    public void onTimeoutNow(int senderId, long term) {
+        received.add("timeoutNow(" + senderId + "," + term + ")");
+    }
 }

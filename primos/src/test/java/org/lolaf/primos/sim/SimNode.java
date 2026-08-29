@@ -63,6 +63,15 @@ public interface SimNode {
      */
     void crash();
 
+    /**
+     * Shuts the node down cleanly, the way {@code PrimosNode.stop()} does.
+     *
+     * <p>The difference from {@link #crash()} is the whole point: a leader stopping cleanly gets to
+     * say so first, handing leadership to a follower rather than leaving the cluster to notice the
+     * silence. Everything durable is kept, as it would be.
+     */
+    void stopCleanly();
+
     /** Brings the node back up, reading its state back from the store that outlived it. */
     void restart();
 }

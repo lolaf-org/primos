@@ -159,6 +159,7 @@ final class WitnessClient implements AutoCloseable {
         private long term;
         private boolean granted;
         private boolean answered;
+        private boolean handedOver;
 
         @Override
         public void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote) {
@@ -191,6 +192,11 @@ final class WitnessClient implements AutoCloseable {
             this.term = term;
             this.answered = true;
         }
-    }
 
+        /** A handover, which a witness must never send. Recorded so a test can prove it did not. */
+        @Override
+        public void onTimeoutNow(int senderId, long term) {
+            this.handedOver = true;
+        }
+    }
 }

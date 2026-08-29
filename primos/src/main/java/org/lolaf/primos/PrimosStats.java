@@ -47,6 +47,8 @@ public final class PrimosStats {
     private final Duration timeInRole;
     private final long electionsStarted;
     private final long electionsWon;
+    private final long handoversSent;
+    private final long handoversAccepted;
     private final Map<DropReason, Long> drops;
     private final Map<Integer, PeerStats> peers;
 
@@ -55,6 +57,8 @@ public final class PrimosStats {
                        Duration timeInRole,
                        long electionsStarted,
                        long electionsWon,
+                       long handoversSent,
+                       long handoversAccepted,
                        Map<DropReason, Long> drops,
                        Map<Integer, PeerStats> peers) {
         this.role = Objects.requireNonNull(role, "role");
@@ -62,6 +66,8 @@ public final class PrimosStats {
         this.timeInRole = Objects.requireNonNull(timeInRole, "timeInRole");
         this.electionsStarted = electionsStarted;
         this.electionsWon = electionsWon;
+        this.handoversSent = handoversSent;
+        this.handoversAccepted = handoversAccepted;
 
         EnumMap<DropReason, Long> allReasons = new EnumMap<>(DropReason.class);
         for (DropReason reason : DropReason.values()) {
@@ -73,6 +79,22 @@ public final class PrimosStats {
         this.drops = Collections.unmodifiableMap(allReasons);
         this.peers = Collections.unmodifiableMap(
                 new LinkedHashMap<>(peers == null ? Collections.emptyMap() : peers));
+    }
+
+    /**
+     * How many times this node handed leadership on as it shut down.
+     *
+     * <p>Worth watching across a rolling deploy: the difference between this and the number of
+     * times this node was stopped while leading is the number of deploys that cost the cluster a
+     * full election timeout with nobody in charge.
+     */
+    public long handoversSent() {
+        return handoversSent;
+    }
+
+    /** How many times this node campaigned because a departing leader handed over to it. */
+    public long handoversAccepted() {
+        return handoversAccepted;
     }
 
     /** How many datagrams were discarded for one reason. Never null; zero if it never happened. */

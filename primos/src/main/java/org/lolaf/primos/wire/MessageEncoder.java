@@ -85,6 +85,17 @@ public final class MessageEncoder {
         return finish(out);
     }
 
+    /**
+     * Tells one follower to campaign now, because this leader is going away.
+     *
+     * <p>Carries nothing but the header: the target needs to know who is handing over and in which
+     * term, and both of those are already there.
+     */
+    public ByteBuffer timeoutNow(ByteBuffer out, long term) {
+        header(out, MessageType.TIMEOUT_NOW, 0, term);
+        return finish(out);
+    }
+
     /** A reachability probe. */
     public ByteBuffer ping(ByteBuffer out, long term, long sequence) {
         header(out, MessageType.PING, 0, term);

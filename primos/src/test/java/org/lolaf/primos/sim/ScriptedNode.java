@@ -137,6 +137,13 @@ final class ScriptedNode implements SimNode {
         votedFor = PersistentState.NO_VOTE;
     }
 
+    /** A scripted node has no leadership to hand over, so this is a crash without the data loss. */
+    @Override
+    public void stopCleanly() {
+        running = false;
+        role = Role.FOLLOWER;
+    }
+
     @Override
     public void restart() {
         reload();

@@ -233,4 +233,27 @@ class UdpClusterTest {
             throw new IllegalStateException("no free port", e);
         }
     }
+
+    @Test
+    void a_leader_stopped_cleanly_hands_over_rather_than_going_quiet() {
+        int[] ports = {freePort(), freePort(), freePort()};
+        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
+        PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+
+        PrimosNode leader = leaderOf(one, two, three);
+        // The real shutdown path, not the simulation's: stop() runs on this thread while the
+        // handover has to go out from the node's own, which is the wiring under test here.
+        leader.stop();
+
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+
+        PrimosNode successor = leaderOf(one, two, three);
+        assertThat(successor).isNotSameAs(leader);
+        assertThat(successor.stats().handoversAccepted())
+                .as("the successor campaigned because it was told to, not because it timed out"
+                        + " waiting — the timeout would have replaced the leader too, just later")
+                .isEqualTo(1);
+    }
 }

@@ -40,7 +40,15 @@ public enum MessageType {
     PING(0x05, 8),
 
     /** A probe reply, echoing the sequence number so a round trip can be measured. */
-    PING_REPLY(0x06, 8);
+    PING_REPLY(0x06, 8),
+
+    /**
+     * A departing leader telling one follower to campaign now, rather than after a timeout.
+     *
+     * <p>Pure header: the sender is the leader handing over and the term is the one it holds,
+     * which is everything the target needs to decide whether the instruction is current.
+     */
+    TIMEOUT_NOW(0x07, 0);
 
     private static final MessageType[] BY_CODE = new MessageType[256];
 

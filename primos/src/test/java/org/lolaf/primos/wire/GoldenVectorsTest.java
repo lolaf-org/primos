@@ -127,6 +127,7 @@ class GoldenVectorsTest {
         assertThat(MessageType.APPEND_ENTRIES_REPLY.messageBytes()).isEqualTo(53);
         assertThat(MessageType.PING.messageBytes()).isEqualTo(60);
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);
+        assertThat(MessageType.TIMEOUT_NOW.messageBytes()).isEqualTo(52);
         assertThat(WireFormat.HEADER_BYTES).isEqualTo(52);
     }
 
@@ -140,6 +141,20 @@ class GoldenVectorsTest {
     @Test
     void zero_is_never_a_valid_type_so_a_zeroed_buffer_is_not_a_message() {
         assertThat(MessageType.forCode(0)).isNull();
+    }
+
+    @Test
+    void the_type_codes_are_the_ones_the_specification_assigns() {
+        // Pinned rather than derived: these travel on the wire, so a reordering of the enum must
+        // fail here rather than in the field between two versions.
+        assertThat(MessageType.forCode(0x01)).isEqualTo(MessageType.REQUEST_VOTE);
+        assertThat(MessageType.forCode(0x02)).isEqualTo(MessageType.REQUEST_VOTE_REPLY);
+        assertThat(MessageType.forCode(0x03)).isEqualTo(MessageType.APPEND_ENTRIES);
+        assertThat(MessageType.forCode(0x04)).isEqualTo(MessageType.APPEND_ENTRIES_REPLY);
+        assertThat(MessageType.forCode(0x05)).isEqualTo(MessageType.PING);
+        assertThat(MessageType.forCode(0x06)).isEqualTo(MessageType.PING_REPLY);
+        assertThat(MessageType.forCode(0x07)).isEqualTo(MessageType.TIMEOUT_NOW);
+        assertThat(MessageType.forCode(0x08)).isNull();
     }
 
     private static String hex(ByteBuffer buffer) {

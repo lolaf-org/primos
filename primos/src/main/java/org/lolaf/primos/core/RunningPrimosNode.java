@@ -213,7 +213,34 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
                 running = false;
             }
         }
+        handOverLeadership();
         publish();
+    }
+
+    /**
+     * Hands leadership on before this thread dies, so a clean stop does not cost an election
+     * timeout of leaderlessness.
+     *
+     * <p>Here rather than in {@link #stop()} because the transport belongs to this thread, and
+     * {@code stop()} runs on the caller's. The join in {@code stop()} covers it and the socket is
+     * still open, so the datagram is on its way before anything is closed.
+     *
+     * <p>Never allowed to throw. This runs while the node is already going away, so a failure here
+     * must not become an exception on a dying thread that nobody will ever see — the cluster falls
+     * back to its election timeout, which is what it would have done without any of this.
+     */
+    private void handOverLeadership() {
+        if (election.isFailed()) {
+            // A failed node has no leadership to give: it stood down when it failed, and it cannot
+            // vouch for a term it may not have persisted.
+            return;
+        }
+        try {
+            election.handOverLeadership();
+        } catch (RuntimeException e) {
+            log.debug("cluster '{}': node {} could not hand over leadership: {}",
+                    config.applicationName(), config.nodeId(), e.toString());
+        }
     }
 
     /**

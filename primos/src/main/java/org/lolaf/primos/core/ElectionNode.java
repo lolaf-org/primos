@@ -115,6 +115,8 @@ public final class ElectionNode implements MessageHandler {
     private long electionsStarted;
     private long electionsWon;
     private long leadershipsRelinquished;
+    private long handoversSent;
+    private long handoversAccepted;
 
     public ElectionNode(ClusterConfig config,
                         StateStore store,
@@ -377,7 +379,8 @@ public final class ElectionNode implements MessageHandler {
     public PrimosStats stats() {
         return new PrimosStats(role, currentTerm,
                 java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
-                electionsStarted, electionsWon, drops.snapshot(), peerStats());
+                electionsStarted, electionsWon, handoversSent, handoversAccepted,
+                drops.snapshot(), peerStats());
     }
 
     private void onDatagram(ByteBuffer datagram) {
@@ -643,6 +646,142 @@ public final class ElectionNode implements MessageHandler {
             stepDown(term);
         }
         send(senderId, encoder.pingReply(sendBuffer, currentTerm, sequence));
+    }
+
+    /**
+     * A departing leader has asked this node to campaign now. Raft thesis §3.10.
+     *
+     * <p><strong>This deliberately skips the pre-vote round</strong>, which is the only place in
+     * primos that does, so the reason has to be stated. A pre-vote asks the other followers
+     * whether they <em>would</em> elect this node, and they answer no while they can still hear a
+     * leader — which, at the moment a leader hands over, they all can, because it was heartbeating
+     * until a moment ago. Pre-voting here would therefore be refused for a full election timeout,
+     * which is exactly the wait this message exists to remove.
+     *
+     * <p>Skipping it is safe because pre-vote defends against a <em>different</em> thing: a
+     * partitioned node inflating its term unilaterally and disrupting a healthy cluster on its
+     * return. Here the term bump is authorised by the leader of the current term, which is
+     * standing down as it sends this. Nothing about vote counting changes — the new candidate
+     * still has to win a real majority in the new term — so the at-most-one-leader-per-term
+     * argument is untouched.
+     *
+     * <p>A forged one of these could force an election, but forging requires the cluster secret,
+     * and an attacker who has it can already inject an {@code AppendEntries} carrying an enormous
+     * term, which is strictly worse. This adds no exposure that authentication was not already
+     * the answer to.
+     */
+    @Override
+    public void onTimeoutNow(int senderId, long term) {
+        if (config.isWitness()) {
+            // The one hard rule about a witness: it never campaigns, so it never leads. A leader
+            // should never target one, and this is the second half of that guarantee — the half
+            // that does not depend on the sender being a version that knows the rule.
+            log.debug("cluster '{}': witness {} ignoring a handover from node {}",
+                    config.applicationName(), config.nodeId(), senderId);
+            return;
+        }
+        if (term < currentTerm) {
+            // From a leader this node has already left behind. Acting would campaign on behalf of
+            // a term that is over.
+            return;
+        }
+        if (term > currentTerm) {
+            stepDown(term);
+        }
+        if (role == Role.LEADER) {
+            return;
+        }
+        handoversAccepted++;
+        log.info("cluster '{}': node {} is campaigning immediately, handed over by node {} in"
+                        + " term {}", config.applicationName(), config.nodeId(), senderId, term);
+        startElection();
+    }
+
+    /**
+     * Hands leadership to a follower on the way out, instead of just going quiet.
+     *
+     * <p>A leader that simply stops costs the cluster up to a full election timeout with nobody in
+     * charge: the followers have to notice the heartbeats stopped, and the timeout is what
+     * "notice" means. Telling one of them to campaign now collapses that to about a round trip.
+     *
+     * <p>Best-effort by design. The message is one datagram and nothing waits for it — if it is
+     * lost, or no follower is reachable, the cluster falls back to the ordinary election timeout,
+     * which is exactly what would have happened anyway. There is therefore no abort path and
+     * nothing to get wrong: this can make a shutdown faster and cannot make it slower.
+     *
+     * @return whether a handover was sent
+     */
+    public boolean handOverLeadership() {
+        if (role != Role.LEADER) {
+            return false;
+        }
+        Peer target = handoverTarget();
+        if (target == null) {
+            log.info("cluster '{}': node {} is stopping as leader of term {} with no reachable"
+                            + " follower to hand over to; the cluster will elect a replacement on"
+                            + " its own timeout", config.applicationName(), config.nodeId(),
+                    currentTerm);
+            return false;
+        }
+        handoversSent++;
+        log.info("cluster '{}': node {} is stopping and handing leadership of term {} to node {}",
+                config.applicationName(), config.nodeId(), currentTerm, target.id());
+        send(target.id(), encoder.timeoutNow(sendBuffer, currentTerm));
+        return true;
+    }
+
+    /**
+     * The follower to hand over to: the one this leader most recently completed a round trip with.
+     *
+     * <p><strong>Never the witness</strong>, which would ignore the message anyway but must not be
+     * asked — declining to campaign is the whole of what makes a witness one, and targeting one
+     * would waste the handover and leave the cluster waiting out its timeout after all.
+     *
+     * <p>The signal is {@code lastRoundTripNanos}, the same one CheckQuorum uses, rather than the
+     * probe's reachability. Both were tried and the difference matters: probes run once a second,
+     * so a leader elected moments ago has no probe results at all and would find nobody to hand to,
+     * while an {@code AppendEntriesReply} lands every heartbeat and is direct proof that this
+     * follower received something this node sent and answered it. Handing over to a node that
+     * cannot hear us is a datagram into a void, and picking well is the entire job here.
+     *
+     * <p>Peers the probe has actually declared down are still excluded. A leader seeds every peer's
+     * contact clock when it takes office, deliberately — see {@link #becomeLeader} — so straight
+     * after an election that clock alone would vouch for a peer nothing has heard from.
+     */
+    private Peer handoverTarget() {
+        long now = clock.nanoTime();
+        long window = timings.electionTimeoutMin().toNanos();
+        Peer best = null;
+        long bestContactNanos = Long.MIN_VALUE;
+
+        for (Peer peer : peers) {
+            if (peer.isWitness()) {
+                continue;
+            }
+            Probe probe = probes.get(peer.id());
+            if (probe != null && probe.consecutiveMisses >= timings.failureThreshold()) {
+                continue;
+            }
+            Long lastContact = lastRoundTripNanos.get(peer.id());
+            if (lastContact == null || now - lastContact > window) {
+                continue;
+            }
+            if (best == null || lastContact > bestContactNanos) {
+                best = peer;
+                bestContactNanos = lastContact;
+            }
+        }
+        return best;
+    }
+
+    /** How many times this node has handed leadership over on the way out. */
+    public long handoversSent() {
+        return handoversSent;
+    }
+
+    /** How many times this node has campaigned because a leader handed over to it. */
+    public long handoversAccepted() {
+        return handoversAccepted;
     }
 
     @Override

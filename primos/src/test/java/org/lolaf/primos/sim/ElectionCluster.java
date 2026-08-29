@@ -228,6 +228,15 @@ public final class ElectionCluster {
         }
 
         @Override
+        public void stopCleanly() {
+            if (running) {
+                node.handOverLeadership();
+            }
+            running = false;
+            node = null;
+        }
+
+        @Override
         public void restart() {
             node = new ElectionNode(config, store, transport, simulation.clock(),
                     new Random(simulation.seed() * 31 + config.nodeId()),

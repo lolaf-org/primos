@@ -196,6 +196,9 @@ public final class MessageDecoder {
             case PING_REPLY:
                 handler.onPingReply(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES));
                 break;
+            case TIMEOUT_NOW:
+                handler.onTimeoutNow(senderId, term);
+                break;
             default:
                 throw new IllegalStateException("unhandled message type " + type);
         }
