@@ -80,6 +80,9 @@ public final class UdpTransport implements Transport {
     private volatile boolean closed;
 
     private long sendFailures;
+    private long sendsWhileClosed;
+    private long sendsToUnknownPeer;
+    private long sendsWithoutAddress;
     private long addressUpdates;
 
     private UdpTransport(Builder builder) throws IOException {
@@ -123,16 +126,36 @@ public final class UdpTransport implements Transport {
 
     @Override
     public void send(int peerId, ByteBuffer datagram) {
+        // Every path out of here that does not put bytes on the wire is counted, because the SPI
+        // promises a failed send is counted and logged rather than propagated — and a send that
+        // returns without doing either is indistinguishable from a working one. Logging is at
+        // debug throughout: heartbeats are every 50ms per peer, so a visible level would turn a
+        // broken peer into a second outage.
         if (closed) {
+            sendsWhileClosed++;
             return;
         }
         Endpoint endpoint = endpoints.get(peerId);
         if (endpoint == null) {
+            // Not a network condition: this node was asked for a peer it was never configured
+            // with, which is a bug in the caller rather than a lost datagram.
+            sendsToUnknownPeer++;
+            if (log.isDebugEnabled()) {
+                log.debug("cluster '{}': asked to send to {}, which is not a configured peer",
+                        clusterName, peerId);
+            }
             return;
         }
         InetSocketAddress target = endpoint.address();
         if (target == null) {
+            // The hostname has never resolved. Without this counter the peer simply looks
+            // unreachable, with nothing anywhere to say that DNS is the reason.
+            sendsWithoutAddress++;
             endpoint.resolveInBackground();
+            if (log.isDebugEnabled()) {
+                log.debug("cluster '{}': no address yet for peer {} ({}); dropping this datagram",
+                        clusterName, peerId, endpoint.peer.host());
+            }
             return;
         }
         try {
@@ -241,9 +264,46 @@ public final class UdpTransport implements Transport {
         }
     }
 
-    /** How many sends have failed. Routine on UDP; a rising rate is not. */
+    /** How many sends the socket itself rejected. Routine on UDP; a rising rate is not. */
     public long sendFailures() {
         return sendFailures;
+    }
+
+    /**
+     * Every datagram this transport did not put on the wire, for any reason.
+     *
+     * <p>The one number worth alerting on. A healthy node's is flat: the individual counters below
+     * separate a network that is refusing traffic from a name that will not resolve from a bug in
+     * the caller, and those want very different responses.
+     */
+    public long sendsDropped() {
+        return sendFailures + sendsWhileClosed + sendsToUnknownPeer + sendsWithoutAddress;
+    }
+
+    /** Sends attempted after {@link #close}. Expected during shutdown, and harmless. */
+    public long sendsWhileClosed() {
+        return sendsWhileClosed;
+    }
+
+    /**
+     * Sends addressed to a peer this transport was not configured with.
+     *
+     * <p>Should stay at zero. Unlike the others this is not a network condition — it means
+     * something asked for a peer id that was never in the configuration.
+     */
+    public long sendsToUnknownPeer() {
+        return sendsToUnknownPeer;
+    }
+
+    /**
+     * Sends dropped because the peer's hostname has never resolved.
+     *
+     * <p>The quietest failure of the set, and the reason these counters exist: without it a peer
+     * whose DNS is broken is simply unreachable, with nothing to distinguish that from a network
+     * partition or a dead process.
+     */
+    public long sendsWithoutAddress() {
+        return sendsWithoutAddress;
     }
 
     /** How many times a peer has been observed at a new address. */
@@ -319,6 +379,12 @@ public final class UdpTransport implements Transport {
                         log.debug("cluster '{}': cannot resolve {} for peer {}",
                                 clusterName, peer.host(), peer.id());
                     } else {
+                        // Closes the loop on the warning logged at construction: an operator who
+                        // was told a name would not resolve should also be told when it does.
+                        if (address == null) {
+                            log.info("cluster '{}': {} now resolves for peer {}; sending resumes",
+                                    clusterName, peer.host(), peer.id());
+                        }
                         address = resolved;
                     }
                     resolvedAtNanos = clock.nanoTime();

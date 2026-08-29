@@ -139,4 +139,81 @@ class UdpTransportTest extends TransportContractTest {
             throw new IllegalStateException("no free port", e);
         }
     }
+
+    // ------------------------------------------------- sends that never happen
+
+    /**
+     * Every way a send can fail to reach the wire, each proved to be counted.
+     *
+     * <p>The SPI promises a failed send is "counted and logged rather than propagated". Three of
+     * these four paths used to do neither: they returned quietly, so a peer that could never be
+     * sent to looked exactly like a peer that was simply not talking back.
+     */
+    @Test
+    void a_send_to_a_peer_that_was_never_configured_is_counted() throws IOException {
+        try (UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, freePort())))
+                .build()) {
+
+            transport.send(99, datagram());
+
+            assertThat(transport.sendsToUnknownPeer())
+                    .as("not a network condition: something asked for an id that was never"
+                            + " configured, which is a bug rather than a lost datagram")
+                    .isEqualTo(1);
+            assertThat(transport.sendsDropped()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void a_send_to_a_hostname_that_does_not_resolve_is_counted() throws IOException {
+        try (UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .peers(Collections.singletonList(
+                        Peer.application(NODE_B, "no-such-host.invalid", 7420)))
+                .build()) {
+
+            transport.send(NODE_B, datagram());
+
+            assertThat(transport.sendsWithoutAddress())
+                    .as("the quietest failure of the set: without this counter, broken DNS is"
+                            + " indistinguishable from a partition or a dead process")
+                    .isEqualTo(1);
+            assertThat(transport.sendFailures())
+                    .as("the socket was never asked, so this is not a socket failure")
+                    .isZero();
+            assertThat(transport.sendsDropped()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void a_send_after_close_is_counted_rather_than_ignored() throws IOException {
+        UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, freePort())))
+                .build();
+        transport.close();
+
+        transport.send(NODE_B, datagram());
+
+        assertThat(transport.sendsWhileClosed()).isEqualTo(1);
+        assertThat(transport.sendsDropped()).isEqualTo(1);
+    }
+
+    @Test
+    void a_healthy_transport_drops_nothing() {
+        ((UdpTransport) a).send(NODE_B, datagram());
+
+        assertThat(((UdpTransport) a).sendsDropped())
+                .as("the one number worth alerting on, and it stays flat when nothing is wrong")
+                .isZero();
+    }
+
+    private static java.nio.ByteBuffer datagram() {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(WireFormat.HEADER_BYTES);
+        buffer.position(WireFormat.HEADER_BYTES);
+        buffer.flip();
+        return buffer;
+    }
 }
