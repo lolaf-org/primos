@@ -268,7 +268,7 @@ public final class WitnessServer implements AutoCloseable {
         long undeliverable = 0;
         for (Served application : served.values()) {
             overflowed += application.transport.overflowed();
-            undeliverable += application.transport.undeliverable();
+            undeliverable += application.transport.sendsDropped();
         }
         return new RoutingStats(unroutable, unservedApplication, autoRegistrationsRefused,
                 unusableName, droppedForFailedApplication, autoRegistrations, overflowed,
@@ -715,7 +715,14 @@ public final class WitnessServer implements AutoCloseable {
             return inboxOverflowed;
         }
 
-        /** Replies that could not be addressed to anybody. Expected to stay at zero. */
+        /**
+         * Replies this witness never put on the wire, for any reason.
+         *
+         * <p>Expected to stay at zero, and worth alerting on if it does not. A witness that
+         * silently fails to answer is indistinguishable from a witness nobody is asking, and the
+         * cluster on the other end is the one that pays: it waits out an election timeout for a
+         * vote that was never coming.
+         */
         public long undeliverableReplies() {
             return undeliverableReplies;
         }

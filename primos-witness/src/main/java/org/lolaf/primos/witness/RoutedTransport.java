@@ -84,6 +84,8 @@ final class RoutedTransport implements Transport {
 
     private long overflowed;
     private long undeliverable;
+    private long sendFailures;
+    private long sendsWhileClosed;
 
     RoutedTransport(String application, DatagramChannel channel, Selector selector) {
         this.application = application;
@@ -121,6 +123,7 @@ final class RoutedTransport implements Transport {
     @Override
     public void send(int peerId, ByteBuffer datagram) {
         if (closed) {
+            sendsWhileClosed++;
             return;
         }
         InetSocketAddress target = endpoints.get(peerId);
@@ -146,7 +149,10 @@ final class RoutedTransport implements Transport {
             channel.send(datagram, target);
         } catch (IOException | RuntimeException e) {
             // Routine on UDP, and an ICMP port-unreachable can surface here long after the fact.
-            // The algorithm's timers are the retry mechanism, so this must never become a failure.
+            // The algorithm's timers are the retry mechanism, so this must never become a failure
+            // — but it is counted, because a reply this witness never managed to send is the
+            // difference between a cluster failing over and a cluster waiting.
+            sendFailures++;
             if (log.isDebugEnabled()) {
                 log.debug("cluster '{}': send to node {} at {} failed: {}",
                         application, peerId, target, e.toString());
@@ -235,6 +241,17 @@ final class RoutedTransport implements Transport {
     /** Datagrams dropped because this application's inbox was full. */
     long overflowed() {
         return overflowed;
+    }
+
+    /**
+     * Every reply this transport did not put on the wire, for any reason.
+     *
+     * <p>Counted for the same reason the node's transport counts them: a send that returns without
+     * either sending or recording anything is indistinguishable from one that worked, and a
+     * witness that silently fails to answer looks exactly like a witness nobody is asking.
+     */
+    long sendsDropped() {
+        return undeliverable + sendFailures + sendsWhileClosed;
     }
 
     /**

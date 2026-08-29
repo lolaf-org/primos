@@ -316,6 +316,22 @@ class WitnessServerTest {
                 .hasMessageContaining("already using the state directory");
     }
 
+    @Test
+    void a_witness_serving_normally_never_fails_to_send_a_reply() {
+        application("orders");
+        start();
+
+        try (WitnessClient candidate = client("orders", 1)) {
+            assertThat(candidate.requestVote(server, 1L)).isTrue();
+        }
+
+        assertThat(server.routing().undeliverableReplies())
+                .as("a witness that silently fails to answer is indistinguishable from one nobody"
+                        + " is asking, and the cluster waiting for the vote is what pays")
+                .isZero();
+        assertThat(server.routing().inboxOverflowed()).isZero();
+    }
+
     // ------------------------------------------------------------------ the role
 
     @Test
