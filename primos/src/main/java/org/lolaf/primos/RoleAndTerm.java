@@ -15,11 +15,9 @@
  */
 package org.lolaf.primos;
 
-import java.util.Objects;
+import lombok.Value;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import java.util.Objects;
 
 /**
  * A role together with the term it was held in, read as one consistent pair.
@@ -29,13 +27,11 @@ import lombok.ToString;
  * provided the system being guarded rejects anything carrying a term lower than the highest it has
  * seen. That is why the two are never exposed separately.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class RoleAndTerm {
+@Value
+public class RoleAndTerm {
 
-    private final Role role;
-    private final long term;
+    Role role;
+    long term;
 
     public RoleAndTerm(Role role, long term) {
         this.role = Objects.requireNonNull(role, "role");
@@ -45,7 +41,9 @@ public final class RoleAndTerm {
         this.term = term;
     }
 
-    /** Whether the role is {@link Role#LEADER}. */
+    /**
+     * Whether the role is {@link Role#LEADER}.
+     */
     public boolean isLeader() {
         return role.isLeader();
     }

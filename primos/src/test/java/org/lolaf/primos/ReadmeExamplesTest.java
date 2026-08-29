@@ -54,9 +54,11 @@ class ReadmeExamplesTest {
                 .addressLearning(true)
                 .build();
              PrimosNode node = PrimosNode.builder()
-                     .applicationName("orders")
-                     .nodeId(1)
-                     .peers(peers)
+                     .clusterConfig(ClusterConfig.builder()
+                             .applicationName("orders")
+                             .nodeId(1)
+                             .peers(peers)
+                             .build())
                      .clusterSecret(secret)
                      .store(new FileStateStore(directory))
                      .transport(transport)
@@ -84,9 +86,11 @@ class ReadmeExamplesTest {
                 .peers(Arrays.asList(Peer.application(2, "127.0.0.1", 7421)))
                 .build();
              PrimosNode node = PrimosNode.builder()
-                     .applicationName("orders")
-                     .nodeId(1)
-                     .peers(Peer.application(2, "127.0.0.1", 7421))
+                     .clusterConfig(ClusterConfig.builder()
+                             .applicationName("orders")
+                             .nodeId(1)
+                             .peers(Peer.application(2, "127.0.0.1", 7421))
+                             .build())
                      .store(new FileStateStore(directory))
                      .transport(transport)
                      .build()) {
@@ -187,9 +191,11 @@ class ReadmeExamplesTest {
     @Test
     void a_node_without_a_store_or_a_transport_is_refused_as_the_readme_says() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> PrimosNode.builder()
-                        .applicationName("orders")
-                        .nodeId(1)
-                        .peers(Peer.application(2, "127.0.0.1", 7421))
+                        .clusterConfig(ClusterConfig.builder()
+                                .applicationName("orders")
+                                .nodeId(1)
+                                .peers(Peer.application(2, "127.0.0.1", 7421))
+                                .build())
                         .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("state store is required");

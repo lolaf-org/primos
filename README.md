@@ -23,10 +23,14 @@ UdpTransport transport = UdpTransport.builder()   // throws IOException
         .addressLearning(true)                    // only ever with a secret set
         .build();
 
-PrimosNode node = PrimosNode.builder()
+ClusterConfig cluster = ClusterConfig.builder()   // who is in the cluster
         .applicationName("orders")
         .nodeId(1)
         .peers(peers)
+        .build();
+
+PrimosNode node = PrimosNode.builder()            // and how this node runs
+        .clusterConfig(cluster)
         .clusterSecret(secret)
         .store(new FileStateStore(Paths.get("/var/lib/orders/primos")))
         .transport(transport)
@@ -40,6 +44,11 @@ PrimosNode node = PrimosNode.builder()
 
 node.start();
 ```
+
+Two objects because they answer different questions. The `ClusterConfig` describes the cluster and
+is the same shape on every node — it is also where a cluster's shape is validated, once. The node
+builder wires up this node's runtime around it: where its state lives, how it reaches the network,
+who listens.
 
 Every listener method has a default, so override only what you need: `onRoleChanged`,
 `onLeaderChanged`, `onPeerUp`, `onPeerDown`.

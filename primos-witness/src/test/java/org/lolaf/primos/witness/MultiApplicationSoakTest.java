@@ -37,6 +37,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.Role;
@@ -233,11 +234,13 @@ class MultiApplicationSoakTest {
             throw new UncheckedIOException(e);
         }
         PrimosNode node = PrimosNode.builder()
-                .applicationName(application)
-                .nodeId(nodeId)
-                .peers(peer)
-                .witness(witness)
-                .timings(FAST)
+                .clusterConfig(ClusterConfig.builder()
+                        .applicationName(application)
+                        .nodeId(nodeId)
+                        .peers(peer)
+                        .witness(witness)
+                        .timings(FAST)
+                        .build())
                 .store(new MemoryStateStore())
                 .transport(transport)
                 .clusterSecret(SECRET.getBytes(StandardCharsets.UTF_8))

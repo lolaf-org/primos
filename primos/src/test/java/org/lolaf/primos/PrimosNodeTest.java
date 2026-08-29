@@ -316,7 +316,7 @@ class PrimosNodeTest {
     @Test
     void a_node_without_a_store_is_refused_with_the_reason() {
         assertThatThrownBy(() -> PrimosNode.builder()
-                .applicationName("orders").nodeId(1)
+                .clusterConfig(cluster(1))
                 .transport(network.transportFor(1))
                 .build())
                 .isInstanceOf(IllegalStateException.class)
@@ -327,7 +327,7 @@ class PrimosNodeTest {
     @Test
     void a_node_without_a_transport_is_refused() {
         assertThatThrownBy(() -> PrimosNode.builder()
-                .applicationName("orders").nodeId(1)
+                .clusterConfig(cluster(1))
                 .store(new MemoryStateStore())
                 .build())
                 .isInstanceOf(IllegalStateException.class)
@@ -335,12 +335,21 @@ class PrimosNodeTest {
     }
 
     @Test
-    void the_builder_applies_the_configuration_rules() {
+    void a_node_without_a_cluster_configuration_is_refused() {
         assertThatThrownBy(() -> PrimosNode.builder()
-                .applicationName("a name with spaces").nodeId(1)
                 .store(new MemoryStateStore())
                 .transport(network.transportFor(1))
                 .build())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cluster configuration is required");
+    }
+
+    @Test
+    void the_configuration_rules_are_applied_where_the_configuration_is_built() {
+        // No longer this builder's job, and worth a test saying so: the cluster's shape is
+        // validated once, by ClusterConfig, rather than at whichever of two entry points was used.
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("a name with spaces").nodeId(1).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("printable ASCII");
     }
@@ -365,17 +374,23 @@ class PrimosNodeTest {
     }
 
     private org.lolaf.primos.PrimosNodeBuilder builder(int id, int... peerIds) {
+        return PrimosNode.builder()
+                .clusterConfig(cluster(id, peerIds))
+                .store(new MemoryStateStore())
+                .transport(network.transportFor(id));
+    }
+
+    private static ClusterConfig cluster(int id, int... peerIds) {
         List<Peer> peers = new ArrayList<>();
         for (int peerId : peerIds) {
             peers.add(Peer.application(peerId, "loopback", 7000 + peerId));
         }
-        return PrimosNode.builder()
+        return ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(id)
                 .peers(peers)
                 .timings(FAST)
-                .store(new MemoryStateStore())
-                .transport(network.transportFor(id));
+                .build();
     }
 
     private static int leaderCount(PrimosNode... nodes) {

@@ -187,10 +187,12 @@ class UdpClusterTest {
                     .build();
 
             PrimosNode node = PrimosNode.builder()
-                    .applicationName("udp-test")
-                    .nodeId(id)
-                    .peers(peers)
-                    .timings(FAST)
+                    .clusterConfig(ClusterConfig.builder()
+                            .applicationName("udp-test")
+                            .nodeId(id)
+                            .peers(peers)
+                            .timings(FAST)
+                            .build())
                     .store(store)
                     .transport(transport)
                     .clusterSecret(secret)
