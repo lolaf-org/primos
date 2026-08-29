@@ -143,7 +143,9 @@ configuration is strictly dominated by an alternative.
 ### The witness server
 
 `primos-witness` is a standalone process serving many clusters at once, keyed by application name.
-It ships as a `tar.gz`/`zip` with a launcher, its jars, and a commented sample configuration:
+**Operators want [its own README](primos-witness/README.md)** — installing, configuring, secret
+rotation, registration modes, what to alert on, and troubleshooting. In brief, it ships as a
+`tar.gz`/`zip` with a launcher, its jars, and a commented sample configuration:
 
 ```
 bin/primos-witness --config /etc/primos-witness

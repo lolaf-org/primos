@@ -300,6 +300,22 @@ class WitnessServerTest {
                 .hasMessageContaining("does not survive a crash");
     }
 
+    @Test
+    void a_second_witness_on_the_same_state_directory_refuses_to_start() {
+        application("orders");
+        start();
+
+        // The mechanical backstop behind the operator rule "never run two instances for one
+        // identity". Two witnesses answering for one cluster is a double vote by construction, so
+        // sharing a state directory has to fail loudly rather than quietly work.
+        assertThatThrownBy(() -> WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(loopback())
+                .build())
+                .hasMessageContaining("already using the state directory");
+    }
+
     // ------------------------------------------------------------------ the role
 
     @Test

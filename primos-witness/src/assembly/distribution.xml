@@ -48,5 +48,14 @@
                 <include>LICENSE.txt</include>
             </includes>
         </fileSet>
+        <!-- The operator manual travels with the thing it documents, so it is to hand on a box
+             that may have no browser and no route to a wiki. -->
+        <fileSet>
+            <directory>${project.basedir}</directory>
+            <outputDirectory></outputDirectory>
+            <includes>
+                <include>README.md</include>
+            </includes>
+        </fileSet>
     </fileSets>
 </assembly>
