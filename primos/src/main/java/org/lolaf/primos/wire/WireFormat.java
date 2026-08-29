@@ -43,10 +43,14 @@ package org.lolaf.primos.wire;
  */
 public final class WireFormat {
 
-    /** Makes a capture recognisable at a glance and a heuristic dissector a one-liner. */
+    /**
+     * Makes a capture recognisable at a glance and a heuristic dissector a one-liner.
+     */
     public static final byte[] MAGIC = {'P', 'R', 'M', 'S'};
 
-    /** Bumped only for an incompatible layout change. An unknown version is dropped, never guessed. */
+    /**
+     * Bumped only for an incompatible layout change. An unknown version is dropped, never guessed.
+     */
     public static final byte VERSION = 1;
 
     public static final int OFFSET_MAGIC = 0;
@@ -57,7 +61,9 @@ public final class WireFormat {
     public static final int OFFSET_TERM = 40;
     public static final int OFFSET_SENDER = 48;
 
-    /** Size of the header carried by all six messages. */
+    /**
+     * Size of the header carried by all six messages.
+     */
     public static final int HEADER_BYTES = 52;
 
     /**
@@ -67,7 +73,9 @@ public final class WireFormat {
      */
     public static final int APPLICATION_BYTES = 32;
 
-    /** Length of an HMAC-SHA256 tag. */
+    /**
+     * Length of an HMAC-SHA256 tag.
+     */
     public static final int TAG_BYTES = 32;
 
     /**
@@ -81,7 +89,9 @@ public final class WireFormat {
      */
     public static final int MAX_DATAGRAM_BYTES = 508;
 
-    /** Marks a {@code RequestVote} or its reply as a pre-vote, which mutates no persistent state. */
+    /**
+     * Marks a {@code RequestVote} or its reply as a pre-vote, which mutates no persistent state.
+     */
     public static final int FLAG_PRE_VOTE = 0x0001;
 
     private WireFormat() {

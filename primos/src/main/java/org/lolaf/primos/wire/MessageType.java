@@ -24,22 +24,34 @@ package org.lolaf.primos.wire;
  */
 public enum MessageType {
 
-    /** Asking for a vote. With {@link WireFormat#FLAG_PRE_VOTE} set, asking whether one would be given. */
+    /**
+     * Asking for a vote. With {@link WireFormat#FLAG_PRE_VOTE} set, asking whether one would be given.
+     */
     REQUEST_VOTE(0x01, 0),
 
-    /** Granting or refusing a vote. */
+    /**
+     * Granting or refusing a vote.
+     */
     REQUEST_VOTE_REPLY(0x02, 1),
 
-    /** The heartbeat. It never carries entries, because there is no log. */
+    /**
+     * The heartbeat. It never carries entries, because there is no log.
+     */
     APPEND_ENTRIES(0x03, 0),
 
-    /** Acknowledging a heartbeat, and carrying the responder's term. */
+    /**
+     * Acknowledging a heartbeat, and carrying the responder's term.
+     */
     APPEND_ENTRIES_REPLY(0x04, 1),
 
-    /** A reachability probe, carrying a sequence number. */
+    /**
+     * A reachability probe, carrying a sequence number.
+     */
     PING(0x05, 8),
 
-    /** A probe reply, echoing the sequence number so a round trip can be measured. */
+    /**
+     * A probe reply, echoing the sequence number so a round trip can be measured.
+     */
     PING_REPLY(0x06, 8),
 
     /**
@@ -76,26 +88,32 @@ public enum MessageType {
         this.messageBytes = WireFormat.HEADER_BYTES + payloadBytes;
     }
 
-    /** The byte written at {@link WireFormat#OFFSET_TYPE}. Never zero, so a zeroed buffer is not a message. */
-    public int code() {
-        return code;
-    }
-
-    /** Bytes after the header. */
-    public int payloadBytes() {
-        return payloadBytes;
-    }
-
-    /** Header plus payload, excluding any authentication tag. */
-    public int messageBytes() {
-        return messageBytes;
-    }
-
     /**
      * The type for a wire code, or null if this build does not know it. Allocation-free: the
      * lookup is a preallocated array rather than {@code values()}, which copies on every call.
      */
     public static MessageType forCode(int code) {
         return (code >= 0 && code < BY_CODE.length) ? BY_CODE[code] : null;
+    }
+
+    /**
+     * The byte written at {@link WireFormat#OFFSET_TYPE}. Never zero, so a zeroed buffer is not a message.
+     */
+    public int code() {
+        return code;
+    }
+
+    /**
+     * Bytes after the header.
+     */
+    public int payloadBytes() {
+        return payloadBytes;
+    }
+
+    /**
+     * Header plus payload, excluding any authentication tag.
+     */
+    public int messageBytes() {
+        return messageBytes;
     }
 }

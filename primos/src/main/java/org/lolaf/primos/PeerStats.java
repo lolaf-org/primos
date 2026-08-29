@@ -15,34 +15,22 @@
  */
 package org.lolaf.primos;
 
+import lombok.AllArgsConstructor;
+import lombok.Value;
+
 import java.time.Duration;
-import java.util.Objects;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+/**
+ * What this node has observed about one peer, as of the moment a snapshot was taken.
+ */
+@Value
+@AllArgsConstructor
+public class PeerStats {
 
-/** What this node has observed about one peer, as of the moment a snapshot was taken. */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class PeerStats {
+    int peerId;
+    PeerType type;
+    boolean reachable;
+    Duration lastRoundTrip;
+    Duration sinceLastHeard;
 
-    private final int peerId;
-    private final PeerType type;
-    private final boolean reachable;
-    private final Duration lastRoundTrip;
-    private final Duration sinceLastHeard;
-
-    public PeerStats(int peerId,
-                     PeerType type,
-                     boolean reachable,
-                     Duration lastRoundTrip,
-                     Duration sinceLastHeard) {
-        this.peerId = peerId;
-        this.type = Objects.requireNonNull(type, "type");
-        this.reachable = reachable;
-        this.lastRoundTrip = lastRoundTrip;
-        this.sinceLastHeard = sinceLastHeard;
-    }
 }

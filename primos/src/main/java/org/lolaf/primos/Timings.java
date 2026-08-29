@@ -15,13 +15,11 @@
  */
 package org.lolaf.primos;
 
+import lombok.Setter;
+import lombok.Value;
+
 import java.time.Duration;
 import java.util.Objects;
-
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
 
 /**
  * The intervals that govern elections and failure detection.
@@ -34,10 +32,8 @@ import lombok.ToString;
  * <p>Use {@link #lan()} for nodes on one network and {@link #wan()} when a witness sits on
  * another, where a fifty-millisecond round trip makes the LAN defaults marginal.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class Timings {
+@Value
+public class Timings {
 
     /**
      * The election timeout must be at least this many heartbeat intervals. A leader has to miss
@@ -53,11 +49,11 @@ public final class Timings {
      */
     public static final Duration MAX_PROBE_INTERVAL = Duration.ofSeconds(15);
 
-    private final Duration heartbeatInterval;
-    private final Duration electionTimeoutMin;
-    private final Duration electionTimeoutMax;
-    private final Duration probeInterval;
-    private final int failureThreshold;
+    Duration heartbeatInterval;
+    Duration electionTimeoutMin;
+    Duration electionTimeoutMax;
+    Duration probeInterval;
+    int failureThreshold;
 
     private Timings(Duration heartbeatInterval,
                     Duration electionTimeoutMin,
@@ -94,6 +90,14 @@ public final class Timings {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    private static Duration requirePositive(Duration value, String what) {
+        Objects.requireNonNull(value, what);
+        if (value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException(what + " must be positive, but was " + value);
+        }
+        return value;
     }
 
     /**
@@ -140,14 +144,6 @@ public final class Timings {
         }
     }
 
-    private static Duration requirePositive(Duration value, String what) {
-        Objects.requireNonNull(value, what);
-        if (value.isZero() || value.isNegative()) {
-            throw new IllegalArgumentException(what + " must be positive, but was " + value);
-        }
-        return value;
-    }
-
     /**
      * Builder for {@link Timings}; every value defaults to the {@link Timings#lan()} profile.
      *
@@ -158,25 +154,33 @@ public final class Timings {
      */
     public static final class Builder {
 
-        /** How often a leader asserts itself. Must stay well below the election timeout. */
+        /**
+         * How often a leader asserts itself. Must stay well below the election timeout.
+         */
         @Setter
         private Duration heartbeatInterval = Duration.ofMillis(50);
 
         private Duration electionTimeoutMin = Duration.ofMillis(300);
         private Duration electionTimeoutMax = Duration.ofMillis(600);
 
-        /** How often every node probes every peer. Independent of the heartbeat, and much slower. */
+        /**
+         * How often every node probes every peer. Independent of the heartbeat, and much slower.
+         */
         @Setter
         private Duration probeInterval = Duration.ofSeconds(1);
 
-        /** How many consecutive probes a peer may miss before it is reported down. */
+        /**
+         * How many consecutive probes a peer may miss before it is reported down.
+         */
         @Setter
         private int failureThreshold = 3;
 
         private Builder() {
         }
 
-        /** The inclusive range each election timeout is drawn from, afresh on every reset. */
+        /**
+         * The inclusive range each election timeout is drawn from, afresh on every reset.
+         */
         public Builder electionTimeout(Duration min, Duration max) {
             this.electionTimeoutMin = min;
             this.electionTimeoutMax = max;

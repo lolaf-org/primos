@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos.store;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -26,9 +29,6 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 import java.util.zip.CRC32;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The durable store: a 24-byte record, fsync'd and replaced atomically.
@@ -58,14 +58,13 @@ import org.slf4j.LoggerFactory;
  */
 public final class FileStateStore implements StateStore {
 
-    private static final Logger log = LoggerFactory.getLogger(FileStateStore.class);
-
     static final byte[] MAGIC = {'P', 'R', 'M', 'S'};
     static final byte VERSION = 1;
-
-    /** magic(4) version(1) reserved(3) term(8) votedFor(4) crc(4) */
+    /**
+     * magic(4) version(1) reserved(3) term(8) votedFor(4) crc(4)
+     */
     static final int RECORD_BYTES = 24;
-
+    private static final Logger log = LoggerFactory.getLogger(FileStateStore.class);
     private static final int OFFSET_TERM = 8;
     private static final int OFFSET_VOTED_FOR = 16;
     private static final int OFFSET_CRC = 20;
@@ -236,7 +235,9 @@ public final class FileStateStore implements StateStore {
         return new PersistentState(view.getLong(OFFSET_TERM), view.getInt(OFFSET_VOTED_FOR));
     }
 
-    /** Over everything up to, but not including, the checksum itself. */
+    /**
+     * Over everything up to, but not including, the checksum itself.
+     */
     private int checksumOf(byte[] bytes) {
         crc.reset();
         crc.update(bytes, 0, OFFSET_CRC);

@@ -15,19 +15,18 @@
  */
 package org.lolaf.primos;
 
-import java.util.Objects;
-import java.util.OptionalInt;
-import java.util.Random;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
-
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.Random;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A node with a thread: the election algorithm, run for real.
@@ -40,9 +39,8 @@ import org.slf4j.LoggerFactory;
  * snapshot whenever anything changes and after every turn of the loop. Application threads read a
  * volatile reference; they never touch the algorithm's state.
  */
+@Slf4j
 final class RunningPrimosNode implements PrimosNode, PrimosListener {
-
-    private static final Logger log = LoggerFactory.getLogger(RunningPrimosNode.class);
 
     private final ClusterConfig config;
     private final StateStore store;

@@ -26,12 +26,16 @@ public final class MemoryStateStore implements StateStore {
 
     private PersistentState state;
 
-    /** A store for a node that has never run. */
+    /**
+     * A store for a node that has never run.
+     */
     public MemoryStateStore() {
         this(PersistentState.fresh());
     }
 
-    /** A store preloaded with state, for tests that begin partway through a cluster's life. */
+    /**
+     * A store preloaded with state, for tests that begin partway through a cluster's life.
+     */
     public MemoryStateStore(PersistentState state) {
         this.state = state;
     }

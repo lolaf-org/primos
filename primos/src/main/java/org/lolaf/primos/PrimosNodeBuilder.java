@@ -15,19 +15,18 @@
  */
 package org.lolaf.primos;
 
+import lombok.Setter;
+import org.lolaf.primos.store.StateStore;
+import org.lolaf.primos.time.MonotonicClock;
+import org.lolaf.primos.transport.Transport;
+import org.lolaf.primos.wire.MessageAuthenticator;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.Executor;
-
-import lombok.Setter;
-
-import org.lolaf.primos.store.StateStore;
-import org.lolaf.primos.time.MonotonicClock;
-import org.lolaf.primos.transport.Transport;
-import org.lolaf.primos.wire.MessageAuthenticator;
 
 /**
  * Builds a {@link PrimosNode}.
@@ -69,11 +68,15 @@ public final class PrimosNodeBuilder {
     @Setter
     private ClusterConfig clusterConfig;
 
-    /** Where the term and vote are kept. Required. */
+    /**
+     * Where the term and vote are kept. Required.
+     */
     @Setter
     private StateStore store;
 
-    /** How this node reaches its peers. Required. */
+    /**
+     * How this node reaches its peers. Required.
+     */
     @Setter
     private Transport transport;
 
@@ -92,28 +95,23 @@ public final class PrimosNodeBuilder {
     @Setter
     private Duration slowCallbackThreshold;
 
-    /** How long {@link PrimosNode#stop()} waits for the node thread. Defaults to five seconds. */
+    /**
+     * How long {@link PrimosNode#stop()} waits for the node thread. Defaults to five seconds.
+     */
     @Setter
     private Duration stopTimeout = Duration.ofSeconds(5);
 
-    /** The clock. Replaced only by tests; production always uses the system's monotonic clock. */
+    /**
+     * The clock. Replaced only by tests; production always uses the system's monotonic clock.
+     */
     @Setter
     private MonotonicClock clock = MonotonicClock.SYSTEM;
 
-    /** The source of election timeout randomness. Seed it to make a test reproducible. */
+    /**
+     * The source of election timeout randomness. Seed it to make a test reproducible.
+     */
     @Setter
     private Random random = new Random();
-
-    private byte[] secret;
-
-    PrimosNodeBuilder() {
-    }
-
-    /** Registered before the node starts, so it cannot miss the first transition. */
-    public PrimosNodeBuilder listener(PrimosListener listener) {
-        listeners.add(Objects.requireNonNull(listener, "listener"));
-        return this;
-    }
 
     /**
      * The shared cluster secret. With one set, every datagram carries an HMAC-SHA256 tag and
@@ -122,10 +120,19 @@ public final class PrimosNodeBuilder {
      * <p>Strongly recommended anywhere that is not a trusted private network: without it, a forged
      * reply is a route to a leader that no majority elected, not merely a nuisance.
      *
-     * <p>Copied on the way in, so the caller's array remains theirs to clear.
+     * <p>Copied in {@link #build()}, so the caller's array remains theirs to clear.
      */
-    public PrimosNodeBuilder clusterSecret(byte[] secret) {
-        this.secret = secret == null ? null : secret.clone();
+    @Setter
+    private byte[] clusterSecret;
+
+    PrimosNodeBuilder() {
+    }
+
+    /**
+     * Registered before the node starts, so it cannot miss the first transition.
+     */
+    public PrimosNodeBuilder listener(PrimosListener listener) {
+        listeners.add(Objects.requireNonNull(listener, "listener"));
         return this;
     }
 
@@ -159,9 +166,13 @@ public final class PrimosNodeBuilder {
                 ? slowCallbackThreshold
                 : clusterConfig.timings().heartbeatInterval().dividedBy(2);
 
-        MessageAuthenticator authenticator = secret == null
+        MessageAuthenticator authenticator = clusterSecret == null
                 ? MessageAuthenticator.disabled()
-                : MessageAuthenticator.hmacSha256(secret);
+                // Copied at the boundary rather than aliasing the caller's array, so a caller
+                // that clears its own secret after building cannot blank this node's key.
+                // SecretKeySpec copies too, but that is the JCE's business; the promise on the
+                // setter is ours.
+                : MessageAuthenticator.hmacSha256(clusterSecret.clone());
 
         RunningPrimosNode node = new RunningPrimosNode(clusterConfig, store, transport, clock,
                 random, authenticator, listenerExecutor, slowCallback.toNanos(),

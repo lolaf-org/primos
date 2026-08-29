@@ -26,24 +26,38 @@ package org.lolaf.primos;
  */
 public enum DropReason {
 
-    /** Too short to contain a header, or longer than a single unfragmented datagram. */
+    /**
+     * Too short to contain a header, or longer than a single unfragmented datagram.
+     */
     MALFORMED,
 
-    /** Authentication is enabled and the HMAC tag did not verify over the datagram. */
+    /**
+     * Authentication is enabled and the HMAC tag did not verify over the datagram.
+     */
     BAD_TAG,
 
-    /** The leading magic bytes were not primos'. Almost always unrelated traffic on the port. */
+    /**
+     * The leading magic bytes were not primos'. Almost always unrelated traffic on the port.
+     */
     BAD_MAGIC,
 
-    /** A protocol version this build does not implement. Never interpreted, only counted. */
+    /**
+     * A protocol version this build does not implement. Never interpreted, only counted.
+     */
     UNKNOWN_VERSION,
 
-    /** Addressed to a different clustered application. Usually a neighbouring cluster or a typo. */
+    /**
+     * Addressed to a different clustered application. Usually a neighbouring cluster or a typo.
+     */
     WRONG_APPLICATION,
 
-    /** A message type this build does not know, or the wrong length for the type claimed. */
+    /**
+     * A message type this build does not know, or the wrong length for the type claimed.
+     */
     UNKNOWN_TYPE,
 
-    /** The sender id is not a configured peer of this cluster. */
+    /**
+     * The sender id is not a configured peer of this cluster.
+     */
     UNKNOWN_PEER
 }

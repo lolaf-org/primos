@@ -80,7 +80,9 @@ public interface Transport extends AutoCloseable {
     default void confirmSender(int senderId) {
     }
 
-    /** Releases the socket or its equivalent. Idempotent. */
+    /**
+     * Releases the socket or its equivalent. Idempotent.
+     */
     @Override
     void close();
 }

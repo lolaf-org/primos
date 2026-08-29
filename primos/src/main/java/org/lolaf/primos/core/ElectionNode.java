@@ -15,39 +15,17 @@
  */
 package org.lolaf.primos.core;
 
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.LinkedHashMap;
-import java.util.OptionalInt;
-import java.util.Random;
-import java.util.Set;
-
-import org.lolaf.primos.ClusterConfig;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PeerStats;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.PrimosStats;
-import org.lolaf.primos.Quorum;
-import org.lolaf.primos.Role;
-import org.lolaf.primos.RoleAndTerm;
-import org.lolaf.primos.Timings;
+import org.lolaf.primos.*;
 import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.Transport;
-import org.lolaf.primos.wire.DropCounters;
-import org.lolaf.primos.wire.MessageAuthenticator;
-import org.lolaf.primos.wire.MessageDecoder;
-import org.lolaf.primos.wire.MessageEncoder;
-import org.lolaf.primos.wire.MessageHandler;
-import org.lolaf.primos.wire.WireFormat;
+import org.lolaf.primos.wire.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.ByteBuffer;
+import java.util.*;
 
 /**
  * The Raft role state machine: terms, votes, election timeouts and heartbeats.
@@ -192,7 +170,9 @@ public final class ElectionNode implements MessageHandler {
         return true;
     }
 
-    /** Reads persisted state back and arms the first election timeout. */
+    /**
+     * Reads persisted state back and arms the first election timeout.
+     */
     public void start() {
         if (started) {
             throw new IllegalStateException("node " + config.nodeId() + " is already started");
@@ -281,12 +261,16 @@ public final class ElectionNode implements MessageHandler {
                 config.applicationName(), config.nodeId(), previous, currentTerm, cause);
     }
 
-    /** Whether this node has failed permanently. */
+    /**
+     * Whether this node has failed permanently.
+     */
     public boolean isFailed() {
         return role == Role.FAILED;
     }
 
-    /** What killed the node, if anything has. */
+    /**
+     * What killed the node, if anything has.
+     */
     public Throwable failureCause() {
         return failureCause;
     }
@@ -322,12 +306,16 @@ public final class ElectionNode implements MessageHandler {
         return votedFor;
     }
 
-    /** Which node is currently believed to be leader, if any. */
+    /**
+     * Which node is currently believed to be leader, if any.
+     */
     public OptionalInt leaderId() {
         return leaderId < 0 ? OptionalInt.empty() : OptionalInt.of(leaderId);
     }
 
-    /** Role and term read together, so the fencing token cannot be separated from the role. */
+    /**
+     * Role and term read together, so the fencing token cannot be separated from the role.
+     */
     public RoleAndTerm roleAndTerm() {
         return new RoleAndTerm(role, currentTerm);
     }
@@ -340,7 +328,9 @@ public final class ElectionNode implements MessageHandler {
         return drops;
     }
 
-    /** How many pre-vote rounds this node has run, whether or not they led to an election. */
+    /**
+     * How many pre-vote rounds this node has run, whether or not they led to an election.
+     */
     public long preVotesStarted() {
         return preVotesStarted;
     }
@@ -367,7 +357,9 @@ public final class ElectionNode implements MessageHandler {
         listener.onRoleChanged(previous, next, currentTerm);
     }
 
-    /** The single place the believed leader changes. */
+    /**
+     * The single place the believed leader changes.
+     */
     private void setLeader(int next) {
         if (leaderId == next) {
             return;
@@ -376,7 +368,9 @@ public final class ElectionNode implements MessageHandler {
         listener.onLeaderChanged(leaderId(), currentTerm);
     }
 
-    /** An immutable snapshot of this node's counters, for {@link org.lolaf.primos.PrimosNode#stats()}. */
+    /**
+     * An immutable snapshot of this node's counters, for {@link org.lolaf.primos.PrimosNode#stats()}.
+     */
     public PrimosStats stats() {
         return new PrimosStats(role, currentTerm,
                 java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
@@ -694,7 +688,7 @@ public final class ElectionNode implements MessageHandler {
         }
         handoversAccepted++;
         log.info("cluster '{}': node {} is campaigning immediately, handed over by node {} in"
-                        + " term {}", config.applicationName(), config.nodeId(), senderId, term);
+                + " term {}", config.applicationName(), config.nodeId(), senderId, term);
         startElection();
     }
 
@@ -776,7 +770,9 @@ public final class ElectionNode implements MessageHandler {
         return peers.size();
     }
 
-    /** How many peers this node has seen announce a clean departure. */
+    /**
+     * How many peers this node has seen announce a clean departure.
+     */
     public long departuresObserved() {
         return departuresObserved;
     }
@@ -858,12 +854,16 @@ public final class ElectionNode implements MessageHandler {
         return best;
     }
 
-    /** How many times this node has handed leadership over on the way out. */
+    /**
+     * How many times this node has handed leadership over on the way out.
+     */
     public long handoversSent() {
         return handoversSent;
     }
 
-    /** How many times this node has campaigned because a leader handed over to it. */
+    /**
+     * How many times this node has campaigned because a leader handed over to it.
+     */
     public long handoversAccepted() {
         return handoversAccepted;
     }
@@ -938,7 +938,9 @@ public final class ElectionNode implements MessageHandler {
         listener.onPeerDown(peer);
     }
 
-    /** What this node has observed about each peer, for {@link org.lolaf.primos.PrimosStats}. */
+    /**
+     * What this node has observed about each peer, for {@link org.lolaf.primos.PrimosStats}.
+     */
     public Map<Integer, PeerStats> peerStats() {
         long now = clock.nanoTime();
         Map<Integer, PeerStats> snapshot = new LinkedHashMap<>();
@@ -953,7 +955,9 @@ public final class ElectionNode implements MessageHandler {
         return snapshot;
     }
 
-    /** Whether a peer is currently answering probes. */
+    /**
+     * Whether a peer is currently answering probes.
+     */
     public boolean isReachable(int peerId) {
         Probe probe = probes.get(peerId);
         return probe != null && probe.reachable;
@@ -1013,7 +1017,9 @@ public final class ElectionNode implements MessageHandler {
         resetElectionTimer();
     }
 
-    /** How many times this node has stood itself down for lack of quorum contact. */
+    /**
+     * How many times this node has stood itself down for lack of quorum contact.
+     */
     public long leadershipsRelinquished() {
         return leadershipsRelinquished;
     }
@@ -1057,12 +1063,16 @@ public final class ElectionNode implements MessageHandler {
         return "node " + config.nodeId() + " " + role + "/" + currentTerm;
     }
 
-    /** Peers this node exchanges messages with, the witness included. */
+    /**
+     * Peers this node exchanges messages with, the witness included.
+     */
     List<Peer> peers() {
         return new ArrayList<>(peers);
     }
 
-    /** What this node knows about reaching one peer. */
+    /**
+     * What this node knows about reaching one peer.
+     */
     private static final class Probe {
 
         private final Peer peer;

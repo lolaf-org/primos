@@ -15,20 +15,13 @@
  */
 package org.lolaf.primos;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-
 import lombok.AccessLevel;
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.ToString;
+import lombok.Value;
+
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 /**
  * The shape of one cluster: who is in it, which member this node is, and how fast it ticks.
@@ -38,10 +31,8 @@ import lombok.ToString;
  * cluster of five with two down still needs three votes. Reading an unreachable peer as "the
  * cluster shrank" is how a split brain gets talked into existence.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class ClusterConfig {
+@Value
+public class ClusterConfig {
 
     /**
      * The application name travels in a fixed 32-byte field on every datagram, so it is bounded
@@ -50,19 +41,19 @@ public final class ClusterConfig {
      */
     public static final int APPLICATION_NAME_MAX_BYTES = 32;
 
-    private final String applicationName;
-    private final int nodeId;
-    private final String nodeName;
-    private final PeerType nodeType;
-    private final List<Peer> peers;
+    String applicationName;
+    int nodeId;
+    String nodeName;
+    PeerType nodeType;
+    List<Peer> peers;
 
     @Getter(AccessLevel.NONE)
-    private final Peer witness;
+    Peer witness;
 
     @Getter(AccessLevel.NONE)
-    private final boolean learnedMembership;
+    boolean learnedMembership;
 
-    private final Timings timings;
+    Timings timings;
 
     private ClusterConfig(Builder builder) {
         this.applicationName = requireApplicationName(builder.applicationName);
@@ -82,7 +73,32 @@ public final class ClusterConfig {
         return new Builder();
     }
 
-    /** The witness, if this cluster has one. Most clusters do not. */
+    private static String requireApplicationName(String name) {
+        Objects.requireNonNull(name, "applicationName");
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("applicationName must not be blank");
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                throw new IllegalArgumentException(
+                        "applicationName must be printable ASCII without spaces, but '" + trimmed
+                                + "' contains a character at index " + i + " that is not");
+            }
+        }
+        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
+        if (bytes > APPLICATION_NAME_MAX_BYTES) {
+            throw new IllegalArgumentException(
+                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
+                            + " bytes, but '" + trimmed + "' is " + bytes);
+        }
+        return trimmed;
+    }
+
+    /**
+     * The witness, if this cluster has one. Most clusters do not.
+     */
     public Optional<Peer> witness() {
         return Optional.ofNullable(witness);
     }
@@ -94,7 +110,9 @@ public final class ClusterConfig {
         return witness != null || nodeType.isWitness();
     }
 
-    /** Whether this node is itself the witness, and so must never campaign. */
+    /**
+     * Whether this node is itself the witness, and so must never campaign.
+     */
     public boolean isWitness() {
         return nodeType.isWitness();
     }
@@ -130,7 +148,9 @@ public final class ClusterConfig {
         return peers.size() + (nodeType.isWitness() ? 0 : 1);
     }
 
-    /** How many voters the cluster has: the application nodes plus the witness, if any. */
+    /**
+     * How many voters the cluster has: the application nodes plus the witness, if any.
+     */
     public int voterCount() {
         return applicationNodeCount() + (hasWitness() ? 1 : 0);
     }
@@ -181,52 +201,32 @@ public final class ClusterConfig {
         }
     }
 
-    private static String requireApplicationName(String name) {
-        Objects.requireNonNull(name, "applicationName");
-        String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("applicationName must not be blank");
-        }
-        for (int i = 0; i < trimmed.length(); i++) {
-            char c = trimmed.charAt(i);
-            if (c < 0x21 || c > 0x7E) {
-                throw new IllegalArgumentException(
-                        "applicationName must be printable ASCII without spaces, but '" + trimmed
-                                + "' contains a character at index " + i + " that is not");
-            }
-        }
-        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
-        if (bytes > APPLICATION_NAME_MAX_BYTES) {
-            throw new IllegalArgumentException(
-                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
-                            + " bytes, but '" + trimmed + "' is " + bytes);
-        }
-        return trimmed;
-    }
-
-    /** Builder for {@link ClusterConfig}. Validation happens in {@link #build()}. */
+    /**
+     * Builder for {@link ClusterConfig}. Validation happens in {@link #build()}.
+     */
     public static final class Builder {
 
-        /** Which clustered application this is. Every node of one cluster must agree on it. */
+        private final List<Peer> peers = new ArrayList<>();
+        /**
+         * Which clustered application this is. Every node of one cluster must agree on it.
+         */
         @Setter
         private String applicationName;
-
-        /** This node's id, unique within the application. */
+        /**
+         * This node's id, unique within the application.
+         */
         @Setter
         private int nodeId;
-
-        /** A human-readable name for this node, used in logs. Defaults to {@code node-<id>}. */
+        /**
+         * A human-readable name for this node, used in logs. Defaults to {@code node-<id>}.
+         */
         @Setter
         private String nodeName;
-
         /**
          * Set through {@link #asWitness()} rather than directly, so that declaring a witness is one
          * named decision rather than a type a caller has to know to pass.
          */
         private PeerType nodeType = PeerType.APPLICATION;
-
-        private final List<Peer> peers = new ArrayList<>();
-
         /**
          * The witness, at most one. Two would give a two-node pair four voters needing three,
          * which is strictly worse than one.
@@ -234,10 +234,14 @@ public final class ClusterConfig {
         @Setter
         private Peer witness;
 
-        /** Set through {@link #learnedMembership()}, which documents what it costs. */
+        /**
+         * Set through {@link #learnedMembership()}, which documents what it costs.
+         */
         private boolean learnedMembership;
 
-        /** Election, heartbeat and probe intervals. */
+        /**
+         * Election, heartbeat and probe intervals.
+         */
         @Setter
         private Timings timings = Timings.lan();
 
@@ -253,12 +257,16 @@ public final class ClusterConfig {
             return this;
         }
 
-        /** The other application instances. This node must not be among them. */
+        /**
+         * The other application instances. This node must not be among them.
+         */
         public Builder peers(Peer... peers) {
             return peers(java.util.Arrays.asList(peers));
         }
 
-        /** The other application instances. This node must not be among them. */
+        /**
+         * The other application instances. This node must not be among them.
+         */
         public Builder peers(List<Peer> peers) {
             this.peers.clear();
             this.peers.addAll(Objects.requireNonNull(peers, "peers"));

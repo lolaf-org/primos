@@ -15,14 +15,12 @@
  */
 package org.lolaf.primos;
 
+import lombok.Value;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
 
 /**
  * The arithmetic of a cluster's voter set, and the warnings that arithmetic deserves.
@@ -38,10 +36,8 @@ import lombok.ToString;
  * start — refusing would break a legitimate transient, such as keeping a witness while scaling a
  * pair up to three nodes.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class Quorum {
+@Value
+public class Quorum {
 
     /**
      * Above this many voters, primos says so.
@@ -56,15 +52,14 @@ public final class Quorum {
      */
     public static final int MAX_RECOMMENDED_VOTERS = 7;
 
-    private final String applicationName;
-    private final int applicationNodes;
-    private final boolean witness;
-    private final int voters;
-    private final int required;
-    private final int faultTolerance;
-
+    String applicationName;
+    int applicationNodes;
+    boolean witness;
+    int voters;
+    int required;
+    int faultTolerance;
     @lombok.Getter(lombok.AccessLevel.NONE)
-    private final boolean known;
+    boolean known;
 
     private Quorum(String applicationName) {
         this.applicationName = Objects.requireNonNull(applicationName, "applicationName");
@@ -80,8 +75,7 @@ public final class Quorum {
         this.applicationName = Objects.requireNonNull(applicationName, "applicationName");
         this.known = true;
         if (applicationNodes < 1) {
-            throw new IllegalArgumentException(
-                    "a cluster has at least one application node, but was " + applicationNodes);
+            throw new IllegalArgumentException("a cluster has at least one application node, but was " + applicationNodes);
         }
         this.applicationNodes = applicationNodes;
         this.witness = witness;
@@ -90,7 +84,9 @@ public final class Quorum {
         this.faultTolerance = voters - required;
     }
 
-    /** The arithmetic implied by a configuration. */
+    /**
+     * The arithmetic implied by a configuration.
+     */
     public static Quorum of(ClusterConfig config) {
         Objects.requireNonNull(config, "config");
         if (config.isLearnedMembership()) {
@@ -113,6 +109,10 @@ public final class Quorum {
         return new Quorum(applicationName);
     }
 
+    private static String failures(int count) {
+        return count + (count == 1 ? " failure" : " failures");
+    }
+
     /**
      * Whether a given number of votes is a majority of the configured voters. Always false when
      * the voter set is not known; see {@link #unknown}.
@@ -121,12 +121,16 @@ public final class Quorum {
         return known && votes >= required;
     }
 
-    /** Whether the voter set is configured, and so whether any of these numbers mean anything. */
+    /**
+     * Whether the voter set is configured, and so whether any of these numbers mean anything.
+     */
     public boolean isKnown() {
         return known;
     }
 
-    /** The line every node logs at startup. */
+    /**
+     * The line every node logs at startup.
+     */
     public String summary() {
         if (!known) {
             return "cluster '" + applicationName + "': served by a witness whose voter set is"
@@ -180,9 +184,5 @@ public final class Quorum {
     private String composition() {
         String nodes = applicationNodes + (applicationNodes == 1 ? " node" : " nodes");
         return witness ? nodes + " + witness" : nodes;
-    }
-
-    private static String failures(int count) {
-        return count + (count == 1 ? " failure" : " failures");
     }
 }

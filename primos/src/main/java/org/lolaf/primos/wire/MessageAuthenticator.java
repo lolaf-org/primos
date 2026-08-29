@@ -15,12 +15,11 @@
  */
 package org.lolaf.primos.wire;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Objects;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Appends and verifies the HMAC-SHA256 tag that proves a datagram came from a cluster member.
@@ -121,17 +120,40 @@ public final class MessageAuthenticator {
         }
     }
 
-    /** Whether a secret is being rotated out and still accepted. */
+    /**
+     * Hashes {@code [0, length)} of the buffer without allocating: the range is selected by moving
+     * the buffer's own position and limit rather than by taking a duplicate or a copy.
+     */
+    private static void computeInto(Mac mac, ByteBuffer datagram, int length, byte[] out) {
+        int savedLimit = datagram.limit();
+        datagram.limit(length);
+        datagram.position(0);
+        mac.update(datagram);
+        datagram.limit(savedLimit);
+        try {
+            mac.doFinal(out, 0);
+        } catch (javax.crypto.ShortBufferException e) {
+            throw new IllegalStateException("a 32-byte buffer always fits an HMAC-SHA256 tag", e);
+        }
+    }
+
+    /**
+     * Whether a secret is being rotated out and still accepted.
+     */
     public boolean hasPreviousSecret() {
         return previousMac != null;
     }
 
-    /** Whether datagrams carry a tag. */
+    /**
+     * Whether datagrams carry a tag.
+     */
     public boolean isEnabled() {
         return mac != null;
     }
 
-    /** Bytes this adds to every datagram: 32 when enabled, 0 when not. */
+    /**
+     * Bytes this adds to every datagram: 32 when enabled, 0 when not.
+     */
     public int tagBytes() {
         return mac == null ? 0 : WireFormat.TAG_BYTES;
     }
@@ -183,22 +205,5 @@ public final class MessageAuthenticator {
         // how far the second got.
         computeInto(previousMac, datagram, bodyEnd, computed);
         return MessageDigest.isEqual(computed, received);
-    }
-
-    /**
-     * Hashes {@code [0, length)} of the buffer without allocating: the range is selected by moving
-     * the buffer's own position and limit rather than by taking a duplicate or a copy.
-     */
-    private static void computeInto(Mac mac, ByteBuffer datagram, int length, byte[] out) {
-        int savedLimit = datagram.limit();
-        datagram.limit(length);
-        datagram.position(0);
-        mac.update(datagram);
-        datagram.limit(savedLimit);
-        try {
-            mac.doFinal(out, 0);
-        } catch (javax.crypto.ShortBufferException e) {
-            throw new IllegalStateException("a 32-byte buffer always fits an HMAC-SHA256 tag", e);
-        }
     }
 }

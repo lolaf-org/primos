@@ -31,7 +31,9 @@ package org.lolaf.primos.time;
 @FunctionalInterface
 public interface MonotonicClock {
 
-    /** The real clock, backed by {@link System#nanoTime()}. */
+    /**
+     * The real clock, backed by {@link System#nanoTime()}.
+     */
     MonotonicClock SYSTEM = System::nanoTime;
 
     /**

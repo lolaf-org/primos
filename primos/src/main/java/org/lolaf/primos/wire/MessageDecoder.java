@@ -15,14 +15,14 @@
  */
 package org.lolaf.primos.wire;
 
+import org.lolaf.primos.DropReason;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.function.IntPredicate;
-
-import org.lolaf.primos.DropReason;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The receive pipeline: seven ordered checks, then a dispatch.
@@ -75,11 +75,75 @@ public final class MessageDecoder {
     }
 
     /**
+     * The application name a datagram claims, read <em>before</em> anything has been verified.
+     *
+     * <p>Every other reader in primos verifies the tag first, unconditionally, because "verify
+     * before parse" is only useful as a rule with no exceptions. <strong>The witness server cannot
+     * follow it.</strong> Its secret is per-application, so it has to know which application a
+     * datagram claims to be for before it knows which key to check it with — and that claim is in
+     * the datagram's own unverified bytes.
+     *
+     * <p>That is sound, and the reasons are worth stating rather than rediscovering. What is read
+     * here is a fixed-offset, fixed-width field: no allocation sized by attacker input, no length
+     * arithmetic, nothing that can be walked off the end. And the claim buys nothing on its own —
+     * an attacker may name any application they like and still cannot produce a tag that
+     * application's key accepts. The real decoder then re-checks the name after verifying, so
+     * routing and acceptance can never disagree.
+     *
+     * @return the claimed name, or null if the datagram is too short to carry one or the field
+     * does not hold a name that could ever have been sent
+     */
+    public static String peekApplicationName(ByteBuffer datagram) {
+        if (datagram.limit() < WireFormat.HEADER_BYTES) {
+            return null;
+        }
+        String name = readApplicationName(datagram);
+        if (name.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                // Not a name any encoder would have produced, so there is nothing to route it to.
+                // Returning it would put arbitrary bytes into a log line and a map lookup.
+                return null;
+            }
+        }
+        return name;
+    }
+
+    private static boolean hasMagic(ByteBuffer datagram) {
+        for (int i = 0; i < WireFormat.MAGIC.length; i++) {
+            if (datagram.get(WireFormat.OFFSET_MAGIC + i) != WireFormat.MAGIC[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The name a foreign datagram claims, for the log line. Naming it is the entire reason the
+     * field is stored readable rather than hashed: "expected orders, got ordres" diagnoses a typo
+     * instantly, where a hash mismatch would not.
+     */
+    private static String readApplicationName(ByteBuffer datagram) {
+        byte[] raw = new byte[WireFormat.APPLICATION_BYTES];
+        int length = 0;
+        for (int i = 0; i < raw.length; i++) {
+            raw[i] = datagram.get(WireFormat.OFFSET_APPLICATION + i);
+            if (raw[i] != 0) {
+                length = i + 1;
+            }
+        }
+        return new String(raw, 0, length, StandardCharsets.UTF_8);
+    }
+
+    /**
      * Runs the pipeline over one datagram, positioned at zero and limited to its length.
      *
      * @return whether the message was dispatched. A false return has already been counted, and
-     *         logged at debug; the counter is the signal, because logging every dropped datagram at
-     *         a visible level would turn a flood into a second denial of service.
+     * logged at debug; the counter is the signal, because logging every dropped datagram at
+     * a visible level would turn a flood into a second denial of service.
      */
     public boolean decode(ByteBuffer datagram, MessageHandler handler) {
         int length = datagram.limit();
@@ -119,44 +183,6 @@ public final class MessageDecoder {
         lastSenderId = senderId;
         dispatch(datagram, type, senderId, handler);
         return true;
-    }
-
-    /**
-     * The application name a datagram claims, read <em>before</em> anything has been verified.
-     *
-     * <p>Every other reader in primos verifies the tag first, unconditionally, because "verify
-     * before parse" is only useful as a rule with no exceptions. <strong>The witness server cannot
-     * follow it.</strong> Its secret is per-application, so it has to know which application a
-     * datagram claims to be for before it knows which key to check it with — and that claim is in
-     * the datagram's own unverified bytes.
-     *
-     * <p>That is sound, and the reasons are worth stating rather than rediscovering. What is read
-     * here is a fixed-offset, fixed-width field: no allocation sized by attacker input, no length
-     * arithmetic, nothing that can be walked off the end. And the claim buys nothing on its own —
-     * an attacker may name any application they like and still cannot produce a tag that
-     * application's key accepts. The real decoder then re-checks the name after verifying, so
-     * routing and acceptance can never disagree.
-     *
-     * @return the claimed name, or null if the datagram is too short to carry one or the field
-     *         does not hold a name that could ever have been sent
-     */
-    public static String peekApplicationName(ByteBuffer datagram) {
-        if (datagram.limit() < WireFormat.HEADER_BYTES) {
-            return null;
-        }
-        String name = readApplicationName(datagram);
-        if (name.isEmpty()) {
-            return null;
-        }
-        for (int i = 0; i < name.length(); i++) {
-            char c = name.charAt(i);
-            if (c < 0x21 || c > 0x7E) {
-                // Not a name any encoder would have produced, so there is nothing to route it to.
-                // Returning it would put arbitrary bytes into a log line and a map lookup.
-                return null;
-            }
-        }
-        return name;
     }
 
     /**
@@ -207,15 +233,6 @@ public final class MessageDecoder {
         }
     }
 
-    private static boolean hasMagic(ByteBuffer datagram) {
-        for (int i = 0; i < WireFormat.MAGIC.length; i++) {
-            if (datagram.get(WireFormat.OFFSET_MAGIC + i) != WireFormat.MAGIC[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private boolean hasExpectedApplication(ByteBuffer datagram) {
         for (int i = 0; i < WireFormat.APPLICATION_BYTES; i++) {
             if (datagram.get(WireFormat.OFFSET_APPLICATION + i) != expectedApplication[i]) {
@@ -223,23 +240,6 @@ public final class MessageDecoder {
             }
         }
         return true;
-    }
-
-    /**
-     * The name a foreign datagram claims, for the log line. Naming it is the entire reason the
-     * field is stored readable rather than hashed: "expected orders, got ordres" diagnoses a typo
-     * instantly, where a hash mismatch would not.
-     */
-    private static String readApplicationName(ByteBuffer datagram) {
-        byte[] raw = new byte[WireFormat.APPLICATION_BYTES];
-        int length = 0;
-        for (int i = 0; i < raw.length; i++) {
-            raw[i] = datagram.get(WireFormat.OFFSET_APPLICATION + i);
-            if (raw[i] != 0) {
-                length = i + 1;
-            }
-        }
-        return new String(raw, 0, length, StandardCharsets.UTF_8);
     }
 
     private boolean drop(DropReason reason, String detail, Object argument) {

@@ -15,12 +15,10 @@
  */
 package org.lolaf.primos;
 
+import lombok.Value;
+
 import java.net.InetSocketAddress;
 import java.util.Objects;
-
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
 
 /**
  * One member of the cluster other than this node: its identity, its kind, and where to reach it.
@@ -32,12 +30,12 @@ import lombok.ToString;
  * <p>The host is kept unresolved here on purpose: DNS resolution can block for seconds and must
  * never happen on the node thread.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class Peer {
+@Value
+public class Peer {
 
-    /** Lowest permitted node id. */
+    /**
+     * Lowest permitted node id.
+     */
     public static final int MIN_ID = 0;
 
     /**
@@ -55,11 +53,11 @@ public final class Peer {
      */
     public static final int MAX_ID = 1_023;
 
-    private final int id;
-    private final String name;
-    private final PeerType type;
-    private final String host;
-    private final int port;
+    int id;
+    String name;
+    PeerType type;
+    String host;
+    int port;
 
     private Peer(int id, String name, PeerType type, String host, int port) {
         this.id = requireValidId(id, "peer id");
@@ -69,40 +67,37 @@ public final class Peer {
         this.name = (name == null || name.trim().isEmpty()) ? defaultName(id, this.type) : name.trim();
     }
 
-    /** An application peer with a generated name. */
+    /**
+     * An application peer with a generated name.
+     */
     public static Peer application(int id, String host, int port) {
         return new Peer(id, null, PeerType.APPLICATION, host, port);
     }
 
-    /** An application peer with a human-readable name used in logs. */
+    /**
+     * An application peer with a human-readable name used in logs.
+     */
     public static Peer application(int id, String name, String host, int port) {
         return new Peer(id, name, PeerType.APPLICATION, host, port);
     }
 
-    /** A witness peer with a generated name. */
+    /**
+     * A witness peer with a generated name.
+     */
     public static Peer witness(int id, String host, int port) {
         return new Peer(id, null, PeerType.WITNESS, host, port);
     }
 
-    /** A witness peer with a human-readable name used in logs. */
+    /**
+     * A witness peer with a human-readable name used in logs.
+     */
     public static Peer witness(int id, String name, String host, int port) {
         return new Peer(id, name, PeerType.WITNESS, host, port);
     }
 
-    /** Whether this peer is a witness, and therefore never a leader and never a work destination. */
-    public boolean isWitness() {
-        return type.isWitness();
-    }
-
     /**
-     * The configured endpoint, deliberately left unresolved. Resolution happens in the transport,
-     * off the node thread.
+     * Validates a node id, returning it unchanged, for reuse by configuration.
      */
-    public InetSocketAddress unresolvedAddress() {
-        return InetSocketAddress.createUnresolved(host, port);
-    }
-
-    /** Validates a node id, returning it unchanged, for reuse by configuration. */
     public static int requireValidId(int id, String what) {
         if (id < MIN_ID || id > MAX_ID) {
             throw new IllegalArgumentException(
@@ -128,5 +123,20 @@ public final class Peer {
 
     private static String defaultName(int id, PeerType type) {
         return (type.isWitness() ? "witness-" : "node-") + id;
+    }
+
+    /**
+     * Whether this peer is a witness, and therefore never a leader and never a work destination.
+     */
+    public boolean isWitness() {
+        return type.isWitness();
+    }
+
+    /**
+     * The configured endpoint, deliberately left unresolved. Resolution happens in the transport,
+     * off the node thread.
+     */
+    public InetSocketAddress unresolvedAddress() {
+        return InetSocketAddress.createUnresolved(host, port);
     }
 }

@@ -27,13 +27,19 @@ package org.lolaf.primos;
  */
 public enum Role {
 
-    /** Not leading. Accepts heartbeats and votes; campaigns when its election timeout expires. */
+    /**
+     * Not leading. Accepts heartbeats and votes; campaigns when its election timeout expires.
+     */
     FOLLOWER,
 
-    /** Campaigning for leadership in a term it has already incremented and persisted. */
+    /**
+     * Campaigning for leadership in a term it has already incremented and persisted.
+     */
     CANDIDATE,
 
-    /** Leading: sending heartbeats, and stepping down if it stops hearing from a majority. */
+    /**
+     * Leading: sending heartbeats, and stepping down if it stops hearing from a majority.
+     */
     LEADER,
 
     /**
@@ -45,7 +51,9 @@ public enum Role {
      */
     FAILED;
 
-    /** Whether this role is {@link #LEADER}. Never true for {@link #FAILED}. */
+    /**
+     * Whether this role is {@link #LEADER}. Never true for {@link #FAILED}.
+     */
     public boolean isLeader() {
         return this == LEADER;
     }

@@ -15,15 +15,15 @@
  */
 package org.lolaf.primos;
 
+import org.lolaf.primos.time.MonotonicClock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-
-import org.lolaf.primos.time.MonotonicClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Delivers events to the application's listeners.

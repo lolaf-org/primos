@@ -15,16 +15,10 @@
  */
 package org.lolaf.primos;
 
-import java.time.Duration;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
+import lombok.Value;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import java.time.Duration;
+import java.util.*;
 
 /**
  * An immutable snapshot of what a node has been doing.
@@ -37,21 +31,19 @@ import lombok.ToString;
  * should be diagnosable from a metric rather than a packet capture, and the reason distinguishes a
  * misconfigured neighbour from a wrong secret.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class PrimosStats {
+@Value
+public class PrimosStats {
 
-    private final Role role;
-    private final long currentTerm;
-    private final Duration timeInRole;
-    private final long electionsStarted;
-    private final long electionsWon;
-    private final long handoversSent;
-    private final long handoversAccepted;
-    private final long departuresObserved;
-    private final Map<DropReason, Long> drops;
-    private final Map<Integer, PeerStats> peers;
+    Role role;
+    long currentTerm;
+    Duration timeInRole;
+    long electionsStarted;
+    long electionsWon;
+    long handoversSent;
+    long handoversAccepted;
+    long departuresObserved;
+    Map<DropReason, Long> drops;
+    Map<Integer, PeerStats> peers;
 
     public PrimosStats(Role role,
                        long currentTerm,
@@ -95,7 +87,9 @@ public final class PrimosStats {
         return handoversSent;
     }
 
-    /** How many times this node campaigned because a departing leader handed over to it. */
+    /**
+     * How many times this node campaigned because a departing leader handed over to it.
+     */
     public long handoversAccepted() {
         return handoversAccepted;
     }
@@ -111,12 +105,16 @@ public final class PrimosStats {
         return departuresObserved;
     }
 
-    /** How many datagrams were discarded for one reason. Never null; zero if it never happened. */
+    /**
+     * How many datagrams were discarded for one reason. Never null; zero if it never happened.
+     */
     public long drops(DropReason reason) {
         return drops.getOrDefault(reason, 0L);
     }
 
-    /** Every datagram discarded, for any reason. */
+    /**
+     * Every datagram discarded, for any reason.
+     */
     public long totalDrops() {
         return drops.values().stream().mapToLong(Long::longValue).sum();
     }

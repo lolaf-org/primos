@@ -15,6 +15,13 @@
  */
 package org.lolaf.primos.transport;
 
+import lombok.Setter;
+import org.lolaf.primos.Peer;
+import org.lolaf.primos.time.MonotonicClock;
+import org.lolaf.primos.wire.WireFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -31,14 +38,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import lombok.Setter;
-
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.time.MonotonicClock;
-import org.lolaf.primos.wire.WireFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The real transport: one bound {@link DatagramChannel}, one {@link Selector}, no connections.
@@ -115,7 +114,9 @@ public final class UdpTransport implements Transport {
         return new Builder();
     }
 
-    /** The address actually bound, useful when the port was left to the operating system. */
+    /**
+     * The address actually bound, useful when the port was left to the operating system.
+     */
     public InetSocketAddress boundAddress() {
         try {
             return (InetSocketAddress) channel.getLocalAddress();
@@ -264,7 +265,9 @@ public final class UdpTransport implements Transport {
         }
     }
 
-    /** How many sends the socket itself rejected. Routine on UDP; a rising rate is not. */
+    /**
+     * How many sends the socket itself rejected. Routine on UDP; a rising rate is not.
+     */
     public long sendFailures() {
         return sendFailures;
     }
@@ -280,7 +283,9 @@ public final class UdpTransport implements Transport {
         return sendFailures + sendsWhileClosed + sendsToUnknownPeer + sendsWithoutAddress;
     }
 
-    /** Sends attempted after {@link #close}. Expected during shutdown, and harmless. */
+    /**
+     * Sends attempted after {@link #close}. Expected during shutdown, and harmless.
+     */
     public long sendsWhileClosed() {
         return sendsWhileClosed;
     }
@@ -306,7 +311,9 @@ public final class UdpTransport implements Transport {
         return sendsWithoutAddress;
     }
 
-    /** How many times a peer has been observed at a new address. */
+    /**
+     * How many times a peer has been observed at a new address.
+     */
     public long addressUpdates() {
         return addressUpdates;
     }
@@ -319,7 +326,71 @@ public final class UdpTransport implements Transport {
         }
     }
 
-    /** Where one peer is, and when that was last worked out. */
+    /**
+     * Builds a {@link UdpTransport}.
+     */
+    public static final class Builder {
+
+        /**
+         * Where to listen. Defaults to the wildcard address on an operating-system-chosen port.
+         */
+        @Setter
+        private InetSocketAddress bindAddress = new InetSocketAddress(0);
+
+        /**
+         * The peers this node may send to, the witness included.
+         */
+        @Setter
+        private List<Peer> peers = java.util.Collections.emptyList();
+
+        /**
+         * Whether a peer's address may be updated from received traffic.
+         *
+         * <p>Enable this only when authentication is on. Without a tag, one spoofed datagram
+         * redirects a peer's traffic and partitions it without forging any content.
+         */
+        @Setter
+        private boolean addressLearning;
+
+        /**
+         * Socket receive buffer. Sized generously on purpose: a silently overflowing socket looks
+         * exactly like a partitioned network.
+         */
+        @Setter
+        private int receiveBufferBytes = 1 << 20;
+
+        /**
+         * How often a peer's hostname is looked up again.
+         */
+        @Setter
+        private Duration reresolveInterval = Duration.ofSeconds(60);
+
+        /**
+         * Used only in log lines.
+         */
+        @Setter
+        private String clusterName = "primos";
+
+        /**
+         * The clock used to decide when a hostname is worth looking up again.
+         *
+         * <p>Here for the same reason it is everywhere else: nothing in primos reads the system
+         * clock directly, so that the rule has no exceptions to remember.
+         */
+        @Setter
+        private MonotonicClock clock = MonotonicClock.SYSTEM;
+
+        private Builder() {
+        }
+
+        public UdpTransport build() throws IOException {
+            return new UdpTransport(this);
+        }
+    }
+
+    /**
+     * Where one peer is, and when that was last worked out.
+     */
     private final class Endpoint {
 
         private final Peer peer;
@@ -397,58 +468,6 @@ public final class UdpTransport implements Transport {
             }, "primos-resolve-" + peer.id());
             worker.setDaemon(true);
             worker.start();
-        }
-    }
-
-    /** Builds a {@link UdpTransport}. */
-    public static final class Builder {
-
-        /** Where to listen. Defaults to the wildcard address on an operating-system-chosen port. */
-        @Setter
-        private InetSocketAddress bindAddress = new InetSocketAddress(0);
-
-        /** The peers this node may send to, the witness included. */
-        @Setter
-        private List<Peer> peers = java.util.Collections.emptyList();
-
-        /**
-         * Whether a peer's address may be updated from received traffic.
-         *
-         * <p>Enable this only when authentication is on. Without a tag, one spoofed datagram
-         * redirects a peer's traffic and partitions it without forging any content.
-         */
-        @Setter
-        private boolean addressLearning;
-
-        /**
-         * Socket receive buffer. Sized generously on purpose: a silently overflowing socket looks
-         * exactly like a partitioned network.
-         */
-        @Setter
-        private int receiveBufferBytes = 1 << 20;
-
-        /** How often a peer's hostname is looked up again. */
-        @Setter
-        private Duration reresolveInterval = Duration.ofSeconds(60);
-
-        /** Used only in log lines. */
-        @Setter
-        private String clusterName = "primos";
-
-        /**
-         * The clock used to decide when a hostname is worth looking up again.
-         *
-         * <p>Here for the same reason it is everywhere else: nothing in primos reads the system
-         * clock directly, so that the rule has no exceptions to remember.
-         */
-        @Setter
-        private MonotonicClock clock = MonotonicClock.SYSTEM;
-
-        private Builder() {
-        }
-
-        public UdpTransport build() throws IOException {
-            return new UdpTransport(this);
         }
     }
 }

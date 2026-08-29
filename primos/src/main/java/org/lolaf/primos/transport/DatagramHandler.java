@@ -27,6 +27,8 @@ import java.nio.ByteBuffer;
 @FunctionalInterface
 public interface DatagramHandler {
 
-    /** One datagram, positioned at zero and limited to its length. */
+    /**
+     * One datagram, positioned at zero and limited to its length.
+     */
     void onDatagram(ByteBuffer datagram);
 }

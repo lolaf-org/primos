@@ -15,11 +15,11 @@
  */
 package org.lolaf.primos.wire;
 
+import org.lolaf.primos.DropReason;
+
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
-
-import org.lolaf.primos.DropReason;
 
 /**
  * Counts discarded datagrams, one counter per reason.
@@ -38,17 +38,23 @@ public final class DropCounters {
 
     private final long[] counts = new long[REASONS.length];
 
-    /** Records one discarded datagram. */
+    /**
+     * Records one discarded datagram.
+     */
     public void record(DropReason reason) {
         counts[reason.ordinal()]++;
     }
 
-    /** How many datagrams were discarded for one reason. */
+    /**
+     * How many datagrams were discarded for one reason.
+     */
     public long count(DropReason reason) {
         return counts[reason.ordinal()];
     }
 
-    /** Every datagram discarded, for any reason. */
+    /**
+     * Every datagram discarded, for any reason.
+     */
     public long total() {
         long total = 0;
         for (long count : counts) {
@@ -57,7 +63,9 @@ public final class DropCounters {
         return total;
     }
 
-    /** An immutable copy, for {@link org.lolaf.primos.PrimosStats}. */
+    /**
+     * An immutable copy, for {@link org.lolaf.primos.PrimosStats}.
+     */
     public Map<DropReason, Long> snapshot() {
         EnumMap<DropReason, Long> snapshot = new EnumMap<>(DropReason.class);
         for (DropReason reason : REASONS) {

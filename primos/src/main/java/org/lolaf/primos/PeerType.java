@@ -21,7 +21,9 @@ package org.lolaf.primos;
  */
 public enum PeerType {
 
-    /** Another instance of the clustered application. Votes, and may become leader. */
+    /**
+     * Another instance of the clustered application. Votes, and may become leader.
+     */
     APPLICATION,
 
     /**
@@ -33,7 +35,9 @@ public enum PeerType {
      */
     WITNESS;
 
-    /** Whether this is the {@link #WITNESS} type. */
+    /**
+     * Whether this is the {@link #WITNESS} type.
+     */
     public boolean isWitness() {
         return this == WITNESS;
     }

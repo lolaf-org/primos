@@ -36,7 +36,9 @@ import java.util.OptionalInt;
  */
 public interface PrimosNode extends AutoCloseable {
 
-    /** Starts building a node. */
+    /**
+     * Starts building a node.
+     */
     static PrimosNodeBuilder builder() {
         return new PrimosNodeBuilder();
     }
@@ -58,7 +60,9 @@ public interface PrimosNode extends AutoCloseable {
      */
     void stop();
 
-    /** Calls {@link #stop()}, so a node can be used in try-with-resources. */
+    /**
+     * Calls {@link #stop()}, so a node can be used in try-with-resources.
+     */
     @Override
     default void close() {
         stop();
@@ -71,10 +75,14 @@ public interface PrimosNode extends AutoCloseable {
      */
     Role role();
 
-    /** The role and the term it is held in, read together so the fencing token cannot be lost. */
+    /**
+     * The role and the term it is held in, read together so the fencing token cannot be lost.
+     */
     RoleAndTerm roleAndTerm();
 
-    /** Which node is currently leader, if any is known. Empty during an election. */
+    /**
+     * Which node is currently leader, if any is known. Empty during an election.
+     */
     OptionalInt leaderId();
 
     /**
@@ -84,9 +92,13 @@ public interface PrimosNode extends AutoCloseable {
      */
     void addListener(PrimosListener listener);
 
-    /** An immutable snapshot of counters and per-peer observations. */
+    /**
+     * An immutable snapshot of counters and per-peer observations.
+     */
     PrimosStats stats();
 
-    /** The configuration this node was built with. */
+    /**
+     * The configuration this node was built with.
+     */
     ClusterConfig config();
 }

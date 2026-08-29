@@ -57,7 +57,9 @@ public interface StateStore extends AutoCloseable {
      */
     boolean isDurable();
 
-    /** Releases whatever the store holds. Idempotent. */
+    /**
+     * Releases whatever the store holds. Idempotent.
+     */
     @Override
     void close();
 }

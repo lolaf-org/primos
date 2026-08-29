@@ -59,26 +59,34 @@ public final class MessageEncoder {
         return field;
     }
 
-    /** A vote request, or with {@code preVote} set, a question about whether a vote would be given. */
+    /**
+     * A vote request, or with {@code preVote} set, a question about whether a vote would be given.
+     */
     public ByteBuffer requestVote(ByteBuffer out, long term, boolean preVote) {
         header(out, MessageType.REQUEST_VOTE, preVote ? WireFormat.FLAG_PRE_VOTE : 0, term);
         return finish(out);
     }
 
-    /** A vote reply, echoing whether this was a pre-vote so the two rounds cannot be confused. */
+    /**
+     * A vote reply, echoing whether this was a pre-vote so the two rounds cannot be confused.
+     */
     public ByteBuffer requestVoteReply(ByteBuffer out, long term, boolean granted, boolean preVote) {
         header(out, MessageType.REQUEST_VOTE_REPLY, preVote ? WireFormat.FLAG_PRE_VOTE : 0, term);
         out.put(granted ? (byte) 1 : (byte) 0);
         return finish(out);
     }
 
-    /** The heartbeat. No payload: the term and the leader's id are both in the header. */
+    /**
+     * The heartbeat. No payload: the term and the leader's id are both in the header.
+     */
     public ByteBuffer appendEntries(ByteBuffer out, long term) {
         header(out, MessageType.APPEND_ENTRIES, 0, term);
         return finish(out);
     }
 
-    /** A heartbeat acknowledgement. */
+    /**
+     * A heartbeat acknowledgement.
+     */
     public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success) {
         header(out, MessageType.APPEND_ENTRIES_REPLY, 0, term);
         out.put(success ? (byte) 1 : (byte) 0);
@@ -106,21 +114,27 @@ public final class MessageEncoder {
         return finish(out);
     }
 
-    /** A reachability probe. */
+    /**
+     * A reachability probe.
+     */
     public ByteBuffer ping(ByteBuffer out, long term, long sequence) {
         header(out, MessageType.PING, 0, term);
         out.putLong(sequence);
         return finish(out);
     }
 
-    /** A probe reply, echoing the sequence number so the round trip can be measured. */
+    /**
+     * A probe reply, echoing the sequence number so the round trip can be measured.
+     */
     public ByteBuffer pingReply(ByteBuffer out, long term, long sequence) {
         header(out, MessageType.PING_REPLY, 0, term);
         out.putLong(sequence);
         return finish(out);
     }
 
-    /** How many bytes a message of this type occupies, tag included. */
+    /**
+     * How many bytes a message of this type occupies, tag included.
+     */
     public int sizeOf(MessageType type) {
         return type.messageBytes() + authenticator.tagBytes();
     }

@@ -15,11 +15,10 @@
  */
 package org.lolaf.primos.store;
 
-import org.lolaf.primos.Peer;
-
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import org.lolaf.primos.Peer;
 
 /**
  * Everything primos has to remember across a restart: the current term, and who this node voted
@@ -36,7 +35,9 @@ import lombok.ToString;
 @ToString
 public final class PersistentState {
 
-    /** {@link #votedFor()} when this node has not voted in {@link #currentTerm()}. */
+    /**
+     * {@link #votedFor()} when this node has not voted in {@link #currentTerm()}.
+     */
     public static final int NO_VOTE = -1;
 
     private static final PersistentState FRESH = new PersistentState(0L, NO_VOTE);
@@ -63,7 +64,9 @@ public final class PersistentState {
         return FRESH;
     }
 
-    /** Whether a vote has been cast in {@link #currentTerm()}. */
+    /**
+     * Whether a vote has been cast in {@link #currentTerm()}.
+     */
     public boolean hasVoted() {
         return votedFor != NO_VOTE;
     }

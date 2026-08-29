@@ -33,19 +33,29 @@ public interface MessageHandler {
      */
     void onRequestVote(int senderId, long term, boolean preVote);
 
-    /** A vote reply. Count it only while still a candidate in this exact term, and dedupe by sender. */
+    /**
+     * A vote reply. Count it only while still a candidate in this exact term, and dedupe by sender.
+     */
     void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote);
 
-    /** A heartbeat from a leader. */
+    /**
+     * A heartbeat from a leader.
+     */
     void onAppendEntries(int senderId, long term);
 
-    /** A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum. */
+    /**
+     * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.
+     */
     void onAppendEntriesReply(int senderId, long term, boolean success);
 
-    /** A reachability probe, to be answered with the same sequence number. */
+    /**
+     * A reachability probe, to be answered with the same sequence number.
+     */
     void onPing(int senderId, long term, long sequence);
 
-    /** A probe reply. Ignore it if the sequence is older than the failure threshold allows. */
+    /**
+     * A probe reply. Ignore it if the sequence is older than the failure threshold allows.
+     */
     void onPingReply(int senderId, long term, long sequence);
 
     /**
