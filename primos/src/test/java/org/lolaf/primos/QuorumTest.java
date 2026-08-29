@@ -173,4 +173,33 @@ class QuorumTest {
         assertThat(q.isReached(3)).isTrue();
         assertThat(q.isReached(5)).isTrue();
     }
+
+    // ------------------------------------------------------- an unknown voter set
+
+    @Test
+    void a_witness_server_has_no_quorum_and_never_reaches_one() {
+        Quorum quorum = Quorum.of(ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1023)
+                .asWitness()
+                .learnedMembership()
+                .build());
+
+        assertThat(quorum.isKnown()).isFalse();
+        assertThat(quorum.isReached(1)).isFalse();
+        assertThat(quorum.isReached(Integer.MAX_VALUE))
+                .as("it never campaigns and never leads, so it never counts votes — and if some"
+                        + " path ever asked, 'no' is the only answer that cannot invent a leader")
+                .isFalse();
+    }
+
+    @Test
+    void an_unknown_voter_set_says_so_rather_than_inventing_numbers() {
+        Quorum quorum = Quorum.unknown("orders");
+
+        assertThat(quorum.summary()).contains("learned from traffic");
+        assertThat(quorum.warnings())
+                .as("nothing useful can be said about a shape nobody described")
+                .isEmpty();
+    }
 }

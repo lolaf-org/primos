@@ -63,8 +63,22 @@ public final class Quorum {
     private final int required;
     private final int faultTolerance;
 
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    private final boolean known;
+
+    private Quorum(String applicationName) {
+        this.applicationName = Objects.requireNonNull(applicationName, "applicationName");
+        this.applicationNodes = 0;
+        this.witness = true;
+        this.voters = 0;
+        this.required = Integer.MAX_VALUE;
+        this.faultTolerance = 0;
+        this.known = false;
+    }
+
     private Quorum(String applicationName, int applicationNodes, boolean witness) {
         this.applicationName = Objects.requireNonNull(applicationName, "applicationName");
+        this.known = true;
         if (applicationNodes < 1) {
             throw new IllegalArgumentException(
                     "a cluster has at least one application node, but was " + applicationNodes);
@@ -79,17 +93,45 @@ public final class Quorum {
     /** The arithmetic implied by a configuration. */
     public static Quorum of(ClusterConfig config) {
         Objects.requireNonNull(config, "config");
+        if (config.isLearnedMembership()) {
+            return unknown(config.applicationName());
+        }
         return new Quorum(config.applicationName(), config.applicationNodeCount(),
                 config.hasWitness());
     }
 
-    /** Whether a given number of votes is a majority of the configured voters. */
+    /**
+     * The arithmetic of a voter set nobody told us about: no quorum, ever reached.
+     *
+     * <p>The standalone witness server does not know how many nodes the clusters it serves have,
+     * and deliberately does not need to — it never campaigns and never leads, so it never counts
+     * votes; it only answers them. Rather than invent a plausible-looking number, this refuses.
+     * If some future path did ask this witness whether it held a majority, "no" is the only answer
+     * that cannot manufacture a leader.
+     */
+    public static Quorum unknown(String applicationName) {
+        return new Quorum(applicationName);
+    }
+
+    /**
+     * Whether a given number of votes is a majority of the configured voters. Always false when
+     * the voter set is not known; see {@link #unknown}.
+     */
     public boolean isReached(int votes) {
-        return votes >= required;
+        return known && votes >= required;
+    }
+
+    /** Whether the voter set is configured, and so whether any of these numbers mean anything. */
+    public boolean isKnown() {
+        return known;
     }
 
     /** The line every node logs at startup. */
     public String summary() {
+        if (!known) {
+            return "cluster '" + applicationName + "': served by a witness whose voter set is"
+                    + " learned from traffic rather than configured";
+        }
         return "cluster '" + applicationName + "': " + voters + " voters ("
                 + composition() + "), quorum " + required + ", tolerates " + failures(faultTolerance);
     }
@@ -100,6 +142,11 @@ public final class Quorum {
      */
     public List<String> warnings() {
         List<String> warnings = new ArrayList<>(2);
+        if (!known) {
+            // Nothing can be said about a shape nobody described. The cluster's own nodes log
+            // their quorum summary, which is where the operator sees it.
+            return warnings;
+        }
 
         if (voters > MAX_RECOMMENDED_VOTERS) {
             warnings.add("cluster '" + applicationName + "': " + voters + " voters is larger than"

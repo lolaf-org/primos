@@ -86,7 +86,7 @@ public final class ElectionNode implements MessageHandler {
     private final MessageDecoder decoder;
     private final DropCounters drops = new DropCounters();
 
-    private final List<Peer> peers;
+    private final List<Peer> peers = new ArrayList<>();
     private final Map<Integer, Probe> probes = new LinkedHashMap<>();
     private final PrimosListener listener;
     private final Set<Integer> peerIds = new HashSet<>();
@@ -146,14 +146,47 @@ public final class ElectionNode implements MessageHandler {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
         this.listener = Objects.requireNonNull(listener, "listener");
-        this.peers = config.allPeers();
-        for (Peer peer : peers) {
+        for (Peer peer : config.allPeers()) {
+            peers.add(peer);
             peerIds.add(peer.id());
             probes.put(peer.id(), new Probe(peer));
         }
         this.encoder = new MessageEncoder(config.applicationName(), config.nodeId(), authenticator);
+        // A node answers only its configured peers, by id. A witness server cannot: its members
+        // are not configured, so it has nothing to compare an id against and the authentication
+        // tag is the whole of its admission control. See ClusterConfig.Builder#learnedMembership.
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
-                peerIds::contains, drops);
+                config.isLearnedMembership() ? id -> true : peerIds::contains, drops);
+    }
+
+    /**
+     * Adds a voter that was not configured, for a witness server whose members arrive.
+     *
+     * <p>Only legal with {@link ClusterConfig.Builder#learnedMembership()}, and only worth calling
+     * once a datagram from that sender has passed authentication — the caller is trusted to have
+     * checked, because by the time this is reached the decoder already has.
+     *
+     * <p>What it buys is the probe: a witness that only ever replied would never notice a node had
+     * gone, and its half of the probe exchange is also what keeps a NAT pinhole open in the
+     * inbound direction. Call it between turns of the loop rather than from inside one.
+     *
+     * @return whether this peer was new
+     */
+    public boolean learnPeer(Peer peer) {
+        Objects.requireNonNull(peer, "peer");
+        if (!config.isLearnedMembership()) {
+            throw new IllegalStateException(
+                    "node " + config.nodeId() + " has a configured peer set, so peer " + peer.id()
+                            + " cannot be learned; build the config with learnedMembership()");
+        }
+        if (peer.id() == config.nodeId() || !peerIds.add(peer.id())) {
+            return false;
+        }
+        peers.add(peer);
+        probes.put(peer.id(), new Probe(peer));
+        log.info("cluster '{}': witness {} has learned voter {} at {}:{}",
+                config.applicationName(), config.nodeId(), peer.id(), peer.host(), peer.port());
+        return true;
     }
 
     /** Reads persisted state back and arms the first election timeout. */
@@ -169,9 +202,17 @@ public final class ElectionNode implements MessageHandler {
         role = Role.FOLLOWER;
         roleChangedAtNanos = clock.nanoTime();
 
-        log.info("{}", quorum.summary());
-        for (String warning : quorum.warnings()) {
-            log.warn("{}", warning);
+        if (config.isLearnedMembership()) {
+            // There is no quorum summary to print: this witness does not know how many voters the
+            // cluster has, and deliberately does not need to. It never campaigns and never leads,
+            // so it never counts votes — it only answers them.
+            log.info("cluster '{}': witness {} is serving, with the voter set learned from traffic",
+                    config.applicationName(), config.nodeId());
+        } else {
+            log.info("{}", quorum.summary());
+            for (String warning : quorum.warnings()) {
+                log.warn("{}", warning);
+            }
         }
         if (!store.isDurable()) {
             log.warn("cluster '{}': node {} is using a state store that does not survive a crash."

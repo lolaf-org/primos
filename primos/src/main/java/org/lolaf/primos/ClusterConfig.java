@@ -58,6 +58,9 @@ public final class ClusterConfig {
     @Getter(AccessLevel.NONE)
     private final Peer witness;
 
+    @Getter(AccessLevel.NONE)
+    private final boolean learnedMembership;
+
     private final Timings timings;
 
     private ClusterConfig(Builder builder) {
@@ -69,6 +72,7 @@ public final class ClusterConfig {
                 : builder.nodeName.trim();
         this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
         this.witness = builder.witness;
+        this.learnedMembership = builder.learnedMembership;
         this.timings = Objects.requireNonNull(builder.timings, "timings");
         validate();
     }
@@ -92,6 +96,16 @@ public final class ClusterConfig {
     /** Whether this node is itself the witness, and so must never campaign. */
     public boolean isWitness() {
         return nodeType.isWitness();
+    }
+
+    /**
+     * Whether this witness's voters arrive rather than being configured.
+     *
+     * <p>True only for the standalone witness server. See
+     * {@link ClusterConfig.Builder#learnedMembership()}.
+     */
+    public boolean isLearnedMembership() {
+        return learnedMembership;
     }
 
     /**
@@ -137,9 +151,16 @@ public final class ClusterConfig {
                     "this node is the witness, so it cannot also have one: a cluster has at most"
                             + " one, and two would give a pair four voters needing three");
         }
-        if (peers.isEmpty() && nodeType.isWitness()) {
+        if (learnedMembership && !nodeType.isWitness()) {
             throw new IllegalArgumentException(
-                    "a witness with no peers has nothing to witness");
+                    "only a witness may have learned membership: an application node is configured"
+                            + " with its peers, and accepting whoever turns up would let anyone who"
+                            + " can reach the port join the vote");
+        }
+        if (peers.isEmpty() && nodeType.isWitness() && !learnedMembership) {
+            throw new IllegalArgumentException(
+                    "a witness with no peers has nothing to witness; a witness server whose members"
+                            + " arrive rather than being configured wants learnedMembership()");
         }
         if (witness != null) {
             if (witness.type() != PeerType.WITNESS) {
@@ -191,6 +212,7 @@ public final class ClusterConfig {
         private PeerType nodeType = PeerType.APPLICATION;
         private final List<Peer> peers = new ArrayList<>();
         private Peer witness;
+        private boolean learnedMembership;
         private Timings timings = Timings.lan();
 
         private Builder() {
@@ -241,6 +263,29 @@ public final class ClusterConfig {
          */
         public Builder witness(Peer witness) {
             this.witness = witness;
+            return this;
+        }
+
+        /**
+         * Declares that this witness's voters are not configured but learned from traffic.
+         *
+         * <p>For the standalone witness server, and only for it. That server holds no addresses in
+         * configuration — only application names and secrets — because in permissive mode the
+         * clusters it serves are not known ahead of time, and even in strict mode listing every
+         * node of every tenant on shared infrastructure is a burden nobody would accept. So it
+         * learns each node's endpoint from the first datagram that passes authentication, and
+         * probes it thereafter.
+         *
+         * <p><strong>The authentication tag is the whole of the admission control here.</strong>
+         * With a configured peer set an unknown sender id is dropped outright; with a learned one
+         * it is not, so a witness serving an application without a secret will answer anybody who
+         * asks. That is exactly the case where a forged reply manufactures a leader, which is why
+         * an unauthenticated witness link is never a documented option.
+         *
+         * <p>Only a witness may do this, and a witness that does may start with no peers at all.
+         */
+        public Builder learnedMembership() {
+            this.learnedMembership = true;
             return this;
         }
 

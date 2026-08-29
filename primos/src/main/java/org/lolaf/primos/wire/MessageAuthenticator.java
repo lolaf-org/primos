@@ -51,11 +51,13 @@ public final class MessageAuthenticator {
     private static final String ALGORITHM = "HmacSha256";
 
     private final Mac mac;
+    private final Mac previousMac;
     private final byte[] computed;
     private final byte[] received;
 
-    private MessageAuthenticator(Mac mac) {
+    private MessageAuthenticator(Mac mac, Mac previousMac) {
         this.mac = mac;
+        this.previousMac = previousMac;
         this.computed = mac == null ? null : new byte[WireFormat.TAG_BYTES];
         this.received = mac == null ? null : new byte[WireFormat.TAG_BYTES];
     }
@@ -66,7 +68,7 @@ public final class MessageAuthenticator {
      * nuisance.
      */
     public static MessageAuthenticator disabled() {
-        return new MessageAuthenticator(null);
+        return new MessageAuthenticator(null, null);
     }
 
     /**
@@ -77,17 +79,51 @@ public final class MessageAuthenticator {
      * milliseconds.
      */
     public static MessageAuthenticator hmacSha256(byte[] secret) {
+        return hmacSha256(secret, null);
+    }
+
+    /**
+     * Authentication during a secret rotation: tags with {@code secret}, accepts either.
+     *
+     * <p>Without this, changing a secret is a flag day — every node in the cluster has to be
+     * restarted at the same instant, because the moment one holds the new secret and another holds
+     * the old one they stop being able to talk at all. That is the worst possible time to lose a
+     * cluster's consensus traffic, and the pressure it creates is what makes people leave secrets
+     * unrotated for years.
+     *
+     * <p>With it, rotation is two edits and a window: set the new secret as current and the old one
+     * as previous, wait until every node has been updated, then drop the previous one. Nothing is
+     * ever unable to talk, and nothing restarts in lockstep.
+     *
+     * <p>The cost is that a compromised old secret keeps working until the second edit, which is
+     * why the previous secret is a rotation window rather than a permanent second key.
+     *
+     * @param previousSecret the secret being rotated out, or null when none is
+     */
+    public static MessageAuthenticator hmacSha256(byte[] secret, byte[] previousSecret) {
         Objects.requireNonNull(secret, "secret");
         if (secret.length == 0) {
             throw new IllegalArgumentException("the cluster secret must not be empty");
         }
+        if (previousSecret != null && previousSecret.length == 0) {
+            throw new IllegalArgumentException("the previous cluster secret must not be empty");
+        }
+        return new MessageAuthenticator(keyed(secret), previousSecret == null ? null : keyed(previousSecret));
+    }
+
+    private static Mac keyed(byte[] secret) {
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(new SecretKeySpec(secret, ALGORITHM));
-            return new MessageAuthenticator(mac);
+            return mac;
         } catch (java.security.GeneralSecurityException e) {
             throw new IllegalStateException("HmacSha256 is required by every Java platform", e);
         }
+    }
+
+    /** Whether a secret is being rotated out and still accepted. */
+    public boolean hasPreviousSecret() {
+        return previousMac != null;
     }
 
     /** Whether datagrams carry a tag. */
@@ -111,7 +147,7 @@ public final class MessageAuthenticator {
             return;
         }
         int end = datagram.position();
-        computeInto(datagram, end, computed);
+        computeInto(mac, datagram, end, computed);
         datagram.position(end);
         datagram.put(computed);
     }
@@ -135,7 +171,17 @@ public final class MessageAuthenticator {
         datagram.position(bodyEnd);
         datagram.get(received);
 
-        computeInto(datagram, bodyEnd, computed);
+        computeInto(mac, datagram, bodyEnd, computed);
+        if (MessageDigest.isEqual(computed, received)) {
+            return true;
+        }
+        if (previousMac == null) {
+            return false;
+        }
+        // Only reached during a rotation window, so the second HMAC is not on any steady-state
+        // path. Both comparisons are time-constant, so failing the first one leaks nothing about
+        // how far the second got.
+        computeInto(previousMac, datagram, bodyEnd, computed);
         return MessageDigest.isEqual(computed, received);
     }
 
@@ -143,7 +189,7 @@ public final class MessageAuthenticator {
      * Hashes {@code [0, length)} of the buffer without allocating: the range is selected by moving
      * the buffer's own position and limit rather than by taking a duplicate or a copy.
      */
-    private void computeInto(ByteBuffer datagram, int length, byte[] out) {
+    private static void computeInto(Mac mac, ByteBuffer datagram, int length, byte[] out) {
         int savedLimit = datagram.limit();
         datagram.limit(length);
         datagram.position(0);

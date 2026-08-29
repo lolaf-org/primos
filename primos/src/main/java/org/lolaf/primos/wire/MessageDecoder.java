@@ -122,6 +122,44 @@ public final class MessageDecoder {
     }
 
     /**
+     * The application name a datagram claims, read <em>before</em> anything has been verified.
+     *
+     * <p>Every other reader in primos verifies the tag first, unconditionally, because "verify
+     * before parse" is only useful as a rule with no exceptions. <strong>The witness server cannot
+     * follow it.</strong> Its secret is per-application, so it has to know which application a
+     * datagram claims to be for before it knows which key to check it with — and that claim is in
+     * the datagram's own unverified bytes.
+     *
+     * <p>That is sound, and the reasons are worth stating rather than rediscovering. What is read
+     * here is a fixed-offset, fixed-width field: no allocation sized by attacker input, no length
+     * arithmetic, nothing that can be walked off the end. And the claim buys nothing on its own —
+     * an attacker may name any application they like and still cannot produce a tag that
+     * application's key accepts. The real decoder then re-checks the name after verifying, so
+     * routing and acceptance can never disagree.
+     *
+     * @return the claimed name, or null if the datagram is too short to carry one or the field
+     *         does not hold a name that could ever have been sent
+     */
+    public static String peekApplicationName(ByteBuffer datagram) {
+        if (datagram.limit() < WireFormat.HEADER_BYTES) {
+            return null;
+        }
+        String name = readApplicationName(datagram);
+        if (name.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                // Not a name any encoder would have produced, so there is nothing to route it to.
+                // Returning it would put arbitrary bytes into a log line and a map lookup.
+                return null;
+            }
+        }
+        return name;
+    }
+
+    /**
      * The sender of the last datagram that passed every check, or -1.
      *
      * <p>Exists so a transport can be told where a peer is speaking from, but only once the

@@ -18,6 +18,7 @@ package org.lolaf.primos.wire;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.DropReason;
@@ -191,5 +192,57 @@ class ReceivePipelineTest {
 
         assertThat(drops.count(expected)).isEqualTo(before + 1);
         assertThat(handler.received).isEmpty();
+    }
+
+    // ------------------------------------------------- peeking before verifying
+
+    @Test
+    void the_application_name_can_be_read_before_the_tag_is_verified() {
+        MessageEncoder encoder = new MessageEncoder("orders", 1,
+                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)));
+        ByteBuffer datagram = encoder.requestVote(
+                ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
+
+        assertThat(MessageDecoder.peekApplicationName(datagram))
+                .as("the witness server has to route before it knows which key to check with,"
+                        + " because the key it needs is chosen by the name it is reading")
+                .isEqualTo("orders");
+    }
+
+    @Test
+    void peeking_a_forged_name_still_cannot_get_a_datagram_accepted() {
+        MessageEncoder wrongKey = new MessageEncoder("orders", 1,
+                MessageAuthenticator.hmacSha256("not-the-secret".getBytes(StandardCharsets.UTF_8)));
+        ByteBuffer datagram = wrongKey.requestVote(
+                ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
+
+        assertThat(MessageDecoder.peekApplicationName(datagram)).isEqualTo("orders");
+
+        RecordingHandler handler = new RecordingHandler();
+        DropCounters drops = new DropCounters();
+        boolean accepted = new MessageDecoder("orders",
+                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)),
+                id -> true, drops).decode(datagram, handler);
+
+        assertThat(accepted)
+                .as("naming an application is free; producing a tag its key accepts is not")
+                .isFalse();
+        assertThat(drops.count(DropReason.BAD_TAG)).isEqualTo(1);
+    }
+
+    @Test
+    void a_datagram_too_short_to_carry_a_name_peeks_as_nothing() {
+        assertThat(MessageDecoder.peekApplicationName(ByteBuffer.allocate(8))).isNull();
+    }
+
+    @Test
+    void a_name_field_full_of_bytes_no_encoder_would_send_peeks_as_nothing() {
+        ByteBuffer datagram = ByteBuffer.allocate(WireFormat.HEADER_BYTES);
+        datagram.put(WireFormat.OFFSET_APPLICATION, (byte) 0x01);
+        datagram.limit(WireFormat.HEADER_BYTES);
+
+        assertThat(MessageDecoder.peekApplicationName(datagram))
+                .as("arbitrary bytes must not reach a log line or a map lookup")
+                .isNull();
     }
 }

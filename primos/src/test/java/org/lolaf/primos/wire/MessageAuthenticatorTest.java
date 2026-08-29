@@ -105,4 +105,73 @@ class MessageAuthenticatorTest {
         }
         return -1;
     }
+
+    // --------------------------------------------------------- secret rotation
+
+    @Test
+    void a_rotating_authenticator_accepts_both_the_current_and_the_previous_secret() {
+        MessageAuthenticator onlyOld = MessageAuthenticator.hmacSha256(secret("old"));
+        MessageAuthenticator onlyNew = MessageAuthenticator.hmacSha256(secret("new"));
+        MessageAuthenticator rotating =
+                MessageAuthenticator.hmacSha256(secret("new"), secret("old"));
+
+        assertThat(rotating.verify(tagged(onlyOld)))
+                .as("without this, changing a secret means restarting every node at the same"
+                        + " instant, which is why secrets go unrotated for years")
+                .isTrue();
+        assertThat(rotating.verify(tagged(onlyNew))).isTrue();
+        assertThat(rotating.hasPreviousSecret()).isTrue();
+    }
+
+    @Test
+    void a_rotating_authenticator_tags_with_the_current_secret_only() {
+        MessageAuthenticator rotating =
+                MessageAuthenticator.hmacSha256(secret("new"), secret("old"));
+
+        assertThat(MessageAuthenticator.hmacSha256(secret("new")).verify(tagged(rotating)))
+                .as("the window is for accepting the old secret, not for continuing to use it")
+                .isTrue();
+        assertThat(MessageAuthenticator.hmacSha256(secret("old")).verify(tagged(rotating)))
+                .isFalse();
+    }
+
+    @Test
+    void a_third_secret_is_still_refused_during_a_rotation() {
+        MessageAuthenticator rotating =
+                MessageAuthenticator.hmacSha256(secret("new"), secret("old"));
+
+        assertThat(rotating.verify(tagged(MessageAuthenticator.hmacSha256(secret("neither")))))
+                .as("a rotation window widens the key set by exactly one, and not to anything")
+                .isFalse();
+    }
+
+    @Test
+    void once_the_previous_secret_is_removed_it_stops_being_accepted() {
+        MessageAuthenticator afterRotation = MessageAuthenticator.hmacSha256(secret("new"));
+
+        assertThat(afterRotation.verify(tagged(MessageAuthenticator.hmacSha256(secret("old")))))
+                .as("a compromised old secret works until the second edit, and that is the whole"
+                        + " reason the window is meant to be closed rather than left open")
+                .isFalse();
+        assertThat(afterRotation.hasPreviousSecret()).isFalse();
+    }
+
+    @Test
+    void an_empty_previous_secret_is_refused_like_an_empty_current_one() {
+        assertThatThrownBy(() -> MessageAuthenticator.hmacSha256(secret("new"), new byte[0]))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be empty");
+    }
+
+    private static byte[] secret(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** A freshly tagged datagram, positioned and limited the way a received one would be. */
+    private static java.nio.ByteBuffer tagged(MessageAuthenticator authenticator) {
+        java.nio.ByteBuffer datagram =
+                new MessageEncoder("orders", 1, authenticator).requestVote(
+                        java.nio.ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 3L, false);
+        return datagram;
+    }
 }

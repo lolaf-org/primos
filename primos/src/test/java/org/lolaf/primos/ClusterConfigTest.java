@@ -171,4 +171,48 @@ class ClusterConfigTest {
         assertThatThrownBy(() -> config.peers().add(Peer.application(3, "host-c", 7000)))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    // ------------------------------------------------------- learned membership
+
+    @Test
+    void a_witness_whose_members_arrive_may_start_with_no_peers() {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1023)
+                .asWitness()
+                .learnedMembership()
+                .build();
+
+        assertThat(config.isLearnedMembership()).isTrue();
+        assertThat(config.allPeers())
+                .as("the witness server holds no addresses at all; in permissive mode it cannot,"
+                        + " because the clusters it serves are not known ahead of time")
+                .isEmpty();
+    }
+
+    @Test
+    void a_witness_without_learned_membership_still_needs_peers() {
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1023)
+                .asWitness()
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nothing to witness");
+    }
+
+    @Test
+    void an_application_node_may_not_accept_whoever_turns_up() {
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1)
+                .peers(Peer.application(2, "host", 7000))
+                .learnedMembership()
+                .build())
+                .as("with a configured peer set an unknown sender is dropped; without one the tag"
+                        + " is the whole of the admission control, which is a witness's bargain"
+                        + " and not a node's")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only a witness");
+    }
 }
