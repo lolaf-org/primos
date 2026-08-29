@@ -36,6 +36,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import lombok.Setter;
+
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosStats;
@@ -734,23 +736,21 @@ public final class WitnessServer implements AutoCloseable {
     /** Builds a {@link WitnessServer}. */
     public static final class Builder {
 
+        /** Where the served set and the secrets come from. Required. */
+        @Setter
         private ConfigStore configStore;
+
         private MonotonicClock clock = MonotonicClock.SYSTEM;
         private Random random = new Random();
+
+        /**
+         * Overrides the timing profile from the configuration.
+         *
+         * <p>A witness usually sits on a third network, where a WAN round trip makes the LAN
+         * election timeout marginal; {@link Timings#wan()} is the profile for that.
+         */
+        @Setter
         private Timings timings;
-        private int nodeId = Peer.MAX_ID;
-        private StateStoreFactory stateStores;
-        private InetSocketAddress bindAddress;
-        private int receiveBufferBytes = 1 << 20;
-
-        private Builder() {
-        }
-
-        /** Where the served set and the secrets come from. Required. */
-        public Builder configStore(ConfigStore configStore) {
-            this.configStore = configStore;
-            return this;
-        }
 
         /**
          * This witness's node id, which every cluster must configure as its witness peer's id.
@@ -760,36 +760,29 @@ public final class WitnessServer implements AutoCloseable {
          * application's {@code votedFor}, so changing it on a running witness makes its recorded
          * votes unattributable — treat it as fixed once deployed.
          */
-        public Builder nodeId(int nodeId) {
-            this.nodeId = nodeId;
-            return this;
-        }
-
-        /** Overrides the bind address from the configuration. */
-        public Builder bindAddress(InetSocketAddress bindAddress) {
-            this.bindAddress = bindAddress;
-            return this;
-        }
-
-        /**
-         * Overrides the timing profile from the configuration.
-         *
-         * <p>A witness usually sits on a third network, where a WAN round trip makes the LAN
-         * election timeout marginal; {@link Timings#wan()} is the profile for that.
-         */
-        public Builder timings(Timings timings) {
-            this.timings = timings;
-            return this;
-        }
+        @Setter
+        private int nodeId = Peer.MAX_ID;
 
         /**
          * Where each application's term and vote are kept. Defaults to a directory each under the
          * configured state directory; whatever is supplied must be durable, or the server refuses
          * to start.
          */
-        public Builder stateStores(StateStoreFactory stateStores) {
-            this.stateStores = stateStores;
-            return this;
+        @Setter
+        private StateStoreFactory stateStores;
+
+        /** Overrides the bind address from the configuration. */
+        @Setter
+        private InetSocketAddress bindAddress;
+
+        /**
+         * Socket receive buffer. Sized generously on purpose: a silently overflowing socket looks
+         * exactly like a partitioned network, and on a witness it looks like every tenant at once.
+         */
+        @Setter
+        private int receiveBufferBytes = 1 << 20;
+
+        private Builder() {
         }
 
         /** Only for tests: the deterministic simulation supplies a virtual clock. */
@@ -801,15 +794,6 @@ public final class WitnessServer implements AutoCloseable {
         /** Only for tests: a seeded source makes a run reproducible. */
         public Builder random(Random random) {
             this.random = Objects.requireNonNull(random, "random");
-            return this;
-        }
-
-        /**
-         * Socket receive buffer. Sized generously on purpose: a silently overflowing socket looks
-         * exactly like a partitioned network, and on a witness it looks like every tenant at once.
-         */
-        public Builder receiveBufferBytes(int receiveBufferBytes) {
-            this.receiveBufferBytes = receiveBufferBytes;
             return this;
         }
 

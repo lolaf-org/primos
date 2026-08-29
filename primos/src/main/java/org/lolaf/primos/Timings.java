@@ -20,6 +20,7 @@ import java.util.Objects;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 
 /**
@@ -147,38 +148,38 @@ public final class Timings {
         return value;
     }
 
-    /** Builder for {@link Timings}; every value defaults to the {@link Timings#lan()} profile. */
+    /**
+     * Builder for {@link Timings}; every value defaults to the {@link Timings#lan()} profile.
+     *
+     * <p>{@code @Setter} is on the fields that may be set individually, and deliberately not on
+     * {@code electionTimeoutMin}/{@code electionTimeoutMax}: those two are only ever set together,
+     * through {@link #electionTimeout}, because setting one alone is how an invalid range is
+     * built. Annotating per field rather than per class is what keeps that constraint.
+     */
     public static final class Builder {
 
+        /** How often a leader asserts itself. Must stay well below the election timeout. */
+        @Setter
         private Duration heartbeatInterval = Duration.ofMillis(50);
+
         private Duration electionTimeoutMin = Duration.ofMillis(300);
         private Duration electionTimeoutMax = Duration.ofMillis(600);
+
+        /** How often every node probes every peer. Independent of the heartbeat, and much slower. */
+        @Setter
         private Duration probeInterval = Duration.ofSeconds(1);
+
+        /** How many consecutive probes a peer may miss before it is reported down. */
+        @Setter
         private int failureThreshold = 3;
 
         private Builder() {
-        }
-
-        public Builder heartbeatInterval(Duration heartbeatInterval) {
-            this.heartbeatInterval = heartbeatInterval;
-            return this;
         }
 
         /** The inclusive range each election timeout is drawn from, afresh on every reset. */
         public Builder electionTimeout(Duration min, Duration max) {
             this.electionTimeoutMin = min;
             this.electionTimeoutMax = max;
-            return this;
-        }
-
-        public Builder probeInterval(Duration probeInterval) {
-            this.probeInterval = probeInterval;
-            return this;
-        }
-
-        /** How many consecutive probes a peer may miss before it is reported down. */
-        public Builder failureThreshold(int failureThreshold) {
-            this.failureThreshold = failureThreshold;
             return this;
         }
 

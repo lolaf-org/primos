@@ -27,6 +27,7 @@ import java.util.Set;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 
 /**
@@ -206,34 +207,41 @@ public final class ClusterConfig {
     /** Builder for {@link ClusterConfig}. Validation happens in {@link #build()}. */
     public static final class Builder {
 
+        /** Which clustered application this is. Every node of one cluster must agree on it. */
+        @Setter
         private String applicationName;
+
+        /** This node's id, unique within the application. */
+        @Setter
         private int nodeId;
+
+        /** A human-readable name for this node, used in logs. Defaults to {@code node-<id>}. */
+        @Setter
         private String nodeName;
+
+        /**
+         * Set through {@link #asWitness()} rather than directly, so that declaring a witness is one
+         * named decision rather than a type a caller has to know to pass.
+         */
         private PeerType nodeType = PeerType.APPLICATION;
+
         private final List<Peer> peers = new ArrayList<>();
+
+        /**
+         * The witness, at most one. Two would give a two-node pair four voters needing three,
+         * which is strictly worse than one.
+         */
+        @Setter
         private Peer witness;
+
+        /** Set through {@link #learnedMembership()}, which documents what it costs. */
         private boolean learnedMembership;
+
+        /** Election, heartbeat and probe intervals. */
+        @Setter
         private Timings timings = Timings.lan();
 
         private Builder() {
-        }
-
-        /** Which clustered application this is. Every node of one cluster must agree on it. */
-        public Builder applicationName(String applicationName) {
-            this.applicationName = applicationName;
-            return this;
-        }
-
-        /** This node's id, unique within the application. */
-        public Builder nodeId(int nodeId) {
-            this.nodeId = nodeId;
-            return this;
-        }
-
-        /** A human-readable name for this node, used in logs. Defaults to {@code node-<id>}. */
-        public Builder nodeName(String nodeName) {
-            this.nodeName = nodeName;
-            return this;
         }
 
         /**
@@ -258,15 +266,6 @@ public final class ClusterConfig {
         }
 
         /**
-         * The witness, at most one. Two would give a two-node pair four voters needing three,
-         * which is strictly worse than one.
-         */
-        public Builder witness(Peer witness) {
-            this.witness = witness;
-            return this;
-        }
-
-        /**
          * Declares that this witness's voters are not configured but learned from traffic.
          *
          * <p>For the standalone witness server, and only for it. That server holds no addresses in
@@ -286,11 +285,6 @@ public final class ClusterConfig {
          */
         public Builder learnedMembership() {
             this.learnedMembership = true;
-            return this;
-        }
-
-        public Builder timings(Timings timings) {
-            this.timings = timings;
             return this;
         }
 

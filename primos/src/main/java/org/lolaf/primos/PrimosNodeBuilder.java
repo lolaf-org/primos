@@ -22,6 +22,8 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.Executor;
 
+import lombok.Setter;
+
 import org.lolaf.primos.core.PrimosNodes;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
@@ -52,13 +54,33 @@ public final class PrimosNodeBuilder {
     private final ClusterConfig.Builder cluster = ClusterConfig.builder();
     private final List<PrimosListener> listeners = new ArrayList<>();
 
+    /** Where the term and vote are kept. Required. */
+    @Setter
     private StateStore store;
+
+    /** How this node reaches its peers. Required. */
+    @Setter
     private Transport transport;
+
     private MonotonicClock clock = MonotonicClock.SYSTEM;
     private Random random = new Random();
     private byte[] secret;
+
+    /**
+     * Where listener callbacks run. By default they run on the node thread, which means a slow
+     * listener stalls consensus; supplying an executor moves them off it without primos creating a
+     * thread of its own.
+     */
+    @Setter
     private Executor listenerExecutor;
+
+    /**
+     * How long a listener callback may take before it is warned about. Defaults to half the
+     * heartbeat interval, which is the point at which one starts to threaten the next heartbeat.
+     */
+    @Setter
     private Duration slowCallbackThreshold;
+
     private Duration stopTimeout = Duration.ofSeconds(5);
 
     PrimosNodeBuilder() {
@@ -115,18 +137,6 @@ public final class PrimosNodeBuilder {
         return this;
     }
 
-    /** Where the term and vote are kept. Required. */
-    public PrimosNodeBuilder store(StateStore store) {
-        this.store = store;
-        return this;
-    }
-
-    /** How this node reaches its peers. Required. */
-    public PrimosNodeBuilder transport(Transport transport) {
-        this.transport = transport;
-        return this;
-    }
-
     /** Registered before the node starts, so it cannot miss the first transition. */
     public PrimosNodeBuilder listener(PrimosListener listener) {
         listeners.add(Objects.requireNonNull(listener, "listener"));
@@ -142,25 +152,6 @@ public final class PrimosNodeBuilder {
      */
     public PrimosNodeBuilder clusterSecret(byte[] secret) {
         this.secret = secret == null ? null : secret.clone();
-        return this;
-    }
-
-    /**
-     * Where listener callbacks run. By default they run on the node thread, which means a slow
-     * listener stalls consensus; supplying an executor moves them off it without primos creating a
-     * thread of its own.
-     */
-    public PrimosNodeBuilder listenerExecutor(Executor listenerExecutor) {
-        this.listenerExecutor = listenerExecutor;
-        return this;
-    }
-
-    /**
-     * How long a listener callback may take before it is warned about. Defaults to half the
-     * heartbeat interval, which is the point at which one starts to threaten the next heartbeat.
-     */
-    public PrimosNodeBuilder slowCallbackThreshold(Duration slowCallbackThreshold) {
-        this.slowCallbackThreshold = slowCallbackThreshold;
         return this;
     }
 

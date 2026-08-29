@@ -22,7 +22,10 @@ import java.util.Objects;
 
 import org.lolaf.primos.Timings;
 
+import lombok.Builder;
+
 /** The witness server's own settings, as opposed to the applications it serves. */
+@Builder(builderClassName = "Builder")
 public final class WitnessSettings {
 
     private final InetSocketAddress bindAddress;
@@ -34,19 +37,23 @@ public final class WitnessSettings {
     private final Duration rescanInterval;
     private final Timings timings;
 
-    private WitnessSettings(Builder builder) {
-        this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
-        this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
-        this.registrationMode = builder.registrationMode;
-        this.defaultSecret = builder.defaultSecret == null ? null : builder.defaultSecret.clone();
-        this.autoRegistrationLimit = builder.autoRegistrationLimit;
-        this.reloadDebounce = builder.reloadDebounce;
-        this.rescanInterval = builder.rescanInterval;
-        this.timings = Objects.requireNonNull(builder.timings, "timings");
-    }
-
-    public static Builder builder() {
-        return new Builder();
+    private WitnessSettings(InetSocketAddress bindAddress,
+                            Path stateDirectory,
+                            RegistrationMode registrationMode,
+                            byte[] defaultSecret,
+                            int autoRegistrationLimit,
+                            Duration reloadDebounce,
+                            Duration rescanInterval,
+                            Timings timings) {
+        this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
+        this.stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory");
+        this.registrationMode = Objects.requireNonNull(registrationMode, "registrationMode");
+        // Copied rather than kept, because it is a secret and the caller's array is theirs.
+        this.defaultSecret = defaultSecret == null ? null : defaultSecret.clone();
+        this.autoRegistrationLimit = autoRegistrationLimit;
+        this.reloadDebounce = Objects.requireNonNull(reloadDebounce, "reloadDebounce");
+        this.rescanInterval = Objects.requireNonNull(rescanInterval, "rescanInterval");
+        this.timings = Objects.requireNonNull(timings, "timings");
     }
 
     public InetSocketAddress bindAddress() {
@@ -106,62 +113,23 @@ public final class WitnessSettings {
         return timings;
     }
 
+    /**
+     * Only the defaults are written out; Lombok fills in the setters and {@code build()}.
+     *
+     * <p>Two things had to line up for that to be worth doing, and they are worth recording because
+     * they do not hold for every builder here. {@code @Builder} sits on the <em>class</em>, which is
+     * what makes it copy each field's javadoc onto the setter that sets it — on a constructor the
+     * setters come from parameters and arrive undocumented. And the defaults live here rather than
+     * as {@code @Builder.Default} on the fields, because that annotation only applies when Lombok
+     * owns the constructor, and this one validates its arguments and copies the secret.
+     */
     public static final class Builder {
 
         private InetSocketAddress bindAddress = new InetSocketAddress(7420);
-        private Path stateDirectory;
         private RegistrationMode registrationMode = RegistrationMode.STRICT;
-        private byte[] defaultSecret;
         private int autoRegistrationLimit = 64;
         private Duration reloadDebounce = Duration.ofMillis(250);
         private Duration rescanInterval = Duration.ofSeconds(30);
         private Timings timings = Timings.lan();
-
-        private Builder() {
-        }
-
-        public Builder bindAddress(InetSocketAddress bindAddress) {
-            this.bindAddress = bindAddress;
-            return this;
-        }
-
-        public Builder stateDirectory(Path stateDirectory) {
-            this.stateDirectory = stateDirectory;
-            return this;
-        }
-
-        public Builder registrationMode(RegistrationMode registrationMode) {
-            this.registrationMode = Objects.requireNonNull(registrationMode, "registrationMode");
-            return this;
-        }
-
-        public Builder defaultSecret(byte[] defaultSecret) {
-            this.defaultSecret = defaultSecret;
-            return this;
-        }
-
-        public Builder autoRegistrationLimit(int autoRegistrationLimit) {
-            this.autoRegistrationLimit = autoRegistrationLimit;
-            return this;
-        }
-
-        public Builder reloadDebounce(Duration reloadDebounce) {
-            this.reloadDebounce = reloadDebounce;
-            return this;
-        }
-
-        public Builder rescanInterval(Duration rescanInterval) {
-            this.rescanInterval = rescanInterval;
-            return this;
-        }
-
-        public Builder timings(Timings timings) {
-            this.timings = Objects.requireNonNull(timings, "timings");
-            return this;
-        }
-
-        public WitnessSettings build() {
-            return new WitnessSettings(this);
-        }
     }
 }
