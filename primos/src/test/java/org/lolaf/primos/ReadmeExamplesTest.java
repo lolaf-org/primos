@@ -1,0 +1,136 @@
+/*
+ * Copyright © 2026 Lolaf.org
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.lolaf.primos;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.store.FileStateStore;
+import org.lolaf.primos.transport.UdpTransport;
+
+/**
+ * The README's examples, compiled and run.
+ *
+ * <p>Documentation that does not compile is worse than none: it is read as authoritative and
+ * costs an hour to disbelieve. Everything here is copied from README.md, so an API change that
+ * makes the README wrong breaks the build instead of quietly misleading the next reader.
+ */
+class ReadmeExamplesTest {
+
+    @TempDir
+    Path directory;
+
+    @Test
+    void the_quick_start_builds_a_node() throws IOException {
+        byte[] secret = "a-shared-cluster-secret".getBytes(StandardCharsets.UTF_8);
+        List<Peer> peers = Arrays.asList(
+                Peer.application(2, "127.0.0.1", 7421),
+                Peer.application(3, "127.0.0.1", 7422));
+
+        try (UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                .peers(peers)
+                .addressLearning(true)
+                .build();
+             PrimosNode node = PrimosNode.builder()
+                     .applicationName("orders")
+                     .nodeId(1)
+                     .peers(peers)
+                     .clusterSecret(secret)
+                     .store(new FileStateStore(directory))
+                     .transport(transport)
+                     .listener(new PrimosListener() {
+                         @Override
+                         public void onRoleChanged(Role previous, Role current, long term) {
+                         }
+                     })
+                     .build()) {
+
+            node.start();
+            assertThat(node.role()).isIn(Role.FOLLOWER, Role.CANDIDATE, Role.LEADER);
+
+            // The fencing pattern from "Using it safely": role and term read together.
+            RoleAndTerm current = node.roleAndTerm();
+            assertThat(current.isLeader()).isEqualTo(current.role() == Role.LEADER);
+            assertThat(current.term()).isNotNegative();
+        }
+    }
+
+    @Test
+    void every_stats_accessor_the_readme_names_exists() throws IOException {
+        try (UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                .peers(Arrays.asList(Peer.application(2, "127.0.0.1", 7421)))
+                .build();
+             PrimosNode node = PrimosNode.builder()
+                     .applicationName("orders")
+                     .nodeId(1)
+                     .peers(Peer.application(2, "127.0.0.1", 7421))
+                     .store(new FileStateStore(directory))
+                     .transport(transport)
+                     .build()) {
+
+            node.start();
+            PrimosStats stats = node.stats();
+
+            assertThat(stats.role()).isNotNull();
+            assertThat(stats.currentTerm()).isNotNegative();
+            assertThat(stats.timeInRole()).isNotNull();
+            assertThat(stats.electionsStarted()).isNotNegative();
+            assertThat(stats.electionsWon()).isNotNegative();
+            assertThat(stats.handoversSent()).isZero();
+            assertThat(stats.handoversAccepted()).isZero();
+            assertThat(stats.departuresObserved()).isZero();
+            assertThat(stats.drops(DropReason.BAD_TAG)).isZero();
+            assertThat(stats.totalDrops()).isZero();
+            assertThat(stats.peers()).containsKey(2);
+            assertThat(stats.peers().get(2).reachable()).isFalse();
+        }
+    }
+
+    @Test
+    void the_two_timing_profiles_the_readme_tabulates_are_what_it_says() {
+        Timings lan = Timings.lan();
+        assertThat(lan.heartbeatInterval().toMillis()).isEqualTo(50);
+        assertThat(lan.electionTimeoutMin().toMillis()).isEqualTo(300);
+        assertThat(lan.probeInterval().toMillis()).isEqualTo(1_000);
+        assertThat(lan.failureThreshold()).isEqualTo(3);
+
+        Timings wan = Timings.wan();
+        assertThat(wan.heartbeatInterval().toMillis()).isEqualTo(200);
+        assertThat(wan.electionTimeoutMin().toMillis()).isEqualTo(1_500);
+        assertThat(wan.probeInterval().toMillis()).isEqualTo(2_000);
+    }
+
+    @Test
+    void a_node_without_a_store_or_a_transport_is_refused_as_the_readme_says() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> PrimosNode.builder()
+                        .applicationName("orders")
+                        .nodeId(1)
+                        .peers(Peer.application(2, "127.0.0.1", 7421))
+                        .build())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("state store is required");
+    }
+}
