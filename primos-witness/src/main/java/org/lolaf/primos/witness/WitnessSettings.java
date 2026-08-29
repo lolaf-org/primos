@@ -22,10 +22,9 @@ import java.util.Objects;
 
 import org.lolaf.primos.Timings;
 
-import lombok.Builder;
+import lombok.Setter;
 
 /** The witness server's own settings, as opposed to the applications it serves. */
-@Builder(builderClassName = "Builder")
 public final class WitnessSettings {
 
     private final InetSocketAddress bindAddress;
@@ -37,23 +36,20 @@ public final class WitnessSettings {
     private final Duration rescanInterval;
     private final Timings timings;
 
-    private WitnessSettings(InetSocketAddress bindAddress,
-                            Path stateDirectory,
-                            RegistrationMode registrationMode,
-                            byte[] defaultSecret,
-                            int autoRegistrationLimit,
-                            Duration reloadDebounce,
-                            Duration rescanInterval,
-                            Timings timings) {
-        this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
-        this.stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory");
-        this.registrationMode = Objects.requireNonNull(registrationMode, "registrationMode");
+    private WitnessSettings(Builder builder) {
+        this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
+        this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
+        this.registrationMode = Objects.requireNonNull(builder.registrationMode, "registrationMode");
         // Copied rather than kept, because it is a secret and the caller's array is theirs.
-        this.defaultSecret = defaultSecret == null ? null : defaultSecret.clone();
-        this.autoRegistrationLimit = autoRegistrationLimit;
-        this.reloadDebounce = Objects.requireNonNull(reloadDebounce, "reloadDebounce");
-        this.rescanInterval = Objects.requireNonNull(rescanInterval, "rescanInterval");
-        this.timings = Objects.requireNonNull(timings, "timings");
+        this.defaultSecret = builder.defaultSecret == null ? null : builder.defaultSecret.clone();
+        this.autoRegistrationLimit = builder.autoRegistrationLimit;
+        this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
+        this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
+        this.timings = Objects.requireNonNull(builder.timings, "timings");
+    }
+
+    public static Builder builder() {
+        return new Builder();
     }
 
     public InetSocketAddress bindAddress() {
@@ -113,23 +109,46 @@ public final class WitnessSettings {
         return timings;
     }
 
-    /**
-     * Only the defaults are written out; Lombok fills in the setters and {@code build()}.
-     *
-     * <p>Two things had to line up for that to be worth doing, and they are worth recording because
-     * they do not hold for every builder here. {@code @Builder} sits on the <em>class</em>, which is
-     * what makes it copy each field's javadoc onto the setter that sets it — on a constructor the
-     * setters come from parameters and arrive undocumented. And the defaults live here rather than
-     * as {@code @Builder.Default} on the fields, because that annotation only applies when Lombok
-     * owns the constructor, and this one validates its arguments and copies the secret.
-     */
+    /** Builder for {@link WitnessSettings}. */
     public static final class Builder {
 
+        /** Where to listen. Not hot-reloadable: a change is read and ignored until a restart. */
+        @Setter
         private InetSocketAddress bindAddress = new InetSocketAddress(7420);
+
+        /** Where per-application term and vote files live. Must be durable local storage. */
+        @Setter
+        private Path stateDirectory;
+
+        /** Whether unconfigured applications are served. See {@link RegistrationMode}. */
+        @Setter
         private RegistrationMode registrationMode = RegistrationMode.STRICT;
+
+        /** The witness-wide secret, used for any application without one of its own. */
+        @Setter
+        private byte[] defaultSecret;
+
+        /** How many applications may auto-register, so an open witness cannot be filled up. */
+        @Setter
         private int autoRegistrationLimit = 64;
+
+        /** Quiet period after a file change before reloading, so one save is one reload. */
+        @Setter
         private Duration reloadDebounce = Duration.ofMillis(250);
+
+        /** How often the configuration directory is re-read regardless of events. */
+        @Setter
         private Duration rescanInterval = Duration.ofSeconds(30);
+
+        /** The timing profile the served nodes run with. Keep it uniform across a cluster. */
+        @Setter
         private Timings timings = Timings.lan();
+
+        private Builder() {
+        }
+
+        public WitnessSettings build() {
+            return new WitnessSettings(this);
+        }
     }
 }
