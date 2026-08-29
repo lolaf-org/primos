@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What an operator actually receives: a directory they can unpack anywhere, with every jar it
+  needs beside it and no build tool in sight. The witness is meant to be installed once and left
+  alone for years, so the distribution deliberately has no installer, no downloader and no step
+  that reaches the network at run time.
+-->
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 http://maven.apache.org/xsd/assembly-2.2.0.xsd">
+    <id>dist</id>
+
+    <formats>
+        <format>tar.gz</format>
+        <format>zip</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>lib</outputDirectory>
+            <useProjectArtifact>true</useProjectArtifact>
+            <scope>runtime</scope>
+        </dependencySet>
+    </dependencySets>
+
+    <fileSets>
+        <fileSet>
+            <directory>src/main/dist/bin</directory>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>0755</fileMode>
+        </fileSet>
+        <!--
+          The sample configuration, not a working one. It is deliberately not installed over
+          anything: an upgrade that quietly replaced witness.properties would replace the secrets
+          with placeholders, and a witness whose secret changed under it stops being able to
+          answer the clusters that depend on it.
+        -->
+        <fileSet>
+            <directory>src/main/dist/conf</directory>
+            <outputDirectory>conf-sample</outputDirectory>
+            <fileMode>0640</fileMode>
+        </fileSet>
+        <fileSet>
+            <directory>${project.basedir}/..</directory>
+            <outputDirectory></outputDirectory>
+            <includes>
+                <include>LICENSE.txt</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+</assembly>

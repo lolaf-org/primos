@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# Copyright © 2026 Lolaf.org
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The witness server. Plain sh, no build tool, nothing fetched at run time: this process is meant
+# to be installed once and left alone for years, and every moving part is one more reason it might
+# one day fail to come back up.
+set -eu
+
+home=$(cd "$(dirname "$0")/.." && pwd)
+
+: "${JAVA_HOME:=}"
+if [ -n "$JAVA_HOME" ]; then
+    java="$JAVA_HOME/bin/java"
+else
+    java=java
+fi
+
+# Small and fixed. A witness holds a few hundred bytes per served cluster and answers a handful of
+# datagrams a second; what matters is that it never pauses, not that it can grow.
+: "${PRIMOS_WITNESS_OPTS:=-Xms64m -Xmx128m -XX:+ExitOnOutOfMemoryError}"
+
+# The state directory is the one thing here that must survive. Losing it lets the witness grant a
+# second vote in a term it has already voted in, which elects two leaders — the exact failure it
+# was deployed to prevent.
+exec "$java" $PRIMOS_WITNESS_OPTS \
+    -cp "$home/lib/*" \
+    org.lolaf.primos.witness.WitnessMain "$@"

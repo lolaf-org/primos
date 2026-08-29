@@ -20,6 +20,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 
+import org.lolaf.primos.Timings;
+
 /** The witness server's own settings, as opposed to the applications it serves. */
 public final class WitnessSettings {
 
@@ -30,6 +32,7 @@ public final class WitnessSettings {
     private final int autoRegistrationLimit;
     private final Duration reloadDebounce;
     private final Duration rescanInterval;
+    private final Timings timings;
 
     private WitnessSettings(Builder builder) {
         this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
@@ -39,6 +42,7 @@ public final class WitnessSettings {
         this.autoRegistrationLimit = builder.autoRegistrationLimit;
         this.reloadDebounce = builder.reloadDebounce;
         this.rescanInterval = builder.rescanInterval;
+        this.timings = Objects.requireNonNull(builder.timings, "timings");
     }
 
     public static Builder builder() {
@@ -90,6 +94,18 @@ public final class WitnessSettings {
         return rescanInterval;
     }
 
+    /**
+     * The timing profile the served nodes run with.
+     *
+     * <p>Defaults to {@link Timings#lan()}, matching the library, because a witness whose pre-vote
+     * window differs from its cluster's answers questions the cluster is not asking. A witness
+     * genuinely on a third network wants {@link Timings#wan()}: a 50ms WAN round trip makes the
+     * LAN election timeout marginal.
+     */
+    public Timings timings() {
+        return timings;
+    }
+
     public static final class Builder {
 
         private InetSocketAddress bindAddress = new InetSocketAddress(7420);
@@ -99,6 +115,7 @@ public final class WitnessSettings {
         private int autoRegistrationLimit = 64;
         private Duration reloadDebounce = Duration.ofMillis(250);
         private Duration rescanInterval = Duration.ofSeconds(30);
+        private Timings timings = Timings.lan();
 
         private Builder() {
         }
@@ -135,6 +152,11 @@ public final class WitnessSettings {
 
         public Builder rescanInterval(Duration rescanInterval) {
             this.rescanInterval = rescanInterval;
+            return this;
+        }
+
+        public Builder timings(Timings timings) {
+            this.timings = Objects.requireNonNull(timings, "timings");
             return this;
         }
 

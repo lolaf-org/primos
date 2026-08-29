@@ -38,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.lolaf.primos.ClusterConfig;
+import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.MonotonicClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -273,7 +274,28 @@ public final class FileConfigStore implements ConfigStore {
         builder.defaultSecret(secretValue(properties, "secret", directory));
         builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
+        builder.timings(timingsProfile(properties.getProperty("timings.profile", "lan")));
         return builder.build();
+    }
+
+    /**
+     * A named profile rather than seven separate intervals.
+     *
+     * <p>The relationships between them are what has to hold — the election timeout an order of
+     * magnitude above the round trip, and so on — and those are far easier to get wrong one key at
+     * a time than to choose between two profiles that are each internally consistent. A witness on
+     * a third network wants {@code wan}; one in the same datacentre wants the default.
+     */
+    private static Timings timingsProfile(String profile) {
+        String name = profile.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("lan".equals(name)) {
+            return Timings.lan();
+        }
+        if ("wan".equals(name)) {
+            return Timings.wan();
+        }
+        throw new IllegalArgumentException(
+                "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
     }
 
     private ApplicationConfig readApplication(Path file, WitnessSettings settings) {
