@@ -171,4 +171,155 @@ class HandoverTest {
         // assertion at the end.
         return new Simulation(seed).checking(Invariants.all());
     }
+
+    // ------------------------------------------------- announcing a departure
+
+    /**
+     * The probe timeout a real JVM deployment would use.
+     *
+     * <p>Long on purpose, and not a strawman: a stop-the-world collection is indistinguishable
+     * from a dead process, so operators raise this precisely so a garbage collection is not
+     * reported as a failure. Every test below is about the gap that tuning opens — a node that
+     * shut down politely would otherwise be reported alive for this entire window.
+     */
+    private static final Timings GC_TOLERANT = Timings.builder()
+            .probeInterval(Duration.ofSeconds(10))
+            .failureThreshold(3)
+            .build();
+
+    @Test
+    void a_departing_follower_is_reported_down_at_once_rather_than_after_the_probe_timeout() {
+        Simulation simulation = simulation(8L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false, GC_TOLERANT);
+        settleWithReachability(simulation, cluster);
+
+        ElectionCluster.NodeUnderTest leaving = follower(cluster);
+        ElectionCluster.NodeUnderTest watcher = cluster.node(cluster.leader().get().id());
+        assertThat(watcher.election().isReachable(leaving.id())).isTrue();
+
+        leaving.stopCleanly();
+        simulation.run(Duration.ofSeconds(1));
+
+        assertThat(watcher.election().isReachable(leaving.id()))
+                .as("silence would have taken 30 seconds to be believed here; the node knew it was"
+                        + " going and said so")
+                .isFalse();
+        assertThat(watcher.election().departuresObserved()).isEqualTo(1);
+    }
+
+    @Test
+    void without_the_announcement_the_same_departure_takes_the_whole_probe_timeout() {
+        Simulation simulation = simulation(9L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false, GC_TOLERANT);
+        settleWithReachability(simulation, cluster);
+
+        ElectionCluster.NodeUnderTest leaving = follower(cluster);
+        ElectionCluster.NodeUnderTest watcher = cluster.node(cluster.leader().get().id());
+
+        // A crash says nothing, which is the only other way a node can go.
+        leaving.crash();
+        simulation.run(Duration.ofSeconds(1));
+
+        assertThat(watcher.election().isReachable(leaving.id()))
+                .as("this is the gap the announcement closes; if silence were noticed this fast"
+                        + " the test above would be proving nothing")
+                .isTrue();
+
+        simulation.run(Duration.ofSeconds(40));
+        assertThat(watcher.election().isReachable(leaving.id()))
+                .as("and it is still detected eventually, by measurement rather than by being told")
+                .isFalse();
+    }
+
+    @Test
+    void a_departure_does_not_shrink_the_quorum() {
+        Simulation simulation = simulation(10L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 5, false, GC_TOLERANT);
+        settleWithReachability(simulation, cluster);
+
+        // Three of five leave politely, so a witness to it has been told the cluster is down to
+        // two. Quorum is configured, not observed: two is not a majority of five and must not
+        // become one just because the others were well mannered about going.
+        int leader = cluster.leader().get().id();
+        int stopped = 0;
+        for (ElectionCluster.NodeUnderTest node : cluster.nodes()) {
+            if (node.id() != leader && stopped < 3) {
+                node.stopCleanly();
+                stopped++;
+            }
+        }
+        simulation.run(Duration.ofSeconds(20));
+
+        assertThat(cluster.leaderCount())
+                .as("reading a departure as 'the cluster shrank' is how a split brain is talked"
+                        + " into existence")
+                .isZero();
+    }
+
+    @Test
+    void a_departure_cannot_make_a_leader_stand_down() {
+        Simulation simulation = simulation(11L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false, GC_TOLERANT);
+        settleWithReachability(simulation, cluster);
+
+        ElectionCluster.NodeUnderTest leader = cluster.node(cluster.leader().get().id());
+        long term = leader.currentTerm();
+
+        // Straight at the handler, twice, as a forgery or a replay would arrive. CheckQuorum reads
+        // lastRoundTripNanos, which this must not touch — otherwise a captured datagram would be a
+        // way to depose a healthy leader.
+        for (ElectionCluster.NodeUnderTest peer : cluster.nodes()) {
+            if (peer.id() != leader.id()) {
+                leader.election().onLeaving(peer.id(), term);
+            }
+        }
+        simulation.run(Duration.ofSeconds(1));
+
+        assertThat(leader.role()).isEqualTo(Role.LEADER);
+        assertThat(leader.currentTerm()).isEqualTo(term);
+    }
+
+    @Test
+    void a_peer_that_comes_back_after_announcing_is_reported_up_again() {
+        Simulation simulation = simulation(12L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false, GC_TOLERANT);
+        settleWithReachability(simulation, cluster);
+
+        ElectionCluster.NodeUnderTest leader = cluster.node(cluster.leader().get().id());
+        ElectionCluster.NodeUnderTest other = follower(cluster);
+        leader.election().onLeaving(other.id(), leader.currentTerm());
+
+        assertThat(leader.election().isReachable(other.id())).isFalse();
+
+        // It never actually went, so its next probe reply corrects the record. That self-healing
+        // is what bounds what a forged departure can do to one probe interval.
+        simulation.run(Duration.ofSeconds(25));
+
+        assertThat(leader.election().isReachable(other.id()))
+                .as("being told is a hint; measurement stays authoritative")
+                .isTrue();
+    }
+
+    /**
+     * Elects a leader and then waits for the probes to have actually established reachability.
+     *
+     * <p>Necessary because the probe interval here is deliberately long. A peer starts out
+     * neither up nor down, and only becomes "up" when its first probe reply lands — so without
+     * this the tests below would be asserting a transition away from a state nothing had reached.
+     */
+    private static void settleWithReachability(Simulation simulation, ElectionCluster cluster) {
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        simulation.runUntil(() -> cluster.nodes().stream().allMatch(node ->
+                        cluster.nodes().stream()
+                                .filter(peer -> peer.id() != node.id())
+                                .allMatch(peer -> node.election().isReachable(peer.id()))),
+                Duration.ofSeconds(60));
+    }
+
+    private static ElectionCluster.NodeUnderTest follower(ElectionCluster cluster) {
+        return cluster.nodes().stream()
+                .filter(node -> node.role() == Role.FOLLOWER && !node.isWitness())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no follower"));
+    }
 }

@@ -231,6 +231,7 @@ public final class ElectionCluster {
         public void stopCleanly() {
             if (running) {
                 node.handOverLeadership();
+                node.announceDeparture();
             }
             running = false;
             node = null;

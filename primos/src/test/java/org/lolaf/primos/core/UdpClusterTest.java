@@ -256,4 +256,28 @@ class UdpClusterTest {
                         + " waiting — the timeout would have replaced the leader too, just later")
                 .isEqualTo(1);
     }
+
+    @Test
+    void a_follower_stopped_cleanly_is_reported_down_without_waiting_for_probes() {
+        int[] ports = {freePort(), freePort(), freePort()};
+        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
+        PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+        await().atMost(15, TimeUnit.SECONDS).until(() ->
+                one.stats().peers().values().stream().allMatch(peer -> peer.reachable()));
+
+        // A follower, so nothing about leadership is in play — only the reporting.
+        PrimosNode follower = one.role() == Role.LEADER ? two : one;
+        PrimosNode watcher = follower == one ? two : one;
+        int departing = follower.config().nodeId();
+        follower.stop();
+
+        // Comfortably inside the probe timeout, which is what the announcement buys. On a real
+        // deployment that timeout is tuned up for garbage collection, making this gap much larger.
+        await().atMost(2, TimeUnit.SECONDS)
+                .until(() -> !watcher.stats().peers().get(departing).reachable());
+
+        assertThat(watcher.stats().peers().get(departing).reachable()).isFalse();
+    }
 }

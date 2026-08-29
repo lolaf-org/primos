@@ -56,4 +56,13 @@ public interface MessageHandler {
      * about one round trip.
      */
     void onTimeoutNow(int senderId, long term);
+
+    /**
+     * A peer announcing that it is shutting down.
+     *
+     * <p>A reachability hint and nothing more. Silence is the only other way to learn this, and
+     * silence has to be given a long benefit of the doubt on the JVM, because a stop-the-world
+     * pause looks exactly like a dead node.
+     */
+    void onLeaving(int senderId, long term);
 }

@@ -65,4 +65,9 @@ final class RecordingHandler implements MessageHandler {
     public void onTimeoutNow(int senderId, long term) {
         received.add("timeoutNow(" + senderId + "," + term + ")");
     }
+
+    @Override
+    public void onLeaving(int senderId, long term) {
+        received.add("leaving(" + senderId + "," + term + ")");
+    }
 }

@@ -61,6 +61,8 @@ class CodecRoundTripTest {
                 .isEqualTo("pingReply(3,7,seq=99)");
         assertThat(decode(decoder, encoder.timeoutNow(buffer, 7)))
                 .isEqualTo("timeoutNow(3,7)");
+        assertThat(decode(decoder, encoder.leaving(buffer, 7)))
+                .isEqualTo("leaving(3,7)");
 
         assertThat(drops.total()).isZero();
     }

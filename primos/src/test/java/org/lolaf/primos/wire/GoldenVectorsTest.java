@@ -128,6 +128,7 @@ class GoldenVectorsTest {
         assertThat(MessageType.PING.messageBytes()).isEqualTo(60);
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);
         assertThat(MessageType.TIMEOUT_NOW.messageBytes()).isEqualTo(52);
+        assertThat(MessageType.LEAVING.messageBytes()).isEqualTo(52);
         assertThat(WireFormat.HEADER_BYTES).isEqualTo(52);
     }
 
@@ -154,7 +155,8 @@ class GoldenVectorsTest {
         assertThat(MessageType.forCode(0x05)).isEqualTo(MessageType.PING);
         assertThat(MessageType.forCode(0x06)).isEqualTo(MessageType.PING_REPLY);
         assertThat(MessageType.forCode(0x07)).isEqualTo(MessageType.TIMEOUT_NOW);
-        assertThat(MessageType.forCode(0x08)).isNull();
+        assertThat(MessageType.forCode(0x08)).isEqualTo(MessageType.LEAVING);
+        assertThat(MessageType.forCode(0x09)).isNull();
     }
 
     private static String hex(ByteBuffer buffer) {

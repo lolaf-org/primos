@@ -49,6 +49,7 @@ public final class PrimosStats {
     private final long electionsWon;
     private final long handoversSent;
     private final long handoversAccepted;
+    private final long departuresObserved;
     private final Map<DropReason, Long> drops;
     private final Map<Integer, PeerStats> peers;
 
@@ -59,6 +60,7 @@ public final class PrimosStats {
                        long electionsWon,
                        long handoversSent,
                        long handoversAccepted,
+                       long departuresObserved,
                        Map<DropReason, Long> drops,
                        Map<Integer, PeerStats> peers) {
         this.role = Objects.requireNonNull(role, "role");
@@ -68,6 +70,7 @@ public final class PrimosStats {
         this.electionsWon = electionsWon;
         this.handoversSent = handoversSent;
         this.handoversAccepted = handoversAccepted;
+        this.departuresObserved = departuresObserved;
 
         EnumMap<DropReason, Long> allReasons = new EnumMap<>(DropReason.class);
         for (DropReason reason : DropReason.values()) {
@@ -95,6 +98,17 @@ public final class PrimosStats {
     /** How many times this node campaigned because a departing leader handed over to it. */
     public long handoversAccepted() {
         return handoversAccepted;
+    }
+
+    /**
+     * How many peers have told this node they were shutting down.
+     *
+     * <p>Read against the peer-down events: departures that were announced are orderly shutdowns,
+     * and the rest were inferred from silence — a crash, a partition, or a garbage collection long
+     * enough to look like one. The two have very different meanings on a dashboard.
+     */
+    public long departuresObserved() {
+        return departuresObserved;
     }
 
     /** How many datagrams were discarded for one reason. Never null; zero if it never happened. */

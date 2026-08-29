@@ -213,7 +213,7 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
                 running = false;
             }
         }
-        handOverLeadership();
+        announceShutdown();
         publish();
     }
 
@@ -229,16 +229,19 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
      * must not become an exception on a dying thread that nobody will ever see — the cluster falls
      * back to its election timeout, which is what it would have done without any of this.
      */
-    private void handOverLeadership() {
+    private void announceShutdown() {
         if (election.isFailed()) {
             // A failed node has no leadership to give: it stood down when it failed, and it cannot
-            // vouch for a term it may not have persisted.
+            // vouch for a term it may not have persisted. It has already been reported down.
             return;
         }
         try {
+            // Order matters. The successor should start campaigning before anything else happens,
+            // and the departure notice is bookkeeping that can follow it.
             election.handOverLeadership();
+            election.announceDeparture();
         } catch (RuntimeException e) {
-            log.debug("cluster '{}': node {} could not hand over leadership: {}",
+            log.debug("cluster '{}': node {} could not announce its shutdown: {}",
                     config.applicationName(), config.nodeId(), e.toString());
         }
     }

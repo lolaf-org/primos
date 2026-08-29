@@ -626,7 +626,22 @@ public final class WitnessServer implements AutoCloseable {
             this.store = store;
         }
 
+        /**
+         * Tells this application's cluster the witness is going away, then releases everything.
+         *
+         * <p>Worth the datagram. A cluster whose witness has silently gone is back to the fault
+         * tolerance it has without one, and the sooner it says so the sooner somebody looks — a
+         * two-node pair in that state tolerates zero failures and looks perfectly healthy.
+         */
         private void close() {
+            if (!failed && node != null) {
+                try {
+                    node.announceDeparture();
+                } catch (RuntimeException e) {
+                    log.debug("cluster '{}': could not announce the witness leaving: {}",
+                            name, e.toString());
+                }
+            }
             transport.close();
             store.close();
         }

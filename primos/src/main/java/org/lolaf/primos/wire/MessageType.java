@@ -48,7 +48,15 @@ public enum MessageType {
      * <p>Pure header: the sender is the leader handing over and the term is the one it holds,
      * which is everything the target needs to decide whether the instruction is current.
      */
-    TIMEOUT_NOW(0x07, 0);
+    TIMEOUT_NOW(0x07, 0),
+
+    /**
+     * A node telling its peers it is shutting down, so they need not wait out a probe timeout.
+     *
+     * <p>Pure header, and purely a reachability hint: it says "stop expecting answers from me",
+     * never "change the voter set". See {@code ElectionNode#onLeaving}.
+     */
+    LEAVING(0x08, 0);
 
     private static final MessageType[] BY_CODE = new MessageType[256];
 

@@ -160,6 +160,7 @@ final class WitnessClient implements AutoCloseable {
         private boolean granted;
         private boolean answered;
         private boolean handedOver;
+        private boolean leaving;
 
         @Override
         public void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote) {
@@ -197,6 +198,12 @@ final class WitnessClient implements AutoCloseable {
         @Override
         public void onTimeoutNow(int senderId, long term) {
             this.handedOver = true;
+        }
+
+        /** The witness announcing it is going away, which a cluster wants to hear promptly. */
+        @Override
+        public void onLeaving(int senderId, long term) {
+            this.leaving = true;
         }
     }
 }

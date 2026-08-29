@@ -105,4 +105,9 @@ final class CapturedReply implements MessageHandler {
     public void onTimeoutNow(int senderId, long term) {
         messages.add("timeoutNow(" + senderId + "," + term + ")");
     }
+
+    @Override
+    public void onLeaving(int senderId, long term) {
+        messages.add("leaving(" + senderId + "," + term + ")");
+    }
 }

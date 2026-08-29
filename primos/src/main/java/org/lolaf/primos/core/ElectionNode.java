@@ -117,6 +117,7 @@ public final class ElectionNode implements MessageHandler {
     private long leadershipsRelinquished;
     private long handoversSent;
     private long handoversAccepted;
+    private long departuresObserved;
 
     public ElectionNode(ClusterConfig config,
                         StateStore store,
@@ -380,7 +381,7 @@ public final class ElectionNode implements MessageHandler {
         return new PrimosStats(role, currentTerm,
                 java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
                 electionsStarted, electionsWon, handoversSent, handoversAccepted,
-                drops.snapshot(), peerStats());
+                departuresObserved, drops.snapshot(), peerStats());
     }
 
     private void onDatagram(ByteBuffer datagram) {
@@ -695,6 +696,89 @@ public final class ElectionNode implements MessageHandler {
         log.info("cluster '{}': node {} is campaigning immediately, handed over by node {} in"
                         + " term {}", config.applicationName(), config.nodeId(), senderId, term);
         startElection();
+    }
+
+    /**
+     * A peer has said it is shutting down, so it is marked unreachable now rather than in silence.
+     *
+     * <p><strong>Why this message exists at all.</strong> Every other way of learning a node has
+     * gone is silence, and silence has to be given a long benefit of the doubt on the JVM: a
+     * stop-the-world pause is indistinguishable from a dead process, so the probe timeout gets
+     * tuned up — often to tens of seconds — precisely so a garbage collection is not reported as a
+     * failure. That tuning is correct, and it means a node that shut down politely would be
+     * reported as alive for that whole window. This closes exactly that gap, and only that one: a
+     * shutdown is the one departure the departing node knows about in advance and can say out
+     * loud. Crashes, kills and partitions still take the probe timeout, as they must.
+     *
+     * <p><strong>What it deliberately does not do.</strong> It touches the probe state and nothing
+     * else — not the election timer, not the leader id, not {@code lastRoundTripNanos}, and above
+     * all not the voter count. Quorum is computed from configured membership and never from who
+     * happens to be reachable; a cluster of five with two gone still needs three votes. Reading a
+     * departure as "the cluster shrank" is how a split brain gets talked into existence.
+     *
+     * <p>Leaving {@code lastRoundTripNanos} alone is the sharp one. CheckQuorum decides whether a
+     * leader may keep leading from that map, so if this cleared it, a forged or replayed departure
+     * would be a way to make a healthy leader stand down. Contact that genuinely happened stays
+     * recorded, and goes stale on its own schedule.
+     *
+     * <p>What a forged one can do is therefore bounded: mark a live peer unreachable until its
+     * next probe reply arrives, which self-corrects within one probe interval. It cannot move a
+     * term, spend a vote, or make a leader.
+     */
+    @Override
+    public void onLeaving(int senderId, long term) {
+        if (term > currentTerm) {
+            // The universal rule, applied here as everywhere else. Nothing below depends on it.
+            stepDown(term);
+        }
+        Probe probe = probes.get(senderId);
+        if (probe == null) {
+            return;
+        }
+        probe.awaitingReply = false;
+        // Held at the threshold rather than merely marked down, so it stays down until the peer
+        // actually answers something. A reply resets this to zero and reports it up again.
+        probe.consecutiveMisses = timings.failureThreshold();
+        departuresObserved++;
+        if (!probe.reachable) {
+            // Already down, or never yet seen up. Nothing changed, so nothing is reported — the
+            // same discipline the probe path follows, so one departure is never two events.
+            return;
+        }
+        probe.reachable = false;
+        log.info("cluster '{}': {} {} said it is shutting down",
+                config.applicationName(), probe.peer.isWitness() ? "witness" : "peer", senderId);
+        listener.onPeerDown(probe.peer);
+    }
+
+    /**
+     * Tells every peer this node is going away, so none of them has to wait out a probe timeout.
+     *
+     * <p>Sent by <em>any</em> node stopping cleanly, whatever its role — unlike the handover
+     * above, which only a leader has anything to send. A follower's departure costs the cluster
+     * nothing, but being told about it promptly is the difference between a status page that is
+     * right and one that is thirty seconds stale.
+     *
+     * <p>Best-effort, like the handover: one datagram per peer, nothing waits for it, and if it is
+     * lost the probe timeout notices in the ordinary way.
+     *
+     * @return how many peers were told
+     */
+    public int announceDeparture() {
+        if (peers.isEmpty()) {
+            return 0;
+        }
+        for (Peer peer : peers) {
+            send(peer.id(), encoder.leaving(sendBuffer, currentTerm));
+        }
+        log.info("cluster '{}': node {} told {} peer(s) it is shutting down",
+                config.applicationName(), config.nodeId(), peers.size());
+        return peers.size();
+    }
+
+    /** How many peers this node has seen announce a clean departure. */
+    public long departuresObserved() {
+        return departuresObserved;
     }
 
     /**

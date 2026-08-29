@@ -96,6 +96,16 @@ public final class MessageEncoder {
         return finish(out);
     }
 
+    /**
+     * Tells a peer this node is shutting down, so it need not wait out a probe timeout.
+     *
+     * <p>Nothing but the header, because it asserts nothing beyond its own sender's departure.
+     */
+    public ByteBuffer leaving(ByteBuffer out, long term) {
+        header(out, MessageType.LEAVING, 0, term);
+        return finish(out);
+    }
+
     /** A reachability probe. */
     public ByteBuffer ping(ByteBuffer out, long term, long sequence) {
         header(out, MessageType.PING, 0, term);

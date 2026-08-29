@@ -199,6 +199,9 @@ public final class MessageDecoder {
             case TIMEOUT_NOW:
                 handler.onTimeoutNow(senderId, term);
                 break;
+            case LEAVING:
+                handler.onLeaving(senderId, term);
+                break;
             default:
                 throw new IllegalStateException("unhandled message type " + type);
         }
