@@ -207,12 +207,21 @@ class FailedStateTest {
 
         private final Throwable failure;
 
+        private long sendsDropped;
+
         private ThrowingTransport(Throwable failure) {
             this.failure = failure;
         }
 
         @Override
         public void send(int peerId, ByteBuffer datagram) {
+            // Nothing goes anywhere, and the SPI says a transport must be able to say so.
+            sendsDropped++;
+        }
+
+        @Override
+        public long sendsDropped() {
+            return sendsDropped;
         }
 
         @Override

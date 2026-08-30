@@ -61,6 +61,25 @@ public interface Transport extends AutoCloseable {
     int poll(long timeoutNanos, DatagramHandler handler);
 
     /**
+     * How many datagrams this transport never handed to the network, for any reason.
+     *
+     * <p>Part of the contract rather than a convenience, and the reason is a bug this project
+     * already had: {@link #send} promises a failure is "counted and logged rather than propagated",
+     * and three separate implementations had paths that returned without doing either — a peer that
+     * could never be sent to looked exactly like a peer that was simply not answering. A transport
+     * may drop anything; it must be able to say how much of what it dropped.
+     *
+     * <p><strong>This counts what never left, not what was lost on the way.</strong> Datagrams the
+     * network discarded after this transport handed them over are invisible here, exactly as they
+     * are to a UDP socket — the simulated network's seeded loss and its partitions are network
+     * behaviour and are counted there instead. What belongs here is a closed transport, an id the
+     * transport has no address for, and a socket that refused the write.
+     *
+     * <p>Monotonic, and flat on a healthy transport, which is what makes it worth alerting on.
+     */
+    long sendsDropped();
+
+    /**
      * Makes a blocked {@link #poll} return promptly. The one method other threads may call, so
      * {@code stop()} does not have to wait out a timeout.
      */

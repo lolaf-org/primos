@@ -36,23 +36,17 @@ public final class LoopbackNetwork {
 
     private final Map<Integer, LinkedBlockingQueue<byte[]>> mailboxes = new ConcurrentHashMap<>();
 
-    private volatile long sentToNobody;
-
     /** A transport for one node. */
     public Transport transportFor(int nodeId) {
         mailboxes.computeIfAbsent(nodeId, id -> new LinkedBlockingQueue<>());
         return new LoopbackTransport(nodeId);
     }
 
-    /** Datagrams addressed to a node this network never registered. Should stay at zero. */
-    public long sentToNobody() {
-        return sentToNobody;
-    }
-
     private final class LoopbackTransport implements Transport {
 
         private final int nodeId;
         private volatile boolean closed;
+        private volatile long sendsDropped;
 
         private LoopbackTransport(int nodeId) {
             this.nodeId = nodeId;
@@ -61,6 +55,7 @@ public final class LoopbackNetwork {
         @Override
         public void send(int peerId, ByteBuffer datagram) {
             if (closed) {
+                sendsDropped++;
                 return;
             }
             LinkedBlockingQueue<byte[]> mailbox = mailboxes.get(peerId);
@@ -68,7 +63,7 @@ public final class LoopbackNetwork {
                 // Sending into the void, exactly as a datagram to a host that is not listening.
                 // Counted so that a test naming a peer that was never registered fails on the
                 // counter rather than on a silence it has to work backwards from.
-                sentToNobody++;
+                sendsDropped++;
                 return;
             }
             byte[] copy = new byte[datagram.remaining()];
@@ -105,6 +100,11 @@ public final class LoopbackNetwork {
             }
             handler.onDatagram(ByteBuffer.wrap(bytes));
             return 1;
+        }
+
+        @Override
+        public long sendsDropped() {
+            return sendsDropped;
         }
 
         @Override

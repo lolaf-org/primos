@@ -261,7 +261,8 @@ final class RoutedTransport implements Transport {
      * either sending or recording anything is indistinguishable from one that worked, and a
      * witness that silently fails to answer looks exactly like a witness nobody is asking.
      */
-    long sendsDropped() {
+    @Override
+    public long sendsDropped() {
         return undeliverable + sendFailures + sendsWhileClosed;
     }
 

@@ -138,6 +138,47 @@ abstract class TransportContractTest {
                 .doesNotThrowAnyException();
     }
 
+    // ------------------------------------------------- saying what was dropped
+
+    /**
+     * A transport may drop anything, and must be able to say how much of what it dropped.
+     *
+     * <p>A send that returns without either sending or recording anything is indistinguishable
+     * from one that worked, so broken configuration presented as a silent partition. The rule is
+     * in the SPI rather than in each implementation's own vocabulary precisely so it can be checked
+     * once, here, against every implementation there will ever be.
+     *
+     * <p>What is asserted is deliberately only what every transport can honestly mean. Sending to
+     * an id the transport has no address for is <em>not</em> here: it is a real drop for the UDP
+     * and loopback transports, which have address tables, and a meaningless question for the
+     * simulated one, which has none. That case keeps its own test beside the implementation whose
+     * counter it is.
+     */
+    @Test
+    void a_new_transport_has_dropped_nothing() {
+        assertThat(a.sendsDropped()).isZero();
+    }
+
+    @Test
+    void a_send_that_reaches_a_peer_is_not_counted_as_dropped() {
+        a.send(NODE_B, wrap("delivered"));
+
+        assertThat(a.sendsDropped())
+                .as("flat on a healthy transport, which is the whole of what makes it alertable")
+                .isZero();
+    }
+
+    @Test
+    void a_send_after_close_is_counted_rather_than_silently_swallowed() {
+        a.close();
+
+        a.send(NODE_B, wrap("too late"));
+
+        assertThat(a.sendsDropped())
+                .as("expected during shutdown and harmless, but still a datagram that never left")
+                .isEqualTo(1);
+    }
+
     @Test
     void closing_twice_is_harmless() {
         assertThatCode(() -> {

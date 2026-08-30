@@ -309,6 +309,7 @@ public final class UdpTransport implements Transport {
      * different responses. A name that will not resolve is not among them — that is refused at
      * construction rather than counted here.
      */
+    @Override
     public long sendsDropped() {
         return sendFailures + sendsWhileClosed + sendsToUnknownPeer;
     }

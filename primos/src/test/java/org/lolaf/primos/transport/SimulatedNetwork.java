@@ -207,6 +207,15 @@ public final class SimulatedNetwork {
         return ((long) from << 32) | (to & 0xFFFFFFFFL);
     }
 
+    /**
+     * Hands a datagram to the network.
+     *
+     * <p>A mailbox is created for a destination that has none yet, and that is deliberate rather
+     * than sloppy: tests routinely assert on what a node <em>sent</em> to a peer that never had a
+     * transport of its own, calling {@link #transportFor} afterwards to read it. A simulated
+     * network has no address table, so unlike a real transport it has no notion of an id it cannot
+     * reach — the only send it drops is one from a closed transport.
+     */
     private void enqueue(int from, int to, ByteBuffer datagram) {
         sent++;
         if (severed.contains(link(from, to))) {
@@ -277,6 +286,7 @@ public final class SimulatedNetwork {
 
         private final int nodeId;
         private boolean closed;
+        private long sendsDropped;
 
         private SimulatedTransport(int nodeId) {
             this.nodeId = nodeId;
@@ -284,9 +294,16 @@ public final class SimulatedNetwork {
 
         @Override
         public void send(int peerId, ByteBuffer datagram) {
-            if (!closed) {
-                enqueue(nodeId, peerId, datagram);
+            if (closed) {
+                sendsDropped++;
+                return;
             }
+            enqueue(nodeId, peerId, datagram);
+        }
+
+        @Override
+        public long sendsDropped() {
+            return sendsDropped;
         }
 
         @Override
