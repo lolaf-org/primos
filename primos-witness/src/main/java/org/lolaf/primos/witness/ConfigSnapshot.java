@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.Getter;
+
 import java.util.*;
 
 /**
@@ -23,6 +25,7 @@ import java.util.*;
  * <p>The server reads a volatile reference to one of these; a reload publishes a new one in a
  * single write. There is no lock, no torn configuration, and no way to serve half an update.
  */
+@Getter
 public final class ConfigSnapshot {
 
     private final WitnessSettings settings;
@@ -32,14 +35,6 @@ public final class ConfigSnapshot {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.applications = Collections.unmodifiableMap(
                 new LinkedHashMap<>(Objects.requireNonNull(applications, "applications")));
-    }
-
-    public WitnessSettings settings() {
-        return settings;
-    }
-
-    public Map<String, ApplicationConfig> applications() {
-        return applications;
     }
 
     public Set<String> applicationNames() {

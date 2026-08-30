@@ -15,21 +15,23 @@
  */
 package org.lolaf.primos.transport;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import java.io.IOException;
-import java.net.DatagramSocket;
-import java.net.InetSocketAddress;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.concurrent.TimeUnit;
-
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.wire.WireFormat;
 
-/** The same contract as every other transport, over a real socket. */
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * The same contract as every other transport, over a real socket.
+ */
 class UdpTransportTest extends TransportContractTest {
 
     private static final String LOOPBACK = "127.0.0.1";
@@ -37,10 +39,17 @@ class UdpTransportTest extends TransportContractTest {
     private int portA;
     private int portB;
 
+    private static ByteBuffer datagram() {
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.HEADER_BYTES);
+        buffer.position(WireFormat.HEADER_BYTES);
+        buffer.flip();
+        return buffer;
+    }
+
     @Override
     protected void createTransports() {
-        portA = freePort();
-        portB = freePort();
+        portA = Ports.free();
+        portB = Ports.free();
         a = udp(portA, Peer.application(NODE_B, LOOPBACK, portB));
         b = udp(portB, Peer.application(NODE_A, LOOPBACK, portA));
     }
@@ -64,8 +73,8 @@ class UdpTransportTest extends TransportContractTest {
     @Test
     void a_peer_that_is_not_listening_costs_a_send_but_not_an_exception() {
         UdpTransport transport = (UdpTransport) a;
-        int deadPort = freePort();
-        Transport toNowhere = udp(freePort(), Peer.application(7, LOOPBACK, deadPort));
+        int deadPort = Ports.free();
+        Transport toNowhere = udp(Ports.free(), Peer.application(7, LOOPBACK, deadPort));
 
         for (int i = 0; i < 20; i++) {
             toNowhere.send(7, wrap("into the void"));
@@ -122,27 +131,19 @@ class UdpTransportTest extends TransportContractTest {
                 .isFalse();
     }
 
+    // ------------------------------------------------- sends that never happen
+
     private Transport udp(int port, Peer... peers) {
         try {
             return UdpTransport.builder()
                     .bindAddress(new InetSocketAddress(LOOPBACK, port))
-                    .peers(java.util.Arrays.asList(peers))
+                    .peers(Arrays.asList(peers))
                     .clusterName("test")
                     .build();
         } catch (IOException e) {
             throw new IllegalStateException("cannot bind " + port, e);
         }
     }
-
-    private static int freePort() {
-        try (DatagramSocket socket = new DatagramSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("no free port", e);
-        }
-    }
-
-    // ------------------------------------------------- sends that never happen
 
     /**
      * Every way a send can fail to reach the wire, each proved to be counted.
@@ -155,7 +156,7 @@ class UdpTransportTest extends TransportContractTest {
     void a_send_to_a_peer_that_was_never_configured_is_counted() throws IOException {
         try (UdpTransport transport = UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
-                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, freePort())))
+                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, Ports.free())))
                 .build()) {
 
             transport.send(99, datagram());
@@ -205,7 +206,7 @@ class UdpTransportTest extends TransportContractTest {
         // putting anything on the wire.
         try (UdpTransport transport = UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
-                .peers(Collections.singletonList(Peer.application(NODE_B, "localhost", freePort())))
+                .peers(Collections.singletonList(Peer.application(NODE_B, "localhost", Ports.free())))
                 .build()) {
 
             transport.send(NODE_B, datagram());
@@ -220,7 +221,7 @@ class UdpTransportTest extends TransportContractTest {
     void a_send_after_close_is_counted_rather_than_ignored() throws IOException {
         UdpTransport transport = UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
-                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, freePort())))
+                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, Ports.free())))
                 .build();
         transport.close();
 
@@ -231,18 +232,41 @@ class UdpTransportTest extends TransportContractTest {
     }
 
     @Test
+    void a_peer_speaking_from_a_new_address_is_learned_and_counted() throws IOException {
+        int learningPort = Ports.free();
+        try (UdpTransport learning = (UdpTransport) UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, learningPort))
+                // Configured to expect node B at portB, which is where it is not.
+                .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, portB)))
+                .addressLearning(true)
+                .clusterName("test")
+                .build();
+             Transport moved = udp(Ports.free(), Peer.application(NODE_A, LOOPBACK, learningPort))) {
+
+            moved.send(NODE_A, datagram());
+            learning.poll(TimeUnit.SECONDS.toNanos(2), buffer -> {
+                // Inside the handler, deliberately: the transport only knows where the datagram
+                // it is currently delivering came from. In production the node calls this from
+                // the same place, once the datagram has passed every check — learning from an
+                // unverified one would let a spoofed packet redirect a peer's traffic.
+                learning.confirmSender(NODE_B);
+                learning.confirmSender(NODE_B);
+            });
+
+            assertThat(learning.addressUpdates())
+                    .as("a peer that restarts on a new port is reachable again without an"
+                            + " operator editing configuration; the counter is how anybody ever"
+                            + " knows that happened, and the same address twice is not two moves")
+                    .isEqualTo(1);
+        }
+    }
+
+    @Test
     void a_healthy_transport_drops_nothing() {
         ((UdpTransport) a).send(NODE_B, datagram());
 
         assertThat(((UdpTransport) a).sendsDropped())
                 .as("the one number worth alerting on, and it stays flat when nothing is wrong")
                 .isZero();
-    }
-
-    private static java.nio.ByteBuffer datagram() {
-        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(WireFormat.HEADER_BYTES);
-        buffer.position(WireFormat.HEADER_BYTES);
-        buffer.flip();
-        return buffer;
     }
 }

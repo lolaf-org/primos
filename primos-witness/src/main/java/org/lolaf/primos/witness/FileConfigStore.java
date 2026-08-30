@@ -30,6 +30,8 @@ import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.*;
+import java.util.Comparator;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -53,7 +55,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class FileConfigStore implements ConfigStore {
 
-    
+
     private static final Logger log = LoggerFactory.getLogger(FileConfigStore.class);
 
     private static final String APPLICATIONS_DIRECTORY = "applications";
@@ -98,7 +100,7 @@ public final class FileConfigStore implements ConfigStore {
      * a third network wants {@code wan}; one in the same datacentre wants the default.
      */
     private static Timings timingsProfile(String profile) {
-        String name = profile.trim().toLowerCase(java.util.Locale.ROOT);
+        String name = profile.trim().toLowerCase(Locale.ROOT);
         if ("lan".equals(name)) {
             return Timings.lan();
         }
@@ -306,7 +308,7 @@ public final class FileConfigStore implements ConfigStore {
             } catch (IOException e) {
                 throw new UncheckedIOException("cannot list " + applicationsDirectory, e);
             }
-            files.sort(java.util.Comparator.comparing(Path::toString));
+            files.sort(Comparator.comparing(Path::toString));
             for (Path file : files) {
                 ApplicationConfig application = readApplication(file, settings);
                 applications.put(application.name(), application);
@@ -329,7 +331,7 @@ public final class FileConfigStore implements ConfigStore {
             builder.stateDirectory(directory.getFileSystem().getPath(state.trim()));
         }
         String mode = properties.getProperty("registration.mode", "strict").trim();
-        builder.registrationMode(RegistrationMode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)));
+        builder.registrationMode(RegistrationMode.valueOf(mode.toUpperCase(Locale.ROOT)));
         builder.autoRegistrationLimit(intValue(properties, "registration.limit", 64));
         builder.defaultSecret(secretValue(properties, "secret", directory));
         String algorithm = properties.getProperty("secret.algorithm");

@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.transport;
 
+import lombok.Getter;
+
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -55,9 +57,15 @@ public final class SimulatedNetwork {
     private long maxDelayNanos;
     private long sequence;
 
+    @Getter
     private long sent;
+
+    @Getter
     private long delivered;
+
+    @Getter
     private long droppedByLoss;
+    @Getter
     private long droppedByPartition;
 
     public SimulatedNetwork(long seed, VirtualClock clock) {
@@ -191,24 +199,8 @@ public final class SimulatedNetwork {
         return total;
     }
 
-    public long sent() {
-        return sent;
-    }
-
-    public long delivered() {
-        return delivered;
-    }
-
     public long dropped() {
         return droppedByLoss + droppedByPartition;
-    }
-
-    public long droppedByPartition() {
-        return droppedByPartition;
-    }
-
-    public long droppedByLoss() {
-        return droppedByLoss;
     }
 
     private static long link(int from, int to) {

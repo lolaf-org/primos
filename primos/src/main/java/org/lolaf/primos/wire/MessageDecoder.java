@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.wire;
 
+import lombok.Getter;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.slf4j.Logger;
@@ -58,6 +59,14 @@ public final class MessageDecoder {
     private final IntPredicate knownSender;
     private final DropCounters drops;
 
+    /**
+     * The sender of the last datagram that passed every check, or -1.
+     *
+     * <p>Exists so a transport can be told where a peer is speaking from, but only once the
+     * message has been authenticated — learning an address from an unverified datagram would let
+     * one spoofed packet redirect a peer's traffic.
+     */
+    @Getter
     private int lastSenderId = -1;
 
     /**
@@ -184,17 +193,6 @@ public final class MessageDecoder {
         lastSenderId = senderId;
         dispatch(datagram, type, senderId, handler);
         return true;
-    }
-
-    /**
-     * The sender of the last datagram that passed every check, or -1.
-     *
-     * <p>Exists so a transport can be told where a peer is speaking from, but only once the
-     * message has been authenticated — learning an address from an unverified datagram would let
-     * one spoofed packet redirect a peer's traffic.
-     */
-    public int lastSenderId() {
-        return lastSenderId;
     }
 
     private void dispatch(ByteBuffer datagram, MessageType type, int senderId, MessageHandler handler) {

@@ -48,6 +48,10 @@ class CheckQuorumTest {
         assertThat(cluster.node(leader).role())
                 .as("it can reach nobody, so it must not keep claiming the cluster")
                 .isNotEqualTo(Role.LEADER);
+        assertThat(cluster.node(leader).election().leadershipsRelinquished())
+                .as("and it says so: the counter is asserted zero elsewhere, which a counter that"
+                        + " never moved would also pass")
+                .isEqualTo(1);
     }
 
     @Test

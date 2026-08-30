@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos;
 
+import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.Value;
 
 import java.util.ArrayList;
@@ -58,7 +60,10 @@ public class Quorum {
     int voters;
     int required;
     int faultTolerance;
-    @lombok.Getter(lombok.AccessLevel.NONE)
+    /**
+     * Read through {@link #isKnown()}, which reads better than the generated accessor would.
+     */
+    @Getter(AccessLevel.NONE)
     boolean known;
 
     private Quorum(String applicationName) {

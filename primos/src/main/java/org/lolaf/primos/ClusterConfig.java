@@ -22,6 +22,7 @@ import lombok.Value;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.Arrays;
 
 /**
  * The shape of one cluster: who is in it, which member this node is, and how fast it ticks.
@@ -286,7 +287,7 @@ public class ClusterConfig {
          * The other application instances. This node must not be among them.
          */
         public Builder peers(Peer... peers) {
-            return peers(java.util.Arrays.asList(peers));
+            return peers(Arrays.asList(peers));
         }
 
         /**

@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Delivers events to the application's listeners.
@@ -109,7 +110,7 @@ final class ListenerDispatcher implements PrimosListener {
         each("onPeerDown", listener -> listener.onPeerDown(peer));
     }
 
-    private void each(String event, java.util.function.Consumer<PrimosListener> delivery) {
+    private void each(String event, Consumer<PrimosListener> delivery) {
         for (PrimosListener listener : listeners) {
             deliverTo(listener, event, () -> delivery.accept(listener));
         }

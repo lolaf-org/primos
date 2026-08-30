@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.transport;
 
+import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
@@ -27,6 +28,7 @@ import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.*;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -80,9 +82,31 @@ public final class UdpTransport implements Transport {
     private SocketAddress currentSource;
     private volatile boolean closed;
 
+    /**
+     * How many sends the socket itself rejected. Routine on UDP; a rising rate is not.
+     */
+    @Getter
     private long sendFailures;
+
+    /**
+     * Sends attempted after {@link #close}. Expected during shutdown, and harmless.
+     */
+    @Getter
     private long sendsWhileClosed;
+
+    /**
+     * Sends addressed to a peer this transport was not configured with.
+     *
+     * <p>Should stay at zero. Unlike the others this is not a network condition — it means
+     * something asked for a peer id that was never in the configuration.
+     */
+    @Getter
     private long sendsToUnknownPeer;
+
+    /**
+     * How many times a peer has been observed at a new address.
+     */
+    @Getter
     private long addressUpdates;
 
     private UdpTransport(Builder builder) throws IOException {
@@ -278,13 +302,6 @@ public final class UdpTransport implements Transport {
     }
 
     /**
-     * How many sends the socket itself rejected. Routine on UDP; a rising rate is not.
-     */
-    public long sendFailures() {
-        return sendFailures;
-    }
-
-    /**
      * Every datagram this transport did not put on the wire, for any reason.
      *
      * <p>The one number worth alerting on. A healthy node's is flat: the individual counters below
@@ -294,30 +311,6 @@ public final class UdpTransport implements Transport {
      */
     public long sendsDropped() {
         return sendFailures + sendsWhileClosed + sendsToUnknownPeer;
-    }
-
-    /**
-     * Sends attempted after {@link #close}. Expected during shutdown, and harmless.
-     */
-    public long sendsWhileClosed() {
-        return sendsWhileClosed;
-    }
-
-    /**
-     * Sends addressed to a peer this transport was not configured with.
-     *
-     * <p>Should stay at zero. Unlike the others this is not a network condition — it means
-     * something asked for a peer id that was never in the configuration.
-     */
-    public long sendsToUnknownPeer() {
-        return sendsToUnknownPeer;
-    }
-
-    /**
-     * How many times a peer has been observed at a new address.
-     */
-    public long addressUpdates() {
-        return addressUpdates;
     }
 
     private <T> void setIfSupported(SocketOption<T> option, T value) {
@@ -343,7 +336,7 @@ public final class UdpTransport implements Transport {
          * The peers this node may send to, the witness included.
          */
         @Setter
-        private List<Peer> peers = java.util.Collections.emptyList();
+        private List<Peer> peers = Collections.emptyList();
 
         /**
          * Whether a peer's address may be updated from received traffic.

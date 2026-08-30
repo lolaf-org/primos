@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.sim;
 
+import lombok.Getter;
+
 /**
  * An invariant broke.
  *
@@ -25,6 +27,8 @@ public final class SimulationFailure extends AssertionError {
 
     private static final long serialVersionUID = 1L;
 
+    /** The seed that produced this run. Check it in as a regression. */
+    @Getter
     private final long seed;
 
     public SimulationFailure(long seed, long nowNanos, String invariant, String detail, String trace) {
@@ -33,10 +37,5 @@ public final class SimulationFailure extends AssertionError {
                 + "  reproduce with seed " + seed + "L\n"
                 + "  recent history:\n" + trace);
         this.seed = seed;
-    }
-
-    /** The seed that produced this run. Check it in as a regression. */
-    public long seed() {
-        return seed;
     }
 }

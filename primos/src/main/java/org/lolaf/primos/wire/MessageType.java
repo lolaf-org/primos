@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.wire;
 
+import lombok.Getter;
+
 /**
  * The six messages, and the fixed size of each.
  *
@@ -78,8 +80,23 @@ public enum MessageType {
         }
     }
 
+    /**
+     * The byte written at {@link WireFormat#OFFSET_TYPE}. Never zero, so a zeroed buffer is not a
+     * message.
+     */
+    @Getter
     private final int code;
+
+    /**
+     * Bytes after the header.
+     */
+    @Getter
     private final int payloadBytes;
+
+    /**
+     * Header plus payload, excluding any authentication tag.
+     */
+    @Getter
     private final int messageBytes;
 
     MessageType(int code, int payloadBytes) {
@@ -96,24 +113,4 @@ public enum MessageType {
         return (code >= 0 && code < BY_CODE.length) ? BY_CODE[code] : null;
     }
 
-    /**
-     * The byte written at {@link WireFormat#OFFSET_TYPE}. Never zero, so a zeroed buffer is not a message.
-     */
-    public int code() {
-        return code;
-    }
-
-    /**
-     * Bytes after the header.
-     */
-    public int payloadBytes() {
-        return payloadBytes;
-    }
-
-    /**
-     * Header plus payload, excluding any authentication tag.
-     */
-    public int messageBytes() {
-        return messageBytes;
-    }
 }

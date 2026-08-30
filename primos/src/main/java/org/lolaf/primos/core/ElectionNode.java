@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.core;
 
+import lombok.Getter;
 import org.lolaf.primos.*;
 import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
@@ -25,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.*;
 
 /**
@@ -59,7 +61,9 @@ public final class ElectionNode implements MessageHandler {
      */
     private static final long NO_CONTACT = Long.MIN_VALUE;
 
+    @Getter
     private final ClusterConfig config;
+
     private final Timings timings;
     private final Quorum quorum;
     private final StateStore store;
@@ -69,6 +73,7 @@ public final class ElectionNode implements MessageHandler {
     private final MessageEncoder encoder;
     private final MessageDecoder decoder;
     private final MessageAuthenticator authenticator;
+    @Getter
     private final DropCounters drops = new DropCounters();
 
     private final List<Peer> peers = new ArrayList<>();
@@ -80,8 +85,13 @@ public final class ElectionNode implements MessageHandler {
     private final ByteBuffer sendBuffer =
             ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
+    @Getter
     private Role role = Role.FOLLOWER;
+
+    @Getter
     private long currentTerm;
+
+    @Getter
     private int votedFor = PersistentState.NO_VOTE;
     private int leaderId = -1;
     private Leader leader;
@@ -94,14 +104,47 @@ public final class ElectionNode implements MessageHandler {
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
+
+    /**
+     * What killed the node, if anything has.
+     */
+    @Getter
     private Throwable failureCause;
 
+    /**
+     * How many pre-vote rounds this node has run, whether or not they led to an election.
+     */
+    @Getter
     private long preVotesStarted;
+
+    @Getter
     private long electionsStarted;
+
+    @Getter
     private long electionsWon;
+
+    /**
+     * How many times this node has stood itself down for lack of quorum contact.
+     */
+    @Getter
     private long leadershipsRelinquished;
+
+    /**
+     * How many times this node has handed leadership over on the way out.
+     */
+    @Getter
     private long handoversSent;
+
+    /**
+     * How many times this node has campaigned because a leader handed over to it.
+     */
+    @Getter
     private long handoversAccepted;
+
+    /**
+     * How many peers this node has seen announce a clean departure.
+     */
+    @Getter
     private long departuresObserved;
 
     public ElectionNode(ClusterConfig config,
@@ -284,13 +327,6 @@ public final class ElectionNode implements MessageHandler {
     }
 
     /**
-     * What killed the node, if anything has.
-     */
-    public Throwable failureCause() {
-        return failureCause;
-    }
-
-    /**
      * When this node next has something to do.
      *
      * <p>A witness returns {@link Long#MAX_VALUE}: it never campaigns, so it has no election timer
@@ -307,18 +343,6 @@ public final class ElectionNode implements MessageHandler {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
         return deadline;
-    }
-
-    public Role role() {
-        return role;
-    }
-
-    public long currentTerm() {
-        return currentTerm;
-    }
-
-    public int votedFor() {
-        return votedFor;
     }
 
     /**
@@ -343,29 +367,6 @@ public final class ElectionNode implements MessageHandler {
      */
     public RoleAndTerm roleAndTerm() {
         return new RoleAndTerm(role, currentTerm);
-    }
-
-    public ClusterConfig config() {
-        return config;
-    }
-
-    public DropCounters drops() {
-        return drops;
-    }
-
-    /**
-     * How many pre-vote rounds this node has run, whether or not they led to an election.
-     */
-    public long preVotesStarted() {
-        return preVotesStarted;
-    }
-
-    public long electionsStarted() {
-        return electionsStarted;
-    }
-
-    public long electionsWon() {
-        return electionsWon;
     }
 
     /**
@@ -419,7 +420,7 @@ public final class ElectionNode implements MessageHandler {
      */
     public PrimosStats stats() {
         return new PrimosStats(role, currentTerm,
-                java.time.Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
+                Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
                 electionsStarted, electionsWon, handoversSent, handoversAccepted,
                 departuresObserved, drops.snapshot(), peerStats());
     }
@@ -820,13 +821,6 @@ public final class ElectionNode implements MessageHandler {
     }
 
     /**
-     * How many peers this node has seen announce a clean departure.
-     */
-    public long departuresObserved() {
-        return departuresObserved;
-    }
-
-    /**
      * Hands leadership to a follower on the way out, instead of just going quiet.
      *
      * <p>A leader that simply stops costs the cluster up to a full election timeout with nobody in
@@ -900,20 +894,6 @@ public final class ElectionNode implements MessageHandler {
             }
         }
         return best;
-    }
-
-    /**
-     * How many times this node has handed leadership over on the way out.
-     */
-    public long handoversSent() {
-        return handoversSent;
-    }
-
-    /**
-     * How many times this node has campaigned because a leader handed over to it.
-     */
-    public long handoversAccepted() {
-        return handoversAccepted;
     }
 
     @Override
@@ -999,8 +979,8 @@ public final class ElectionNode implements MessageHandler {
                     probe.reachable,
                     probe.lastProbeRoundTripNanos < 0
                             ? null
-                            : java.time.Duration.ofNanos(probe.lastProbeRoundTripNanos),
-                    probe.lastHeardNanos < 0 ? null : java.time.Duration.ofNanos(now - probe.lastHeardNanos)));
+                            : Duration.ofNanos(probe.lastProbeRoundTripNanos),
+                    probe.lastHeardNanos < 0 ? null : Duration.ofNanos(now - probe.lastHeardNanos)));
         }
         return snapshot;
     }
@@ -1077,13 +1057,6 @@ public final class ElectionNode implements MessageHandler {
         for (Probe probe : probes.values()) {
             probe.lastRoundTripNanos = NO_CONTACT;
         }
-    }
-
-    /**
-     * How many times this node has stood itself down for lack of quorum contact.
-     */
-    public long leadershipsRelinquished() {
-        return leadershipsRelinquished;
     }
 
     /**

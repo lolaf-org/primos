@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.Setter;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.wire.MessageAuthenticator;
@@ -27,16 +29,61 @@ import java.util.Objects;
 /**
  * The witness server's own settings, as opposed to the applications it serves.
  */
+@Getter
 public final class WitnessSettings {
 
     private final InetSocketAddress bindAddress;
+
+    /**
+     * Where per-application term and vote files live. Must be durable local storage.
+     */
     private final Path stateDirectory;
+
     private final RegistrationMode registrationMode;
+
+    /**
+     * Read through {@link #defaultSecret()}, which copies: the array is a secret and handing the
+     * same one out twice lets a caller change what this witness authenticates with.
+     */
+    @Getter(AccessLevel.NONE)
     private final byte[] defaultSecret;
+
+    /**
+     * The algorithm used for any application that does not name one, auto-registered ones included.
+     *
+     * <p>Defaults to what the library defaults to, so a witness and a cluster that have both said
+     * nothing still agree. An application file may override it; nothing on the wire carries the
+     * algorithm, so whatever is set here has to match what the cluster's nodes were built with.
+     */
     private final String defaultMacAlgorithm;
+
+    /**
+     * How many applications may auto-register, so an open witness cannot be filled up.
+     */
     private final int autoRegistrationLimit;
+
+    /**
+     * Quiet period after a file change before reloading, so one save is one reload.
+     */
     private final Duration reloadDebounce;
+
+    /**
+     * How often the configuration directory is re-read regardless of events.
+     *
+     * <p>A safety net, not an optimisation: {@code WatchService} is inotify on Linux but a slow
+     * polling fallback on macOS, and does not work at all on some network filesystems. Hot reload
+     * that silently never fires is worse than none.
+     */
     private final Duration rescanInterval;
+
+    /**
+     * The timing profile the served nodes run with.
+     *
+     * <p>Defaults to {@link Timings#lan()}, matching the library, because a witness whose pre-vote
+     * window differs from its cluster's answers questions the cluster is not asking. A witness
+     * genuinely on a third network wants {@link Timings#wan()}: a 50ms WAN round trip makes the
+     * LAN election timeout marginal.
+     */
     private final Timings timings;
 
     private WitnessSettings(Builder builder) {
@@ -57,21 +104,6 @@ public final class WitnessSettings {
         return new Builder();
     }
 
-    public InetSocketAddress bindAddress() {
-        return bindAddress;
-    }
-
-    /**
-     * Where per-application term and vote files live. Must be durable local storage.
-     */
-    public Path stateDirectory() {
-        return stateDirectory;
-    }
-
-    public RegistrationMode registrationMode() {
-        return registrationMode;
-    }
-
     /**
      * The witness-wide secret, used for any application without one of its own.
      *
@@ -81,54 +113,6 @@ public final class WitnessSettings {
      */
     public byte[] defaultSecret() {
         return defaultSecret == null ? null : defaultSecret.clone();
-    }
-
-    /**
-     * The algorithm used for any application that does not name one, auto-registered ones included.
-     *
-     * <p>Defaults to what the library defaults to, so a witness and a cluster that have both said
-     * nothing still agree. An application file may override it; nothing on the wire carries the
-     * algorithm, so whatever is set here has to match what the cluster's nodes were built with.
-     */
-    public String defaultMacAlgorithm() {
-        return defaultMacAlgorithm;
-    }
-
-    /**
-     * How many applications may auto-register, so an open witness cannot be filled up.
-     */
-    public int autoRegistrationLimit() {
-        return autoRegistrationLimit;
-    }
-
-    /**
-     * Quiet period after a file change before reloading, so one save is one reload.
-     */
-    public Duration reloadDebounce() {
-        return reloadDebounce;
-    }
-
-    /**
-     * How often the configuration directory is re-read regardless of events.
-     *
-     * <p>A safety net, not an optimisation: {@code WatchService} is inotify on Linux but a slow
-     * polling fallback on macOS, and does not work at all on some network filesystems. Hot reload
-     * that silently never fires is worse than none.
-     */
-    public Duration rescanInterval() {
-        return rescanInterval;
-    }
-
-    /**
-     * The timing profile the served nodes run with.
-     *
-     * <p>Defaults to {@link Timings#lan()}, matching the library, because a witness whose pre-vote
-     * window differs from its cluster's answers questions the cluster is not asking. A witness
-     * genuinely on a third network wants {@link Timings#wan()}: a 50ms WAN round trip makes the
-     * LAN election timeout marginal.
-     */
-    public Timings timings() {
-        return timings;
     }
 
     /**

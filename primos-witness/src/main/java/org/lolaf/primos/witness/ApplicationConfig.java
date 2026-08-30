@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.util.Objects;
@@ -26,12 +29,38 @@ import java.util.Objects;
  * That makes a name collision between two genuinely different clusters a split brain rather than
  * an inconvenience, which is why names are validated and why the strict mode exists.
  */
+@Getter
+@EqualsAndHashCode
 public final class ApplicationConfig {
 
     private final String name;
+
+    /**
+     * Read through {@link #secret()} and {@link #previousSecret()}, which copy: an array handed
+     * out twice is an array a caller can change under this witness.
+     */
+    @Getter(AccessLevel.NONE)
     private final byte[] secret;
+
+    @Getter(AccessLevel.NONE)
     private final byte[] previousSecret;
+
+    /**
+     * The {@link javax.crypto.Mac} algorithm this application's datagrams are tagged with.
+     *
+     * <p>Per application rather than per witness, because a witness serves clusters it does not
+     * own: one of them moving to a different algorithm must not be a flag day for every other
+     * tenant. Never null — an application that says nothing gets
+     * {@link MessageAuthenticator#DEFAULT_ALGORITHM}, which is what the library defaults to, so
+     * the two agree without anybody configuring anything.
+     */
     private final String macAlgorithm;
+
+    /**
+     * Whether this application appeared by itself rather than being configured. Read through
+     * {@link #isAutoRegistered()}.
+     */
+    @Getter(AccessLevel.NONE)
     private final boolean autoRegistered;
 
     public ApplicationConfig(String name, byte[] secret, byte[] previousSecret,
@@ -43,10 +72,6 @@ public final class ApplicationConfig {
                 ? MessageAuthenticator.DEFAULT_ALGORITHM
                 : macAlgorithm;
         this.autoRegistered = autoRegistered;
-    }
-
-    public String name() {
-        return name;
     }
 
     /**
@@ -67,19 +92,6 @@ public final class ApplicationConfig {
         return previousSecret == null ? null : previousSecret.clone();
     }
 
-    /**
-     * The {@link javax.crypto.Mac} algorithm this application's datagrams are tagged with.
-     *
-     * <p>Per application rather than per witness, because a witness serves clusters it does not
-     * own: one of them moving to a different algorithm must not be a flag day for every other
-     * tenant. Never null — an application that says nothing gets
-     * {@link MessageAuthenticator#DEFAULT_ALGORITHM}, which is what the library defaults to, so
-     * the two agree without anybody configuring anything.
-     */
-    public String macAlgorithm() {
-        return macAlgorithm;
-    }
-
     public boolean hasSecret() {
         return secret != null;
     }
@@ -89,28 +101,6 @@ public final class ApplicationConfig {
      */
     public boolean isAutoRegistered() {
         return autoRegistered;
-    }
-
-    @Override
-    public boolean equals(Object other) {
-        if (this == other) {
-            return true;
-        }
-        if (!(other instanceof ApplicationConfig)) {
-            return false;
-        }
-        ApplicationConfig that = (ApplicationConfig) other;
-        return autoRegistered == that.autoRegistered
-                && name.equals(that.name)
-                && macAlgorithm.equals(that.macAlgorithm)
-                && java.util.Arrays.equals(secret, that.secret)
-                && java.util.Arrays.equals(previousSecret, that.previousSecret);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(name, autoRegistered, macAlgorithm, java.util.Arrays.hashCode(secret),
-                java.util.Arrays.hashCode(previousSecret));
     }
 
     /**

@@ -15,7 +15,9 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AllArgsConstructor;
 import lombok.Setter;
+import lombok.Value;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosStats;
@@ -665,71 +667,39 @@ public final class WitnessServer implements AutoCloseable {
     /**
      * Why datagrams did not reach an application.
      */
-    public static final class RoutingStats {
-
-        private final long unroutable;
-        private final long unservedApplication;
-        private final long autoRegistrationsRefused;
-        private final long unusableName;
-        private final long droppedForFailedApplication;
-        private final long autoRegistrations;
-        private final long inboxOverflowed;
-        private final long undeliverableReplies;
-
-        RoutingStats(long unroutable, long unservedApplication, long autoRegistrationsRefused,
-                     long unusableName, long droppedForFailedApplication, long autoRegistrations,
-                     long inboxOverflowed, long undeliverableReplies) {
-            this.unroutable = unroutable;
-            this.unservedApplication = unservedApplication;
-            this.autoRegistrationsRefused = autoRegistrationsRefused;
-            this.unusableName = unusableName;
-            this.droppedForFailedApplication = droppedForFailedApplication;
-            this.autoRegistrations = autoRegistrations;
-            this.inboxOverflowed = inboxOverflowed;
-            this.undeliverableReplies = undeliverableReplies;
-        }
+    @Value
+    @AllArgsConstructor
+    public static class RoutingStats {
 
         /**
          * Datagrams too short or too malformed to carry a readable application name.
          */
-        public long unroutable() {
-            return unroutable;
-        }
+        long unroutable;
 
         /**
          * Datagrams naming an application this witness does not serve.
          */
-        public long unservedApplication() {
-            return unservedApplication;
-        }
+        long unservedApplication;
 
         /**
          * Datagrams refused because the auto-registration limit was reached.
          */
-        public long autoRegistrationsRefused() {
-            return autoRegistrationsRefused;
-        }
+        long autoRegistrationsRefused;
 
         /**
          * Datagrams naming something that could not be a directory name.
          */
-        public long unusableName() {
-            return unusableName;
-        }
+        long unusableName;
 
         /**
          * Datagrams for an application whose node has failed and been quarantined.
          */
-        public long droppedForFailedApplication() {
-            return droppedForFailedApplication;
-        }
+        long droppedForFailedApplication;
 
         /**
          * Applications that appeared by themselves. On a strict witness this is always zero.
          */
-        public long autoRegistrations() {
-            return autoRegistrations;
-        }
+        long autoRegistrations;
 
         /**
          * Datagrams dropped because an application's inbox was full.
@@ -738,9 +708,7 @@ public final class WitnessServer implements AutoCloseable {
          * rather than a buffer that is too small — and the bound is what stops that flood being
          * every other tenant's problem too.
          */
-        public long inboxOverflowed() {
-            return inboxOverflowed;
-        }
+        long inboxOverflowed;
 
         /**
          * Replies this witness never put on the wire, for any reason.
@@ -750,21 +718,8 @@ public final class WitnessServer implements AutoCloseable {
          * cluster on the other end is the one that pays: it waits out an election timeout for a
          * vote that was never coming.
          */
-        public long undeliverableReplies() {
-            return undeliverableReplies;
-        }
+        long undeliverableReplies;
 
-        @Override
-        public String toString() {
-            return "RoutingStats(unroutable=" + unroutable
-                    + ", unservedApplication=" + unservedApplication
-                    + ", autoRegistrationsRefused=" + autoRegistrationsRefused
-                    + ", unusableName=" + unusableName
-                    + ", droppedForFailedApplication=" + droppedForFailedApplication
-                    + ", autoRegistrations=" + autoRegistrations
-                    + ", inboxOverflowed=" + inboxOverflowed
-                    + ", undeliverableReplies=" + undeliverableReplies + ")";
-        }
     }
 
     /**

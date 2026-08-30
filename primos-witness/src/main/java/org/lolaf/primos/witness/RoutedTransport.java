@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
@@ -28,6 +31,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.Selector;
 import java.util.*;
+import java.util.Collections;
+import java.util.Set;
 
 /**
  * One application's view of the witness server's single socket.
@@ -76,7 +81,18 @@ final class RoutedTransport implements Transport {
     private boolean closed;
 
     private long overflowed;
+
+    /**
+     * Replies this application could not address to anybody.
+     *
+     * <p>Expected to stay at zero. A witness only ever answers, and an answer is addressed to the
+     * source of the datagram being answered even before that node has been learned — so anything
+     * counted here means a send went looking for a node outside a reply, which a witness has no
+     * reason to do.
+     */
+    @Getter(AccessLevel.PACKAGE)
     private long undeliverable;
+
     private long sendFailures;
     private long sendsWhileClosed;
 
@@ -214,7 +230,7 @@ final class RoutedTransport implements Transport {
      */
     List<Peer> drainLearned() {
         if (learned.isEmpty()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
         List<Peer> drained = new ArrayList<>(learned);
         learned.clear();
@@ -227,7 +243,7 @@ final class RoutedTransport implements Transport {
      * <p>Read when a node is rebuilt after a secret rotation, so the replacement inherits the
      * voters this one had learned rather than waiting for each to speak again.
      */
-    java.util.Set<Map.Entry<Integer, InetSocketAddress>> endpoints() {
+    Set<Map.Entry<Integer, InetSocketAddress>> endpoints() {
         return new LinkedHashMap<>(endpoints).entrySet();
     }
 
@@ -247,18 +263,6 @@ final class RoutedTransport implements Transport {
      */
     long sendsDropped() {
         return undeliverable + sendFailures + sendsWhileClosed;
-    }
-
-    /**
-     * Replies this application could not address to anybody.
-     *
-     * <p>Expected to stay at zero. A witness only ever answers, and an answer is addressed to the
-     * source of the datagram being answered even before that node has been learned — so anything
-     * counted here means a send went looking for a node outside a reply, which a witness has no
-     * reason to do.
-     */
-    long undeliverable() {
-        return undeliverable;
     }
 
     /**

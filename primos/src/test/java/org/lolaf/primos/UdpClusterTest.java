@@ -15,22 +15,22 @@
  */
 package org.lolaf.primos;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.lolaf.primos.store.MemoryStateStore;
+import org.lolaf.primos.store.StateStore;
+import org.lolaf.primos.transport.Ports;
+import org.lolaf.primos.transport.UdpTransport;
 
 import java.io.IOException;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.store.MemoryStateStore;
-import org.lolaf.primos.store.StateStore;
-import org.lolaf.primos.transport.UdpTransport;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /**
  * A real cluster: real sockets, real threads, real packets on the loopback interface.
@@ -52,6 +52,33 @@ class UdpClusterTest {
 
     private final List<PrimosNode> nodes = new ArrayList<>();
 
+    private static int leaders(PrimosNode... nodes) {
+        int count = 0;
+        for (PrimosNode node : nodes) {
+            if (node.role() == Role.LEADER) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static PrimosNode leaderOf(PrimosNode... nodes) {
+        for (PrimosNode node : nodes) {
+            if (node.role() == Role.LEADER) {
+                return node;
+            }
+        }
+        throw new IllegalStateException("no leader");
+    }
+
+    /**
+     * The id of the node this one believes is leading, or -1 while none is known — the shape an
+     * awaited condition wants, without an Optional per poll.
+     */
+    private static int leaderId(PrimosNode node) {
+        return node.leader().map(Leader::id).orElse(-1);
+    }
+
     @AfterEach
     void stopEverything() {
         nodes.forEach(PrimosNode::stop);
@@ -59,7 +86,7 @@ class UdpClusterTest {
 
     @Test
     void three_nodes_on_real_sockets_elect_exactly_one_leader() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
@@ -74,7 +101,7 @@ class UdpClusterTest {
 
     @Test
     void every_node_agrees_who_leads() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
@@ -94,7 +121,7 @@ class UdpClusterTest {
 
     @Test
     void the_survivors_replace_a_leader_that_is_stopped() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
@@ -109,22 +136,24 @@ class UdpClusterTest {
 
     @Test
     void peers_become_reachable_over_a_real_network() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         start(2, ports, null, new MemoryStateStore(), ports[1]);
         start(3, ports, null, new MemoryStateStore(), ports[2]);
 
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                one.stats().peers().values().stream().allMatch(peer -> peer.reachable()));
+                one.stats().peers().values().stream().allMatch(PeerStats::reachable));
 
         assertThat(one.stats().peers().get(2).lastRoundTrip())
                 .as("a real round trip on loopback, measured")
                 .isNotNull();
     }
 
+    // -------------------------------------------------------------- helpers
+
     @Test
     void a_cluster_forms_with_authentication_enabled() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, SECRET, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, SECRET, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, SECRET, new MemoryStateStore(), ports[2]);
@@ -137,7 +166,7 @@ class UdpClusterTest {
 
     @Test
     void nodes_with_different_secrets_never_form_a_cluster() throws Exception {
-        int[] ports = {freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, SECRET, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, "a-different-secret".getBytes(),
                 new MemoryStateStore(), ports[1]);
@@ -154,7 +183,7 @@ class UdpClusterTest {
 
     @Test
     void a_node_that_returns_on_a_different_port_is_found_again() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         StateStore thirdStore = new MemoryStateStore();
         PrimosNode one = start(1, ports, SECRET, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, SECRET, new MemoryStateStore(), ports[1]);
@@ -166,14 +195,12 @@ class UdpClusterTest {
                 .until(() -> !one.stats().peers().get(3).reachable());
 
         // Same identity, new endpoint: exactly what a container restart looks like.
-        PrimosNode moved = start(3, ports, SECRET, thirdStore, freePort());
+        PrimosNode moved = start(3, ports, SECRET, thirdStore, Ports.free());
 
         await().atMost(15, TimeUnit.SECONDS)
                 .until(() -> one.stats().peers().get(3).reachable());
         assertThat(moved.role()).isNotEqualTo(Role.FAILED);
     }
-
-    // -------------------------------------------------------------- helpers
 
     private PrimosNode start(int id, int[] ports, byte[] secret, StateStore store, int bindPort) {
         List<Peer> peers = new ArrayList<>();
@@ -209,44 +236,9 @@ class UdpClusterTest {
         }
     }
 
-    private static int leaders(PrimosNode... nodes) {
-        int count = 0;
-        for (PrimosNode node : nodes) {
-            if (node.role() == Role.LEADER) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private static PrimosNode leaderOf(PrimosNode... nodes) {
-        for (PrimosNode node : nodes) {
-            if (node.role() == Role.LEADER) {
-                return node;
-            }
-        }
-        throw new IllegalStateException("no leader");
-    }
-
-    /**
-     * The id of the node this one believes is leading, or -1 while none is known — the shape an
-     * awaited condition wants, without an Optional per poll.
-     */
-    private static int leaderId(PrimosNode node) {
-        return node.leader().map(Leader::id).orElse(-1);
-    }
-
-    private static int freePort() {
-        try (DatagramSocket socket = new DatagramSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("no free port", e);
-        }
-    }
-
     @Test
     void a_leader_stopped_cleanly_hands_over_rather_than_going_quiet() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
@@ -269,13 +261,13 @@ class UdpClusterTest {
 
     @Test
     void a_follower_stopped_cleanly_is_reported_down_without_waiting_for_probes() {
-        int[] ports = {freePort(), freePort(), freePort()};
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                one.stats().peers().values().stream().allMatch(peer -> peer.reachable()));
+                one.stats().peers().values().stream().allMatch(PeerStats::reachable));
 
         // A follower, so nothing about leadership is in play — only the reporting.
         PrimosNode follower = one.role() == Role.LEADER ? two : one;

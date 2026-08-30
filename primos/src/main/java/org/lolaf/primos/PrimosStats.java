@@ -92,7 +92,7 @@ public class PrimosStats {
         this.peers = Collections.unmodifiableMap(
                 new LinkedHashMap<>(peers == null ? Collections.emptyMap() : peers));
     }
-    
+
     /**
      * How many datagrams were discarded for one reason. Never null; zero if it never happened.
      */

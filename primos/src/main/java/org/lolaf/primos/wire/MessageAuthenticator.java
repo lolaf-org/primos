@@ -15,7 +15,10 @@
  */
 package org.lolaf.primos.wire;
 
+import lombok.Getter;
+
 import javax.crypto.Mac;
+import javax.crypto.ShortBufferException;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.security.InvalidKeyException;
@@ -69,9 +72,21 @@ public final class MessageAuthenticator {
      */
     private static final int MIN_TAG_BYTES = 16;
 
+    /**
+     * The algorithm datagrams are tagged with, or null when authentication is disabled. Worth
+     * logging at startup: nothing on the wire carries it, so a cluster that disagrees about it
+     * looks exactly like one that disagrees about the secret.
+     */
+    @Getter
     private final String algorithm;
+
     private final Mac mac;
     private final Mac previousMac;
+
+    /**
+     * Bytes this adds to every datagram: the algorithm's tag length when enabled, 0 when not.
+     */
+    @Getter
     private final int tagBytes;
     private final byte[] computed;
     private final byte[] received;
@@ -219,15 +234,6 @@ public final class MessageAuthenticator {
     }
 
     /**
-     * The algorithm datagrams are tagged with, or null when authentication is disabled. Worth
-     * logging at startup: nothing on the wire carries it, so a cluster that disagrees about it
-     * looks exactly like one that disagrees about the secret.
-     */
-    public String algorithm() {
-        return algorithm;
-    }
-
-    /**
      * Hashes {@code [0, length)} of the buffer without allocating: the range is selected by moving
      * the buffer's own position and limit rather than by taking a duplicate or a copy.
      */
@@ -239,7 +245,7 @@ public final class MessageAuthenticator {
         datagram.limit(savedLimit);
         try {
             mac.doFinal(out, 0);
-        } catch (javax.crypto.ShortBufferException e) {
+        } catch (ShortBufferException e) {
             throw new IllegalStateException("a 32-byte buffer always fits an HMAC-SHA256 tag", e);
         }
     }
@@ -256,13 +262,6 @@ public final class MessageAuthenticator {
      */
     public boolean isEnabled() {
         return mac != null;
-    }
-
-    /**
-     * Bytes this adds to every datagram: the algorithm's tag length when enabled, 0 when not.
-     */
-    public int tagBytes() {
-        return tagBytes;
     }
 
     /**
