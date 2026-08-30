@@ -47,8 +47,14 @@ class PeerTest {
     }
 
     @Test
-    void the_address_is_left_unresolved_because_dns_must_not_run_on_the_node_thread() {
-        assertThat(Peer.application(1, "host-a", 7000).unresolvedAddress().isUnresolved()).isTrue();
+    void a_hostname_is_kept_as_written_and_never_resolved_here() {
+        // A name that cannot resolve still builds, which is the property that matters: DNS can
+        // block for seconds and must not run wherever a Peer happens to be constructed. The
+        // transport resolves it once at startup, and refuses to start if it cannot.
+        Peer peer = Peer.application(1, "no-such-host.invalid", 7000);
+
+        assertThat(peer.host()).isEqualTo("no-such-host.invalid");
+        assertThat(peer.port()).isEqualTo(7000);
     }
 
     @Test

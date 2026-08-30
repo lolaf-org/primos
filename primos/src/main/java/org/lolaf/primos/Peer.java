@@ -17,18 +17,19 @@ package org.lolaf.primos;
 
 import lombok.Value;
 
-import java.net.InetSocketAddress;
 import java.util.Objects;
 
 /**
  * One member of the cluster other than this node: its identity, its kind, and where to reach it.
  *
- * <p>Identity is the {@link #id()}, never the address. Addresses may be learned or re-resolved at
- * runtime, and on a multi-homed host the source address of a datagram need not be the one
- * configured, so nothing may key off the address.
+ * <p>Identity is the {@link #id()}, never the address. An address may be learned from
+ * authenticated traffic at runtime, and on a multi-homed host the source address of a datagram
+ * need not be the one configured, so nothing may key off the address.
  *
- * <p>The host is kept unresolved here on purpose: DNS resolution can block for seconds and must
- * never happen on the node thread.
+ * <p>The host stays the string it was configured with and is never resolved here: DNS can block
+ * for seconds and must not happen wherever a {@code Peer} happens to be built. Resolution belongs
+ * to the transport, which does it once at startup and refuses to start on a name that will not
+ * resolve.
  */
 @Value
 public class Peer {
@@ -125,13 +126,5 @@ public class Peer {
      */
     public boolean isWitness() {
         return type.isWitness();
-    }
-
-    /**
-     * The configured endpoint, deliberately left unresolved. Resolution happens in the transport,
-     * off the node thread.
-     */
-    public InetSocketAddress unresolvedAddress() {
-        return InetSocketAddress.createUnresolved(host, port);
     }
 }
