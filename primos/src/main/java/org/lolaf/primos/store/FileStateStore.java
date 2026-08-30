@@ -73,8 +73,8 @@ public final class FileStateStore implements StateStore {
     private final Path statePath;
     private final Path tempPath;
     private final Path lockPath;
-    private final ByteBuffer record = ByteBuffer.allocate(RECORD_BYTES);
-    private final CRC32 crc = new CRC32();
+    private final ByteBuffer buffer;
+    private final CRC32 crc;
 
     private FileChannel lockChannel;
     private FileLock lock;
@@ -91,7 +91,8 @@ public final class FileStateStore implements StateStore {
         this.statePath = directory.resolve("state");
         this.tempPath = directory.resolve("state.tmp");
         this.lockPath = directory.resolve("state.lock");
-
+        this.buffer = ByteBuffer.allocate(RECORD_BYTES);
+        this.crc = new CRC32();
         try {
             Files.createDirectories(directory);
         } catch (IOException e) {
@@ -124,9 +125,9 @@ public final class FileStateStore implements StateStore {
                 StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE,
                 StandardOpenOption.TRUNCATE_EXISTING)) {
-            record.rewind();
-            while (record.hasRemaining()) {
-                channel.write(record);
+            buffer.rewind();
+            while (buffer.hasRemaining()) {
+                channel.write(buffer);
             }
             channel.force(true);
         } catch (IOException e) {
@@ -204,14 +205,14 @@ public final class FileStateStore implements StateStore {
     }
 
     private void encode(long currentTerm, int votedFor) {
-        record.clear();
-        record.put(MAGIC);
-        record.put(VERSION);
-        record.put((byte) 0).put((byte) 0).put((byte) 0);
-        record.putLong(currentTerm);
-        record.putInt(votedFor);
-        record.putInt(checksumOf(record.array()));
-        record.flip();
+        buffer.clear();
+        buffer.put(MAGIC);
+        buffer.put(VERSION);
+        buffer.put((byte) 0).put((byte) 0).put((byte) 0);
+        buffer.putLong(currentTerm);
+        buffer.putInt(votedFor);
+        buffer.putInt(checksumOf(buffer.array()));
+        buffer.flip();
     }
 
     private PersistentState decode(byte[] bytes) {

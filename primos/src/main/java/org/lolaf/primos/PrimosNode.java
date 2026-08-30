@@ -15,7 +15,7 @@
  */
 package org.lolaf.primos;
 
-import java.util.OptionalInt;
+import java.util.Optional;
 
 /**
  * One application instance's membership of a cluster: it starts, joins, and can answer
@@ -81,9 +81,14 @@ public interface PrimosNode extends AutoCloseable {
     RoleAndTerm roleAndTerm();
 
     /**
-     * Which node is currently leader, if any is known. Empty during an election.
+     * Who is currently leading, if anyone is known to be. Empty during an election, which is a
+     * real and common state rather than an error.
+     *
+     * <p>A {@link Leader} rather than a bare id, so that a follower asking where to forward work
+     * is answered rather than pointed at a lookup — and so that this node holding leadership is
+     * distinguishable from nobody holding it. See {@link Leader}.
      */
-    OptionalInt leaderId();
+    Optional<Leader> leader();
 
     /**
      * Registers a listener. Allowed after {@link #start()}, in which case it is immediately

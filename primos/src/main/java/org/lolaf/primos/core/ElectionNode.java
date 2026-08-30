@@ -84,6 +84,7 @@ public final class ElectionNode implements MessageHandler {
     private long currentTerm;
     private int votedFor = PersistentState.NO_VOTE;
     private int leaderId = -1;
+    private Leader leader;
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
     private long lastLeaderContactNanos;
@@ -321,19 +322,20 @@ public final class ElectionNode implements MessageHandler {
     }
 
     /**
-     * Which node is currently believed to be leader, if any.
+     * Who is currently believed to be leading, if anyone.
      */
-    public OptionalInt leaderId() {
-        return leaderId < 0 ? OptionalInt.empty() : OptionalInt.of(leaderId);
+    public Optional<Leader> leader() {
+        return Optional.ofNullable(leader);
     }
 
     /**
-     * Which node is believed to be leader, or -1 when none is, without the {@link OptionalInt}
-     * that {@link #leaderId()} allocates. The production loop reads this after every turn, and a
-     * turn that changed nothing should allocate nothing.
+     * The believed leader, or null when there is none, without the {@link Optional} that
+     * {@link #leader()} allocates. The production loop republishes this after every turn, and a
+     * turn that changed nothing should allocate nothing — this is a field read, because the
+     * {@link Leader} is built once when leadership moves.
      */
-    public int leaderIdOrNone() {
-        return leaderId;
+    public Leader leaderOrNull() {
+        return leader;
     }
 
     /**
@@ -388,7 +390,28 @@ public final class ElectionNode implements MessageHandler {
             return;
         }
         leaderId = next;
-        listener.onLeaderChanged(leaderId(), currentTerm);
+        leader = identify(next);
+        listener.onLeaderChanged(leader(), currentTerm);
+    }
+
+    /**
+     * Turns a leader's id into the object listeners are handed.
+     *
+     * <p>This node itself has no {@link Peer} — a node holds no address for itself — so
+     * {@link Leader#self} carries the name from the configuration instead. A peer that is not in
+     * the probe table can only happen on the witness server, which learns its voters from traffic
+     * and so may hear a leader's heartbeat before {@link #learnPeer} has been called for it; every
+     * other node answers only configured senders, so there the lookup always succeeds.
+     */
+    private Leader identify(int id) {
+        if (id < 0) {
+            return null;
+        }
+        if (id == config.nodeId()) {
+            return Leader.self(id, config.nodeName());
+        }
+        Probe probe = probes.get(id);
+        return probe == null ? Leader.byId(id) : Leader.at(probe.peer);
     }
 
     /**

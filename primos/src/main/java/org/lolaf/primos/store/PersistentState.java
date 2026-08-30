@@ -15,9 +15,7 @@
  */
 package org.lolaf.primos.store;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.Value;
 import org.lolaf.primos.Peer;
 
 /**
@@ -30,10 +28,8 @@ import org.lolaf.primos.Peer;
  * vote" leaves a node that has forgotten who it voted for in the term it is now in, which is the
  * same bug reached by a side door.
  */
-@Getter
-@EqualsAndHashCode
-@ToString
-public final class PersistentState {
+@Value
+public class PersistentState {
 
     /**
      * {@link #votedFor()} when this node has not voted in {@link #currentTerm()}.
@@ -42,8 +38,8 @@ public final class PersistentState {
 
     private static final PersistentState FRESH = new PersistentState(0L, NO_VOTE);
 
-    private final long currentTerm;
-    private final int votedFor;
+    long currentTerm;
+    int votedFor;
 
     public PersistentState(long currentTerm, int votedFor) {
         if (currentTerm < 0) {

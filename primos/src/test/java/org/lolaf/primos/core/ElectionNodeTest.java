@@ -24,6 +24,7 @@ import java.util.Random;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
+import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.store.MemoryStateStore;
@@ -142,7 +143,56 @@ class ElectionNodeTest {
 
         assertThat(node.currentTerm()).isEqualTo(6);
         assertThat(node.votedFor()).isEqualTo(PersistentState.NO_VOTE);
-        assertThat(node.leaderId()).hasValue(3);
+        assertThat(node.leader()).map(Leader::id).hasValue(3);
+        assertThat(node.leader().flatMap(Leader::peer))
+                .as("a follower is told where the leader is, so it need not look the id up to"
+                        + " forward work there")
+                .contains(Peer.application(3, "sim", 7003));
+        assertThat(node.leader().get().isSelf()).isFalse();
+    }
+
+    @Test
+    void a_node_leading_itself_says_so_rather_than_looking_like_no_leader() {
+        ElectionNode node = campaigningNodeOfFive();
+        long term = node.currentTerm();
+        node.onRequestVoteReply(2, term, true, false);
+        node.onRequestVoteReply(3, term, true, false);
+
+        assertThat(node.role()).isEqualTo(Role.LEADER);
+
+        Leader leader = node.leader().orElseThrow(AssertionError::new);
+        assertThat(leader.id()).isEqualTo(1);
+        assertThat(leader.isSelf())
+                .as("this node holds it, which is the opposite of nobody holding it and must not"
+                        + " share the empty encoding")
+                .isTrue();
+        assertThat(leader.peer())
+                .as("a node holds no address for itself, and there is nowhere to forward to")
+                .isEmpty();
+    }
+
+    @Test
+    void a_witness_hearing_a_leader_it_has_not_learned_yet_knows_only_the_id() {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(99)
+                .asWitness()
+                .learnedMembership()
+                .build();
+        ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
+                new Random(1L), MessageAuthenticator.disabled());
+        witness.start();
+
+        // The witness server learns voters between turns of its own loop, so a heartbeat can
+        // arrive before learnPeer has been called for its sender. Every other node answers only
+        // configured senders, so this is the one place the peer can be missing.
+        witness.onAppendEntries(7, 1);
+
+        Leader leader = witness.leader().orElseThrow(AssertionError::new);
+        assertThat(leader.id()).isEqualTo(7);
+        assertThat(leader.isSelf()).isFalse();
+        assertThat(leader.peer()).isEmpty();
+        assertThat(leader.name()).isEqualTo("node-7");
     }
 
     @Test
@@ -153,7 +203,7 @@ class ElectionNodeTest {
         node.onAppendEntries(3, 4);
 
         assertThat(node.currentTerm()).isEqualTo(7);
-        assertThat(node.leaderId()).isEmpty();
+        assertThat(node.leader()).isEmpty();
     }
 
     @Test
@@ -164,7 +214,7 @@ class ElectionNodeTest {
         node.onAppendEntries(4, term);
 
         assertThat(node.role()).isEqualTo(Role.FOLLOWER);
-        assertThat(node.leaderId()).hasValue(4);
+        assertThat(node.leader()).map(Leader::id).hasValue(4);
     }
 
     @Test

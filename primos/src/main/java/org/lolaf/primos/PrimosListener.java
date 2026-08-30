@@ -15,7 +15,7 @@
  */
 package org.lolaf.primos;
 
-import java.util.OptionalInt;
+import java.util.Optional;
 
 /**
  * Receives everything that happens to a node: its own role changing, the leader changing, and
@@ -47,8 +47,12 @@ public interface PrimosListener {
      * The cluster's leader changed, which is not the same event as this node's role changing — a
      * follower needs this to know where to forward work. Empty means no leader is currently known,
      * which is a real and common state during an election, not an error.
+     *
+     * <p>A {@link Leader} rather than a bare id, so that a listener told where the leader is does
+     * not then have to look it up. {@link Leader#peer()} is the address to forward to; it is empty
+     * when {@link Leader#isSelf()}, since there is nowhere to forward to when the work is here.
      */
-    default void onLeaderChanged(OptionalInt leaderId, long term) {
+    default void onLeaderChanged(Optional<Leader> leader, long term) {
     }
 
     /**

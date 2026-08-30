@@ -80,12 +80,16 @@ class UdpClusterTest {
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
 
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                one.leaderId().isPresent() && two.leaderId().isPresent()
-                        && three.leaderId().isPresent()
-                        && one.leaderId().equals(two.leaderId())
-                        && two.leaderId().equals(three.leaderId()));
+                leaderId(one) > 0 && leaderId(one) == leaderId(two)
+                        && leaderId(two) == leaderId(three));
 
-        assertThat(one.leaderId()).isEqualTo(three.leaderId());
+        int leaderId = leaderId(one);
+        assertThat(leaderId(three)).isEqualTo(leaderId);
+
+        PrimosNode follower = one.leader().orElseThrow(AssertionError::new).isSelf() ? two : one;
+        assertThat(follower.leader().flatMap(Leader::peer)).map(Peer::port)
+                .as("a follower is handed the address to forward work to, not an id to look up")
+                .hasValue(ports[leaderId - 1]);
     }
 
     @Test
@@ -222,6 +226,14 @@ class UdpClusterTest {
             }
         }
         throw new IllegalStateException("no leader");
+    }
+
+    /**
+     * The id of the node this one believes is leading, or -1 while none is known — the shape an
+     * awaited condition wants, without an Optional per poll.
+     */
+    private static int leaderId(PrimosNode node) {
+        return node.leader().map(Leader::id).orElse(-1);
     }
 
     private static int freePort() {

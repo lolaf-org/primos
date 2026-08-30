@@ -23,7 +23,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalInt;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,7 +65,13 @@ class PrimosNodeTest {
 
         await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
         assertThat(node.roleAndTerm().isLeader()).isTrue();
-        assertThat(node.leaderId()).hasValue(1);
+
+        Leader leader = node.leader().orElseThrow(AssertionError::new);
+        assertThat(leader.id()).isEqualTo(1);
+        assertThat(leader.isSelf())
+                .as("leading itself is present and says so; empty would mean nobody leads")
+                .isTrue();
+        assertThat(leader.peer()).isEmpty();
     }
 
     @Test
@@ -117,7 +123,7 @@ class PrimosNodeTest {
                 .as("an application that checks after shutdown must not be told it is in charge")
                 .isNotEqualTo(Role.LEADER);
         assertThat(node.roleAndTerm().isLeader()).isFalse();
-        assertThat(node.leaderId()).isEmpty();
+        assertThat(node.leader()).isEmpty();
     }
 
     @Test
@@ -175,12 +181,25 @@ class PrimosNodeTest {
         PrimosNode three = start(builder(3, 1, 2));
 
         await().atMost(10, TimeUnit.SECONDS).until(() ->
-                one.leaderId().isPresent() && two.leaderId().isPresent()
-                        && three.leaderId().isPresent());
+                one.leader().isPresent() && two.leader().isPresent()
+                        && three.leader().isPresent());
 
-        OptionalInt leader = one.leaderId();
-        assertThat(two.leaderId()).isEqualTo(leader);
-        assertThat(three.leaderId()).isEqualTo(leader);
+        int leaderId = one.leader().orElseThrow(AssertionError::new).id();
+        assertThat(two.leader()).map(Leader::id).hasValue(leaderId);
+        assertThat(three.leader()).map(Leader::id).hasValue(leaderId);
+
+        // The nodes agree on who leads, not on the object describing it: whichever node holds it
+        // reports itself, and the other two report a peer they can forward work to.
+        int selves = 0;
+        for (PrimosNode node : new PrimosNode[]{one, two, three}) {
+            Leader leader = node.leader().orElseThrow(AssertionError::new);
+            if (leader.isSelf()) {
+                selves++;
+            } else {
+                assertThat(leader.peer()).map(Peer::id).hasValue(leaderId);
+            }
+        }
+        assertThat(selves).isEqualTo(1);
     }
 
     @Test
@@ -480,8 +499,8 @@ class PrimosNodeTest {
         }
 
         @Override
-        public void onLeaderChanged(OptionalInt leaderId, long term) {
-            leaders.add(leaderId.isPresent() ? String.valueOf(leaderId.getAsInt()) : "none");
+        public void onLeaderChanged(Optional<Leader> leader, long term) {
+            leaders.add(leader.map(l -> String.valueOf(l.id())).orElse("none"));
         }
 
         @Override

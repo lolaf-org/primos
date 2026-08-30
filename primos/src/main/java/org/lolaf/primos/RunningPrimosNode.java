@@ -23,7 +23,7 @@ import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.util.Objects;
-import java.util.OptionalInt;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -50,7 +50,7 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
     private final long stopTimeoutNanos;
 
     private volatile RoleAndTerm roleAndTerm;
-    private volatile int leaderId = -1;
+    private volatile Leader leader;
     private volatile boolean running;
 
     private Thread thread;
@@ -140,9 +140,8 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public OptionalInt leaderId() {
-        int current = leaderId;
-        return current < 0 ? OptionalInt.empty() : OptionalInt.of(current);
+    public Optional<Leader> leader() {
+        return Optional.ofNullable(leader);
     }
 
     @Override
@@ -153,7 +152,7 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
             // A listener registered after the node started would otherwise wait for the next
             // change to learn anything, and may have been registered for one that already happened.
             dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(),
-                    leaderId());
+                    leader());
         }
     }
 
@@ -200,9 +199,9 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public void onLeaderChanged(OptionalInt leader, long term) {
-        leaderId = leader.orElse(-1);
-        dispatcher.onLeaderChanged(leader, term);
+    public void onLeaderChanged(Optional<Leader> next, long term) {
+        leader = next.orElse(null);
+        dispatcher.onLeaderChanged(next, term);
     }
 
     @Override
@@ -271,12 +270,12 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
      */
     private void standDown() {
         RoleAndTerm last = roleAndTerm;
-        leaderId = -1;
+        leader = null;
         roleAndTerm = new RoleAndTerm(Role.FOLLOWER, last.term());
         if (last.role() != Role.FOLLOWER) {
             dispatcher.onRoleChanged(last.role(), Role.FOLLOWER, last.term());
         }
-        dispatcher.onLeaderChanged(OptionalInt.empty(), last.term());
+        dispatcher.onLeaderChanged(Optional.empty(), last.term());
     }
 
     /**
@@ -293,7 +292,7 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
         if (published.role() != role || published.term() != term) {
             roleAndTerm = new RoleAndTerm(role, term);
         }
-        leaderId = election.leaderIdOrNone();
+        leader = election.leaderOrNull();
     }
 
     private void closeQuietly() {

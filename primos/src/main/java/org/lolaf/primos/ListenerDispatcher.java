@@ -20,7 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.OptionalInt;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -83,7 +83,8 @@ final class ListenerDispatcher implements PrimosListener {
      * <p>A listener registered after the node started would otherwise wait for the next change to
      * learn anything, and the transition it was registered for may already have happened.
      */
-    void deliverCurrentState(PrimosListener listener, Role role, long term, OptionalInt leader) {
+    void deliverCurrentState(PrimosListener listener, Role role, long term,
+                             Optional<Leader> leader) {
         deliverTo(listener, "onRoleChanged", () -> listener.onRoleChanged(role, role, term));
         deliverTo(listener, "onLeaderChanged", () -> listener.onLeaderChanged(leader, term));
     }
@@ -94,8 +95,8 @@ final class ListenerDispatcher implements PrimosListener {
     }
 
     @Override
-    public void onLeaderChanged(OptionalInt leaderId, long term) {
-        each("onLeaderChanged", listener -> listener.onLeaderChanged(leaderId, term));
+    public void onLeaderChanged(Optional<Leader> leader, long term) {
+        each("onLeaderChanged", listener -> listener.onLeaderChanged(leader, term));
     }
 
     @Override

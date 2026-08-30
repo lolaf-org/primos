@@ -20,10 +20,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalInt;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosListener;
 import org.lolaf.primos.Role;
@@ -176,8 +177,8 @@ class WitnessTest {
         for (ElectionCluster.NodeUnderTest node : cluster.nodes()) {
             node.attach(new PrimosListener() {
                 @Override
-                public void onLeaderChanged(OptionalInt leaderId, long term) {
-                    leaderId.ifPresent(namedLeaders::add);
+                public void onLeaderChanged(Optional<Leader> leader, long term) {
+                    leader.map(Leader::id).ifPresent(namedLeaders::add);
                 }
             });
         }
