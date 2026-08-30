@@ -16,10 +16,12 @@
 package org.lolaf.primos.transport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
@@ -167,23 +169,50 @@ class UdpTransportTest extends TransportContractTest {
     }
 
     @Test
-    void a_send_to_a_hostname_that_does_not_resolve_is_counted() throws IOException {
-        try (UdpTransport transport = UdpTransport.builder()
+    void a_hostname_that_does_not_resolve_refuses_to_build() {
+        assertThatThrownBy(() -> UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
                 .peers(Collections.singletonList(
                         Peer.application(NODE_B, "no-such-host.invalid", 7420)))
+                .build())
+                .as("a node that cannot work out where a peer is could never reach it; dropping"
+                        + " the datagrams instead made broken DNS look like a partition")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("peer " + NODE_B)
+                .hasMessageContaining("no-such-host.invalid:7420");
+    }
+
+    @Test
+    void every_unresolvable_peer_is_named_at_once() {
+        assertThatThrownBy(() -> UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .peers(Arrays.asList(
+                        Peer.application(NODE_A, "no-such-host-a.invalid", 7420),
+                        Peer.application(NODE_B, LOOPBACK, 7421),
+                        Peer.witness(9, "no-such-host-b.invalid", 7422)))
+                .build())
+                .as("stopping at the first would make an operator who mistyped three hostnames"
+                        + " find them one restart at a time")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no-such-host-a.invalid")
+                .hasMessageContaining("no-such-host-b.invalid")
+                .hasMessageContaining("2 of 3 peers");
+    }
+
+    @Test
+    void a_resolvable_peer_is_sent_to_rather_than_dropped() throws IOException {
+        // The negative twin of the two above: the eager resolution must not be passing by never
+        // putting anything on the wire.
+        try (UdpTransport transport = UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .peers(Collections.singletonList(Peer.application(NODE_B, "localhost", freePort())))
                 .build()) {
 
             transport.send(NODE_B, datagram());
 
-            assertThat(transport.sendsWithoutAddress())
-                    .as("the quietest failure of the set: without this counter, broken DNS is"
-                            + " indistinguishable from a partition or a dead process")
-                    .isEqualTo(1);
-            assertThat(transport.sendFailures())
-                    .as("the socket was never asked, so this is not a socket failure")
+            assertThat(transport.sendsDropped())
+                    .as("a name that resolves is sent to, and nothing about it is counted")
                     .isZero();
-            assertThat(transport.sendsDropped()).isEqualTo(1);
         }
     }
 

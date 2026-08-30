@@ -15,33 +15,22 @@
  */
 package org.lolaf.primos.witness;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardWatchEventKinds;
-import java.nio.file.WatchKey;
-import java.nio.file.WatchService;
-import java.nio.file.attribute.PosixFilePermission;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
-
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.MonotonicClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermission;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Configuration as a directory of properties files.
@@ -64,6 +53,7 @@ import org.slf4j.LoggerFactory;
  */
 public final class FileConfigStore implements ConfigStore {
 
+    
     private static final Logger log = LoggerFactory.getLogger(FileConfigStore.class);
 
     private static final String APPLICATIONS_DIRECTORY = "applications";
@@ -97,6 +87,74 @@ public final class FileConfigStore implements ConfigStore {
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
         startWatching();
         logServedApplications();
+    }
+
+    /**
+     * A named profile rather than seven separate intervals.
+     *
+     * <p>The relationships between them are what has to hold — the election timeout an order of
+     * magnitude above the round trip, and so on — and those are far easier to get wrong one key at
+     * a time than to choose between two profiles that are each internally consistent. A witness on
+     * a third network wants {@code wan}; one in the same datacentre wants the default.
+     */
+    private static Timings timingsProfile(String profile) {
+        String name = profile.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("lan".equals(name)) {
+            return Timings.lan();
+        }
+        if ("wan".equals(name)) {
+            return Timings.wan();
+        }
+        throw new IllegalArgumentException(
+                "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
+    }
+
+    private static int intValue(Properties properties, String key, int fallback) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(key + " must be a number, but was '" + raw + "'");
+        }
+    }
+
+    /**
+     * A secret given inline, as {@code env:NAME}, or as {@code file:path}.
+     *
+     * <p>The indirections exist so configuration can go into version control without the secret
+     * going with it.
+     */
+    private static byte[] secretValue(Properties properties, String key, Path base) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.startsWith("env:")) {
+            String variable = value.substring(4);
+            String fromEnvironment = System.getenv(variable);
+            if (fromEnvironment == null || fromEnvironment.isEmpty()) {
+                throw new IllegalArgumentException(
+                        key + " refers to environment variable " + variable + ", which is not set");
+            }
+            return fromEnvironment.getBytes(StandardCharsets.UTF_8);
+        }
+        if (value.startsWith("file:")) {
+            Path path = base.getFileSystem().getPath(value.substring(5));
+            try {
+                return Files.readAllBytes(path);
+            } catch (IOException e) {
+                throw new IllegalArgumentException(key + " refers to " + path + ", which cannot be"
+                        + " read: " + e.getMessage(), e);
+            }
+        }
+        if (value.startsWith("base64:")) {
+            return Base64.getDecoder().decode(value.substring(7));
+        }
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
@@ -183,7 +241,7 @@ public final class FileConfigStore implements ConfigStore {
         for (ApplicationConfig application : previous.applications().values()) {
             if (!candidate.serves(application.name())) {
                 log.info("no longer serving application '{}'. Its state is kept: a cluster that"
-                        + " returns still needs the vote it was given remembered.",
+                                + " returns still needs the vote it was given remembered.",
                         application.name());
                 listeners.forEach(listener -> listener.onApplicationRemoved(application));
             }
@@ -284,26 +342,6 @@ public final class FileConfigStore implements ConfigStore {
         return builder.build();
     }
 
-    /**
-     * A named profile rather than seven separate intervals.
-     *
-     * <p>The relationships between them are what has to hold — the election timeout an order of
-     * magnitude above the round trip, and so on — and those are far easier to get wrong one key at
-     * a time than to choose between two profiles that are each internally consistent. A witness on
-     * a third network wants {@code wan}; one in the same datacentre wants the default.
-     */
-    private static Timings timingsProfile(String profile) {
-        String name = profile.trim().toLowerCase(java.util.Locale.ROOT);
-        if ("lan".equals(name)) {
-            return Timings.lan();
-        }
-        if ("wan".equals(name)) {
-            return Timings.wan();
-        }
-        throw new IllegalArgumentException(
-                "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
-    }
-
     private ApplicationConfig readApplication(Path file, WitnessSettings settings) {
         String name = applicationNameOf(file);
         warnIfWorldReadable(file);
@@ -353,7 +391,9 @@ public final class FileConfigStore implements ConfigStore {
         return name;
     }
 
-    /** Warns the way {@code ssh} does, rather than refusing: the operator owns their filesystem. */
+    /**
+     * Warns the way {@code ssh} does, rather than refusing: the operator owns their filesystem.
+     */
     private void warnIfWorldReadable(Path file) {
         try {
             Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
@@ -380,54 +420,6 @@ public final class FileConfigStore implements ConfigStore {
             throw new IllegalArgumentException("cannot parse " + file + ": " + e.getMessage(), e);
         }
         return properties;
-    }
-
-    private static int intValue(Properties properties, String key, int fallback) {
-        String raw = properties.getProperty(key);
-        if (raw == null || raw.trim().isEmpty()) {
-            return fallback;
-        }
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(key + " must be a number, but was '" + raw + "'");
-        }
-    }
-
-    /**
-     * A secret given inline, as {@code env:NAME}, or as {@code file:path}.
-     *
-     * <p>The indirections exist so configuration can go into version control without the secret
-     * going with it.
-     */
-    private static byte[] secretValue(Properties properties, String key, Path base) {
-        String raw = properties.getProperty(key);
-        if (raw == null || raw.trim().isEmpty()) {
-            return null;
-        }
-        String value = raw.trim();
-        if (value.startsWith("env:")) {
-            String variable = value.substring(4);
-            String fromEnvironment = System.getenv(variable);
-            if (fromEnvironment == null || fromEnvironment.isEmpty()) {
-                throw new IllegalArgumentException(
-                        key + " refers to environment variable " + variable + ", which is not set");
-            }
-            return fromEnvironment.getBytes(StandardCharsets.UTF_8);
-        }
-        if (value.startsWith("file:")) {
-            Path path = base.getFileSystem().getPath(value.substring(5));
-            try {
-                return Files.readAllBytes(path);
-            } catch (IOException e) {
-                throw new IllegalArgumentException(key + " refers to " + path + ", which cannot be"
-                        + " read: " + e.getMessage(), e);
-            }
-        }
-        if (value.startsWith("base64:")) {
-            return Base64.getDecoder().decode(value.substring(7));
-        }
-        return value.getBytes(StandardCharsets.UTF_8);
     }
 
     private void logServedApplications() {

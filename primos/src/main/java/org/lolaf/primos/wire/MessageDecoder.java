@@ -245,17 +245,13 @@ public final class MessageDecoder {
 
     private boolean drop(DropReason reason, String detail, Object argument) {
         drops.record(reason);
-        if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {},{}", reason, detail, argument);
-        }
+        log.warn("dropped datagram ({}): {},{}", reason, detail, argument);
         return false;
     }
 
     private boolean drop(DropReason reason, String detail, Object first, Object second) {
         drops.record(reason);
-        if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {},{},{}", reason, detail, first, second);
-        }
+        log.warn("dropped datagram ({}): {},{},{}", reason, detail, first, second);
         return false;
     }
 }

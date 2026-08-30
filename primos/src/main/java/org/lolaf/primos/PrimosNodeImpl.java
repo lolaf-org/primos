@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit;
  * volatile reference; they never touch the algorithm's state.
  */
 @Slf4j
-final class RunningPrimosNode implements PrimosNode, PrimosListener {
+final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
     private final ClusterConfig config;
     private final StateStore store;
@@ -57,15 +57,15 @@ final class RunningPrimosNode implements PrimosNode, PrimosListener {
     private boolean started;
     private boolean stopped;
 
-    RunningPrimosNode(ClusterConfig config,
-                      StateStore store,
-                      Transport transport,
-                      MonotonicClock clock,
-                      Random random,
-                      MessageAuthenticator authenticator,
-                      Executor listenerExecutor,
-                      long slowCallbackNanos,
-                      long stopTimeoutNanos) {
+    PrimosNodeImpl(ClusterConfig config,
+                   StateStore store,
+                   Transport transport,
+                   MonotonicClock clock,
+                   Random random,
+                   MessageAuthenticator authenticator,
+                   Executor listenerExecutor,
+                   long slowCallbackNanos,
+                   long stopTimeoutNanos) {
         this.config = config;
         this.store = store;
         this.transport = transport;

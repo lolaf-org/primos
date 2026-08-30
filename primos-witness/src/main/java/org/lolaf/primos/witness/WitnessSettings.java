@@ -15,18 +15,18 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.Setter;
+import org.lolaf.primos.Timings;
+import org.lolaf.primos.wire.MessageAuthenticator;
+
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 
-import org.lolaf.primos.Timings;
-
-import lombok.Setter;
-
-import org.lolaf.primos.wire.MessageAuthenticator;
-
-/** The witness server's own settings, as opposed to the applications it serves. */
+/**
+ * The witness server's own settings, as opposed to the applications it serves.
+ */
 public final class WitnessSettings {
 
     private final InetSocketAddress bindAddress;
@@ -61,7 +61,9 @@ public final class WitnessSettings {
         return bindAddress;
     }
 
-    /** Where per-application term and vote files live. Must be durable local storage. */
+    /**
+     * Where per-application term and vote files live. Must be durable local storage.
+     */
     public Path stateDirectory() {
         return stateDirectory;
     }
@@ -92,12 +94,16 @@ public final class WitnessSettings {
         return defaultMacAlgorithm;
     }
 
-    /** How many applications may auto-register, so an open witness cannot be filled up. */
+    /**
+     * How many applications may auto-register, so an open witness cannot be filled up.
+     */
     public int autoRegistrationLimit() {
         return autoRegistrationLimit;
     }
 
-    /** Quiet period after a file change before reloading, so one save is one reload. */
+    /**
+     * Quiet period after a file change before reloading, so one save is one reload.
+     */
     public Duration reloadDebounce() {
         return reloadDebounce;
     }
@@ -125,42 +131,62 @@ public final class WitnessSettings {
         return timings;
     }
 
-    /** Builder for {@link WitnessSettings}. */
+    /**
+     * Builder for {@link WitnessSettings}.
+     */
     public static final class Builder {
 
-        /** Where to listen. Not hot-reloadable: a change is read and ignored until a restart. */
+        /**
+         * Where to listen. Not hot-reloadable: a change is read and ignored until a restart.
+         */
         @Setter
         private InetSocketAddress bindAddress = new InetSocketAddress(7420);
 
-        /** Where per-application term and vote files live. Must be durable local storage. */
+        /**
+         * Where per-application term and vote files live. Must be durable local storage.
+         */
         @Setter
         private Path stateDirectory;
 
-        /** Whether unconfigured applications are served. See {@link RegistrationMode}. */
+        /**
+         * Whether unconfigured applications are served. See {@link RegistrationMode}.
+         */
         @Setter
         private RegistrationMode registrationMode = RegistrationMode.STRICT;
 
-        /** The witness-wide secret, used for any application without one of its own. */
+        /**
+         * The witness-wide secret, used for any application without one of its own.
+         */
         @Setter
         private byte[] defaultSecret;
 
-        /** The algorithm for any application that does not name one. Cluster-wide policy. */
+        /**
+         * The algorithm for any application that does not name one. Cluster-wide policy.
+         */
         @Setter
         private String defaultMacAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
 
-        /** How many applications may auto-register, so an open witness cannot be filled up. */
+        /**
+         * How many applications may auto-register, so an open witness cannot be filled up.
+         */
         @Setter
         private int autoRegistrationLimit = 64;
 
-        /** Quiet period after a file change before reloading, so one save is one reload. */
+        /**
+         * Quiet period after a file change before reloading, so one save is one reload.
+         */
         @Setter
         private Duration reloadDebounce = Duration.ofMillis(250);
 
-        /** How often the configuration directory is re-read regardless of events. */
+        /**
+         * How often the configuration directory is re-read regardless of events.
+         */
         @Setter
         private Duration rescanInterval = Duration.ofSeconds(30);
 
-        /** The timing profile the served nodes run with. Keep it uniform across a cluster. */
+        /**
+         * The timing profile the served nodes run with. Keep it uniform across a cluster.
+         */
         @Setter
         private Timings timings = Timings.lan();
 

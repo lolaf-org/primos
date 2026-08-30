@@ -23,58 +23,91 @@ import java.nio.file.Paths;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
 
+import picocli.CommandLine;
+import picocli.CommandLine.ParameterException;
+
 /** The command line, which is the whole of the operator's interface to the process. */
 class WitnessMainTest {
 
     @Test
     void the_defaults_are_the_documented_ones() {
-        WitnessMain.Arguments arguments = WitnessMain.Arguments.parse(new String[0]);
+        WitnessMain command = parse();
 
-        assertThat(arguments.configDirectory()).isEqualTo(Paths.get("/etc/primos-witness"));
-        assertThat(arguments.nodeId())
+        assertThat(command.configDirectory()).isEqualTo(Paths.get("/etc/primos-witness"));
+        assertThat(command.nodeId())
                 .as("the top of the id range, so it does not collide with application nodes"
                         + " numbered from zero upward")
                 .isEqualTo(Peer.MAX_ID);
-        assertThat(arguments.bindAddress()).isNull();
+        assertThat(command.bindAddress()).isNull();
     }
 
     @Test
     void every_option_is_read() {
-        WitnessMain.Arguments arguments = WitnessMain.Arguments.parse(
-                new String[] {"--config", "/srv/witness", "--node-id", "900",
-                        "--bind", "10.0.0.4:7420"});
+        WitnessMain command = parse("--config", "/srv/witness", "--node-id", "900",
+                "--bind", "10.0.0.4:7420");
 
-        assertThat(arguments.configDirectory()).isEqualTo(Paths.get("/srv/witness"));
-        assertThat(arguments.nodeId()).isEqualTo(900);
-        assertThat(arguments.bindAddress().getPort()).isEqualTo(7420);
-        assertThat(arguments.bindAddress().getHostString()).isEqualTo("10.0.0.4");
+        assertThat(command.configDirectory()).isEqualTo(Paths.get("/srv/witness"));
+        assertThat(command.nodeId()).isEqualTo(900);
+        assertThat(command.bindAddress().getPort()).isEqualTo(7420);
+        assertThat(command.bindAddress().getHostString()).isEqualTo("10.0.0.4");
+    }
+
+    @Test
+    void a_bind_with_no_host_is_the_wildcard_address() {
+        assertThat(parse("--bind", ":7420").bindAddress().getPort()).isEqualTo(7420);
     }
 
     @Test
     void help_asks_for_nothing_else() {
-        assertThat(WitnessMain.Arguments.parse(new String[] {"--help"}).isHelp()).isTrue();
-        assertThat(WitnessMain.Arguments.parse(new String[] {"-h"}).isHelp()).isTrue();
+        assertThat(new CommandLine(new WitnessMain()).parseArgs("--help").isUsageHelpRequested())
+                .isTrue();
+        assertThat(new CommandLine(new WitnessMain()).parseArgs("-h").isUsageHelpRequested())
+                .isTrue();
+    }
+
+    @Test
+    void the_version_is_answerable_without_unpacking_the_jar() {
+        assertThat(new CommandLine(new WitnessMain()).parseArgs("--version")
+                .isVersionHelpRequested()).isTrue();
+        assertThat(new WitnessMain.BuildVersion().getVersion())
+                .as("read from the manifest when there is one, and never absent, since an"
+                        + " operator asking this is trying to establish what is deployed")
+                .hasSize(1)
+                .allSatisfy(line -> assertThat(line).startsWith("primos-witness "));
     }
 
     @Test
     void a_mistake_names_itself_rather_than_being_ignored() {
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--nodeid", "3"}))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unknown option '--nodeid'");
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--config"}))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("needs a value");
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--node-id", "x"}))
-                .isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> parse("--nodeid", "3"))
+                .isInstanceOf(ParameterException.class)
+                .hasMessageContaining("--nodeid");
+        assertThatThrownBy(() -> parse("--config"))
+                .isInstanceOf(ParameterException.class)
+                .hasMessageContaining("--config");
+        assertThatThrownBy(() -> parse("--node-id", "x"))
+                .isInstanceOf(ParameterException.class)
                 .hasMessageContaining("must be a number");
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--node-id", "9999"}))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--bind", "7420"}))
-                .isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> parse("--node-id", "9999"))
+                .as("the id range is checked where it is typed, not several layers down")
+                .isInstanceOf(ParameterException.class)
+                .hasMessageContaining(String.valueOf(Peer.MAX_ID));
+        assertThatThrownBy(() -> parse("--bind", "7420"))
+                .isInstanceOf(ParameterException.class)
                 .hasMessageContaining("host:port");
-        assertThatThrownBy(() -> WitnessMain.Arguments.parse(new String[] {"--bind", "host:0"}))
-                .isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> parse("--bind", "host:0"))
+                .isInstanceOf(ParameterException.class)
                 .hasMessageContaining("1-65535");
+    }
+
+    @Test
+    void a_missing_configuration_directory_is_the_operator_s_mistake_not_a_crash() {
+        WitnessMain command = new WitnessMain();
+        int status = new CommandLine(command).execute("--config", "/no/such/directory/anywhere");
+
+        assertThat(status)
+                .as("exit 2 with the usage text, the way a mistyped option is reported — an init"
+                        + " system reading this must not be told the software failed")
+                .isEqualTo(CommandLine.ExitCode.USAGE);
     }
 
     @Test
@@ -84,5 +117,22 @@ class WitnessMainTest {
                         + " before reaching for a restart")
                 .contains("--config", "--node-id", "--bind")
                 .contains("tolerates zero failures");
+    }
+
+    @Test
+    void the_options_are_listed_in_the_order_they_matter() {
+        String usage = WitnessMain.usage();
+
+        assertThat(usage.indexOf("--config"))
+                .as("alphabetical order would put --bind first, which is the least important of"
+                        + " the three and the one most operators never pass")
+                .isLessThan(usage.indexOf("--node-id"));
+        assertThat(usage.indexOf("--node-id")).isLessThan(usage.indexOf("--bind"));
+    }
+
+    private static WitnessMain parse(String... args) {
+        WitnessMain command = new WitnessMain();
+        new CommandLine(command).parseArgs(args);
+        return command;
     }
 }

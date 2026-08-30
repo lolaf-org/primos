@@ -32,10 +32,14 @@ package org.lolaf.primos.witness;
  */
 public interface ConfigStore extends AutoCloseable {
 
-    /** The configuration in force. Never null after construction. */
+    /**
+     * The configuration in force. Never null after construction.
+     */
     ConfigSnapshot current();
 
-    /** Registers a listener for changes to the served set. */
+    /**
+     * Registers a listener for changes to the served set.
+     */
     void addListener(ConfigChangeListener listener);
 
     /**
@@ -48,7 +52,9 @@ public interface ConfigStore extends AutoCloseable {
      */
     boolean poll(long nowNanos);
 
-    /** When {@link #poll} should next be called, so the server can size its select timeout. */
+    /**
+     * When {@link #poll} should next be called, so the server can size its select timeout.
+     */
     long nextCheckNanos(long nowNanos);
 
     @Override

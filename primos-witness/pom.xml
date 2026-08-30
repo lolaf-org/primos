@@ -30,6 +30,14 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
+        <!-- The command line. A single self-contained jar with no dependencies of its own, which is
+             what makes it acceptable in a process meant to run untouched for years: every dependency
+             here is a future CVE notification and an unplanned upgrade of something whose job is
+             never to move. -->
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+        </dependency>
         <!-- This one is an application, not a library, so it ships its own logging backend at
              runtime. The SLF4J-only rule constrains what consumers inherit; nobody depends on this. -->
         <dependency>

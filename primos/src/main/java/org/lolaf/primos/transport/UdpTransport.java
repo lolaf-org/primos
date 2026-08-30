@@ -18,25 +18,16 @@ package org.lolaf.primos.transport;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
-import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.net.SocketOption;
-import java.net.StandardSocketOptions;
+import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The real transport: one bound {@link DatagramChannel}, one {@link Selector}, no connections.
@@ -54,6 +45,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * spoofable and, on a multi-homed host, the source of an outgoing datagram is chosen by the
  * routing table rather than by us. Filtering therefore happens above, on the id and the
  * authentication tag; this class only learns where a known peer is currently speaking from.
+ *
+ * <p><strong>Every peer's hostname is resolved once, when this is built, and a name that does not
+ * resolve is a startup failure.</strong> Not a warning, not a retry: a node that cannot work out
+ * where a peer is could never reach it, and the earlier design — drop the datagram, count it, and
+ * retry the lookup on a background thread — made broken DNS indistinguishable from a partition or
+ * a dead process from every vantage point outside this class. It is better to refuse to start,
+ * loudly, on the thread that called {@code build()}, while somebody is still watching.
+ *
+ * <p>Two things follow. Resolution is the one blocking call here, and it happens on the caller's
+ * thread before the node has one of its own, so the rule that DNS never touches the node thread
+ * still holds with no exceptions. And <strong>address learning is now the only thing that changes
+ * an address at runtime</strong>: a peer that moves is reached again because its own datagrams
+ * arrive and say so, which needs {@link Builder#addressLearning} and therefore authentication. A
+ * cluster without a secret whose peers change address needs a restart, and that is the deliberate
+ * trade for never silently failing to send.
  */
 @Slf4j
 public final class UdpTransport implements Transport {
@@ -66,12 +72,10 @@ public final class UdpTransport implements Transport {
 
     private final DatagramChannel channel;
     private final Selector selector;
-    private final ByteBuffer receiveBuffer = ByteBuffer.allocateDirect(RECEIVE_CAPACITY);
-    private final Map<Integer, Endpoint> endpoints = new HashMap<>();
+    private final ByteBuffer receiveBuffer = ByteBuffer.allocate(RECEIVE_CAPACITY);
+    private final Map<Integer, InetSocketAddress> addresses = new HashMap<>();
     private final boolean addressLearning;
-    private final Duration reresolveInterval;
     private final String clusterName;
-    private final MonotonicClock clock;
 
     private SocketAddress currentSource;
     private volatile boolean closed;
@@ -79,18 +83,19 @@ public final class UdpTransport implements Transport {
     private long sendFailures;
     private long sendsWhileClosed;
     private long sendsToUnknownPeer;
-    private long sendsWithoutAddress;
     private long addressUpdates;
 
     private UdpTransport(Builder builder) throws IOException {
         // Checked here rather than in each setter, so that the builder's fields can be plain
         // declarations and every required value is still refused in one place.
         this.addressLearning = builder.addressLearning;
-        this.reresolveInterval = Objects.requireNonNull(builder.reresolveInterval, "reresolveInterval");
         this.clusterName = Objects.requireNonNull(builder.clusterName, "clusterName");
-        this.clock = Objects.requireNonNull(builder.clock, "clock");
         Objects.requireNonNull(builder.bindAddress, "bindAddress");
         Objects.requireNonNull(builder.peers, "peers");
+
+        // Before the socket, deliberately: this is the check most likely to fail, and failing it
+        // after binding would leak a channel and a selector that nobody is left holding.
+        resolveAll(builder.peers);
 
         this.channel = DatagramChannel.open();
         this.channel.configureBlocking(false);
@@ -102,14 +107,40 @@ public final class UdpTransport implements Transport {
         this.selector = Selector.open();
         this.channel.register(selector, SelectionKey.OP_READ);
 
-        for (Peer peer : builder.peers) {
-            endpoints.put(peer.id(), new Endpoint(peer));
-        }
         log.info("cluster '{}': bound to {}", clusterName, channel.getLocalAddress());
     }
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /**
+     * Resolves every peer, or refuses to build.
+     *
+     * <p>All of them are tried before anything is thrown, and the failures are reported together.
+     * Stopping at the first would make an operator who mistyped three hostnames find them one
+     * restart at a time.
+     *
+     * @throws IllegalStateException if any peer's hostname does not resolve
+     */
+    private void resolveAll(List<Peer> peers) {
+        List<String> unresolved = new ArrayList<>();
+        for (Peer peer : peers) {
+            try {
+                InetAddress host = InetAddress.getByName(peer.host());
+                addresses.put(peer.id(), new InetSocketAddress(host, peer.port()));
+            } catch (UnknownHostException | SecurityException e) {
+                unresolved.add("peer " + peer.id() + " (" + peer.name() + ") at "
+                        + peer.host() + ":" + peer.port());
+            }
+        }
+        if (!unresolved.isEmpty()) {
+            throw new IllegalStateException("cluster '" + clusterName + "': cannot resolve the"
+                    + " address of " + unresolved.size() + " of " + peers.size() + " peers, so"
+                    + " this node could never reach them: " + String.join(", ", unresolved)
+                    + ". A name that does not resolve is a configuration error, not a network"
+                    + " condition: fix it or use an IP address.");
+        }
     }
 
     /**
@@ -134,27 +165,13 @@ public final class UdpTransport implements Transport {
             sendsWhileClosed++;
             return;
         }
-        Endpoint endpoint = endpoints.get(peerId);
-        if (endpoint == null) {
-            // Not a network condition: this node was asked for a peer it was never configured
-            // with, which is a bug in the caller rather than a lost datagram.
-            sendsToUnknownPeer++;
-            if (log.isDebugEnabled()) {
-                log.debug("cluster '{}': asked to send to {}, which is not a configured peer",
-                        clusterName, peerId);
-            }
-            return;
-        }
-        InetSocketAddress target = endpoint.address();
+        InetSocketAddress target = addresses.get(peerId);
         if (target == null) {
-            // The hostname has never resolved. Without this counter the peer simply looks
-            // unreachable, with nothing anywhere to say that DNS is the reason.
-            sendsWithoutAddress++;
-            endpoint.resolveInBackground();
-            if (log.isDebugEnabled()) {
-                log.debug("cluster '{}': no address yet for peer {} ({}); dropping this datagram",
-                        clusterName, peerId, endpoint.peer.host());
-            }
+            // Not a network condition: this node was asked for a peer it was never configured
+            // with, which is a bug in the caller rather than a lost datagram. Every configured
+            // peer has an address, because one that did not resolve refused to build.
+            sendsToUnknownPeer++;
+            log.warn("cluster '{}': asked to send to peer {}, which is not a configured peer", clusterName, peerId);
             return;
         }
         try {
@@ -167,11 +184,7 @@ public final class UdpTransport implements Transport {
             // after the fact. The algorithm's timers are the retry mechanism, so this must never
             // become a node failure.
             sendFailures++;
-            endpoint.resolveInBackground();
-            if (log.isDebugEnabled()) {
-                log.debug("cluster '{}': send to {} at {} failed: {}",
-                        clusterName, peerId, target, e.toString());
-            }
+            log.warn("cluster '{}': send to peer {} at {} failed", clusterName, peerId, target, e);
         }
     }
 
@@ -186,13 +199,12 @@ public final class UdpTransport implements Transport {
             } else {
                 // select(0) blocks forever in NIO, so a sub-millisecond wait is rounded up rather
                 // than turned into an indefinite one.
-                long millis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(timeoutNanos));
-                selector.select(millis);
+                selector.select(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(timeoutNanos)));
             }
             selector.selectedKeys().clear();
             return drain(handler);
         } catch (IOException e) {
-            log.debug("cluster '{}': select failed: {}", clusterName, e.toString());
+            log.warn("cluster '{}': NIO select failed", clusterName, e);
             return 0;
         }
     }
@@ -218,21 +230,23 @@ public final class UdpTransport implements Transport {
      * Records where a peer is speaking from, now that the message has passed every check.
      *
      * <p>Learning is why a peer that restarts on a new address can be reached again without an
-     * operator editing configuration. It is gated on authentication for a reason: learning from an
-     * unauthenticated datagram would let a single spoofed packet redirect a peer's traffic and
-     * partition it, without the attacker forging any content at all.
+     * operator editing configuration, and since hostnames are resolved once at construction it is
+     * the only thing that updates an address at all. It is gated on authentication for a reason:
+     * learning from an unauthenticated datagram would let a single spoofed packet redirect a
+     * peer's traffic and partition it, without the attacker forging any content at all.
      */
     @Override
     public void confirmSender(int senderId) {
         if (!addressLearning || currentSource == null) {
             return;
         }
-        Endpoint endpoint = endpoints.get(senderId);
-        if (endpoint == null || !(currentSource instanceof InetSocketAddress)) {
+        InetSocketAddress known = addresses.get(senderId);
+        if (known == null || !(currentSource instanceof InetSocketAddress)) {
             return;
         }
         InetSocketAddress observed = (InetSocketAddress) currentSource;
-        if (endpoint.learn(observed)) {
+        if (!observed.equals(known)) {
+            addresses.put(senderId, observed);
             addressUpdates++;
             log.info("cluster '{}': peer {} is now speaking from {}",
                     clusterName, senderId, observed);
@@ -274,11 +288,12 @@ public final class UdpTransport implements Transport {
      * Every datagram this transport did not put on the wire, for any reason.
      *
      * <p>The one number worth alerting on. A healthy node's is flat: the individual counters below
-     * separate a network that is refusing traffic from a name that will not resolve from a bug in
-     * the caller, and those want very different responses.
+     * separate a network that is refusing traffic from a bug in the caller, and those want very
+     * different responses. A name that will not resolve is not among them — that is refused at
+     * construction rather than counted here.
      */
     public long sendsDropped() {
-        return sendFailures + sendsWhileClosed + sendsToUnknownPeer + sendsWithoutAddress;
+        return sendFailures + sendsWhileClosed + sendsToUnknownPeer;
     }
 
     /**
@@ -296,17 +311,6 @@ public final class UdpTransport implements Transport {
      */
     public long sendsToUnknownPeer() {
         return sendsToUnknownPeer;
-    }
-
-    /**
-     * Sends dropped because the peer's hostname has never resolved.
-     *
-     * <p>The quietest failure of the set, and the reason these counters exist: without it a peer
-     * whose DNS is broken is simply unreachable, with nothing to distinguish that from a network
-     * partition or a dead process.
-     */
-    public long sendsWithoutAddress() {
-        return sendsWithoutAddress;
     }
 
     /**
@@ -358,114 +362,24 @@ public final class UdpTransport implements Transport {
         private int receiveBufferBytes = 1 << 20;
 
         /**
-         * How often a peer's hostname is looked up again.
-         */
-        @Setter
-        private Duration reresolveInterval = Duration.ofSeconds(60);
-
-        /**
          * Used only in log lines.
          */
         @Setter
         private String clusterName = "primos";
 
-        /**
-         * The clock used to decide when a hostname is worth looking up again.
-         *
-         * <p>Here for the same reason it is everywhere else: nothing in primos reads the system
-         * clock directly, so that the rule has no exceptions to remember.
-         */
-        @Setter
-        private MonotonicClock clock = MonotonicClock.SYSTEM;
-
         private Builder() {
         }
 
+        /**
+         * Binds the socket and resolves every peer.
+         *
+         * @throws IllegalStateException if a peer's hostname does not resolve. Deliberately fatal
+         *                               and deliberately here, on the calling thread, before the
+         *                               node has one of its own — see the class javadoc.
+         * @throws IOException           if the socket cannot be opened or bound
+         */
         public UdpTransport build() throws IOException {
             return new UdpTransport(this);
-        }
-    }
-
-    /**
-     * Where one peer is, and when that was last worked out.
-     */
-    private final class Endpoint {
-
-        private final Peer peer;
-        private final AtomicBoolean resolving = new AtomicBoolean();
-
-        private volatile InetSocketAddress address;
-        private volatile long resolvedAtNanos = Long.MIN_VALUE;
-
-        private Endpoint(Peer peer) {
-            this.peer = peer;
-            // Resolved here, on the caller's thread, so the very first datagram has somewhere to
-            // go. Only refreshes happen in the background, where blocking would cost heartbeats.
-            InetSocketAddress initial = new InetSocketAddress(peer.host(), peer.port());
-            if (initial.isUnresolved()) {
-                log.warn("cluster '{}': cannot resolve {} for peer {} yet; will retry in the"
-                        + " background", clusterName, peer.host(), peer.id());
-                this.address = null;
-            } else {
-                this.address = initial;
-            }
-            this.resolvedAtNanos = clock.nanoTime();
-        }
-
-        private InetSocketAddress address() {
-            InetSocketAddress current = address;
-            if (current != null && clock.nanoTime() - resolvedAtNanos > reresolveInterval.toNanos()) {
-                resolveInBackground();
-            }
-            return current;
-        }
-
-        private boolean learn(InetSocketAddress observed) {
-            InetSocketAddress current = address;
-            if (observed.equals(current)) {
-                return false;
-            }
-            address = observed;
-            resolvedAtNanos = clock.nanoTime();
-            return true;
-        }
-
-        /**
-         * Resolves the hostname on a short-lived worker.
-         *
-         * <p>Never on the node thread: a DNS lookup can block for seconds, and the node has
-         * heartbeats to send. Re-resolution is rare, so the steady state remains one thread.
-         */
-        private void resolveInBackground() {
-            if (closed || !resolving.compareAndSet(false, true)) {
-                return;
-            }
-            Thread worker = new Thread(() -> {
-                try {
-                    InetSocketAddress resolved =
-                            new InetSocketAddress(peer.host(), peer.port());
-                    if (resolved.isUnresolved()) {
-                        log.debug("cluster '{}': cannot resolve {} for peer {}",
-                                clusterName, peer.host(), peer.id());
-                    } else {
-                        // Closes the loop on the warning logged at construction: an operator who
-                        // was told a name would not resolve should also be told when it does.
-                        if (address == null) {
-                            log.info("cluster '{}': {} now resolves for peer {}; sending resumes",
-                                    clusterName, peer.host(), peer.id());
-                        }
-                        address = resolved;
-                    }
-                    resolvedAtNanos = clock.nanoTime();
-                } catch (RuntimeException e) {
-                    log.debug("cluster '{}': resolving {} failed: {}",
-                            clusterName, peer.host(), e.toString());
-                } finally {
-                    resolving.set(false);
-                }
-            }, "primos-resolve-" + peer.id());
-            worker.setDaemon(true);
-            worker.start();
         }
     }
 }

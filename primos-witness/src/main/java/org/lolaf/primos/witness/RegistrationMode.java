@@ -15,7 +15,9 @@
  */
 package org.lolaf.primos.witness;
 
-/** Whether the witness serves only the applications it was told about, or any that turn up. */
+/**
+ * Whether the witness serves only the applications it was told about, or any that turn up.
+ */
 public enum RegistrationMode {
 
     /**

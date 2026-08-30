@@ -45,11 +45,6 @@ public class Peer {
      * {@link Quorum#MAX_RECOMMENDED_VOTERS} for that, which is far smaller. Ids may be sparse, so
      * an operator is free to use a scheme that means something, such as {@code 101, 102, 201}
      * for two datacentres.
-     *
-     * <p>The wire carries the sender as a 32-bit integer, so the protocol would accept any
-     * {@code int}. The cap is here for legibility and for catching mistakes: ids appear in every
-     * log line and packet dump, and a four-digit ceiling makes a port number or an IP octet passed
-     * by accident fail immediately rather than become a peer nobody can find.
      */
     public static final int MAX_ID = 1_023;
 

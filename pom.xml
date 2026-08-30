@@ -51,6 +51,7 @@
         <mockito.version>5.23.0</mockito.version>
         <assertj-core.version>3.27.7</assertj-core.version>
         <awaitility.version>4.3.0</awaitility.version>
+        <picocli.version>4.7.7</picocli.version>
 
         <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
@@ -114,6 +115,14 @@
                 <groupId>org.slf4j</groupId>
                 <artifactId>slf4j-simple</artifactId>
                 <version>${slf4j.version}</version>
+            </dependency>
+            <!-- The witness server's command line, and the only dependency in the estate outside
+                 SLF4J. It reaches primos-witness alone: the library stays SLF4J-only, because that
+                 rule is about what a consumer inherits and nobody depends on the server. -->
+            <dependency>
+                <groupId>info.picocli</groupId>
+                <artifactId>picocli</artifactId>
+                <version>${picocli.version}</version>
             </dependency>
             <!-- Align every transitive org.junit.* artifact to a single JUnit version. -->
             <dependency>

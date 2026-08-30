@@ -15,11 +15,7 @@
  */
 package org.lolaf.primos.witness;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * The whole configuration at one instant, immutable.
@@ -58,7 +54,9 @@ public final class ConfigSnapshot {
         return applications.containsKey(name);
     }
 
-    /** The same settings with one more application, for permissive auto-registration. */
+    /**
+     * The same settings with one more application, for permissive auto-registration.
+     */
     public ConfigSnapshot with(ApplicationConfig application) {
         Map<String, ApplicationConfig> extended = new LinkedHashMap<>(applications);
         extended.put(application.name(), application);

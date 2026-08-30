@@ -118,7 +118,7 @@ public final class WitnessServer implements AutoCloseable {
     private final StateStoreFactory stateStores;
     private final DatagramChannel channel;
     private final Selector selector;
-    private final ByteBuffer receiveBuffer = ByteBuffer.allocateDirect(RECEIVE_CAPACITY);
+    private final ByteBuffer receiveBuffer = ByteBuffer.allocate(RECEIVE_CAPACITY);
     private final Map<String, Served> served = new LinkedHashMap<>();
     private final Set<String> namesSeen = new HashSet<>();
 

@@ -23,15 +23,21 @@ package org.lolaf.primos.witness;
  */
 public interface ConfigChangeListener {
 
-    /** A new application is being served. */
+    /**
+     * A new application is being served.
+     */
     default void onApplicationAdded(ApplicationConfig application) {
     }
 
-    /** An application's settings changed, most often a secret being rotated. */
+    /**
+     * An application's settings changed, most often a secret being rotated.
+     */
     default void onApplicationChanged(ApplicationConfig previous, ApplicationConfig current) {
     }
 
-    /** An application is no longer served. Its state stays on disk. */
+    /**
+     * An application is no longer served. Its state stays on disk.
+     */
     default void onApplicationRemoved(ApplicationConfig application) {
     }
 }

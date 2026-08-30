@@ -15,24 +15,19 @@
  */
 package org.lolaf.primos.witness;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
-import java.nio.channels.Selector;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.WireFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.Selector;
+import java.util.*;
 
 /**
  * One application's view of the witness server's single socket.
@@ -61,15 +56,13 @@ import org.slf4j.LoggerFactory;
  */
 final class RoutedTransport implements Transport {
 
-    private static final Logger log = LoggerFactory.getLogger(RoutedTransport.class);
-
     /**
      * How many datagrams may wait for one application. Reached only if a node's traffic outruns
      * the server loop, which for a witness answering a few messages a second means something has
      * gone wrong rather than that the buffer is too small.
      */
     static final int INBOX_CAPACITY = 256;
-
+    private static final Logger log = LoggerFactory.getLogger(RoutedTransport.class);
     private final String application;
     private final DatagramChannel channel;
     private final Selector selector;
@@ -238,7 +231,9 @@ final class RoutedTransport implements Transport {
         return new LinkedHashMap<>(endpoints).entrySet();
     }
 
-    /** Datagrams dropped because this application's inbox was full. */
+    /**
+     * Datagrams dropped because this application's inbox was full.
+     */
     long overflowed() {
         return overflowed;
     }
@@ -266,7 +261,9 @@ final class RoutedTransport implements Transport {
         return undeliverable;
     }
 
-    /** Drops the queue. The channel and selector belong to the server and are left alone. */
+    /**
+     * Drops the queue. The channel and selector belong to the server and are left alone.
+     */
     @Override
     public void close() {
         closed = true;
@@ -275,7 +272,9 @@ final class RoutedTransport implements Transport {
         learned.clear();
     }
 
-    /** One queued datagram and the address it came from, reused rather than reallocated. */
+    /**
+     * One queued datagram and the address it came from, reused rather than reallocated.
+     */
     private static final class Inbound {
 
         private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES + 1);

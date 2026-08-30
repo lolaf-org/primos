@@ -39,8 +39,25 @@ public class PrimosStats {
     Duration timeInRole;
     long electionsStarted;
     long electionsWon;
+    /**
+     * How many times this node handed leadership on as it shut down.
+     *
+     * <p>Worth watching across a rolling deploy: the difference between this and the number of
+     * times this node was stopped while leading is the number of deploys that cost the cluster a
+     * full election timeout with nobody in charge.
+     */
     long handoversSent;
+    /**
+     * How many times this node campaigned because a departing leader handed over to it.
+     */
     long handoversAccepted;
+    /**
+     * How many peers have told this node they were shutting down.
+     *
+     * <p>Read against the peer-down events: departures that were announced are orderly shutdowns,
+     * and the rest were inferred from silence — a crash, a partition, or a garbage collection long
+     * enough to look like one. The two have very different meanings on a dashboard.
+     */
     long departuresObserved;
     Map<DropReason, Long> drops;
     Map<Integer, PeerStats> peers;
@@ -75,36 +92,7 @@ public class PrimosStats {
         this.peers = Collections.unmodifiableMap(
                 new LinkedHashMap<>(peers == null ? Collections.emptyMap() : peers));
     }
-
-    /**
-     * How many times this node handed leadership on as it shut down.
-     *
-     * <p>Worth watching across a rolling deploy: the difference between this and the number of
-     * times this node was stopped while leading is the number of deploys that cost the cluster a
-     * full election timeout with nobody in charge.
-     */
-    public long handoversSent() {
-        return handoversSent;
-    }
-
-    /**
-     * How many times this node campaigned because a departing leader handed over to it.
-     */
-    public long handoversAccepted() {
-        return handoversAccepted;
-    }
-
-    /**
-     * How many peers have told this node they were shutting down.
-     *
-     * <p>Read against the peer-down events: departures that were announced are orderly shutdowns,
-     * and the rest were inferred from silence — a crash, a partition, or a garbage collection long
-     * enough to look like one. The two have very different meanings on a dashboard.
-     */
-    public long departuresObserved() {
-        return departuresObserved;
-    }
-
+    
     /**
      * How many datagrams were discarded for one reason. Never null; zero if it never happened.
      */

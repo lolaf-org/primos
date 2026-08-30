@@ -188,7 +188,7 @@ public final class PrimosNodeBuilder {
                 // setter is ours.
                 : MessageAuthenticator.hmac(macAlgorithm, clusterSecret.clone());
 
-        RunningPrimosNode node = new RunningPrimosNode(clusterConfig, store, transport, clock,
+        PrimosNodeImpl node = new PrimosNodeImpl(clusterConfig, store, transport, clock,
                 random, authenticator, listenerExecutor, slowCallback.toNanos(),
                 stopTimeout.toNanos());
         for (PrimosListener listener : listeners) {

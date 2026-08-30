@@ -17,7 +17,9 @@ package org.lolaf.primos.witness;
 
 import java.util.Locale;
 
-/** Checks on an application name that only the witness server needs. */
+/**
+ * Checks on an application name that only the witness server needs.
+ */
 final class ApplicationNames {
 
     /**

@@ -398,7 +398,7 @@ public final class ElectionNode implements MessageHandler {
      * Turns a leader's id into the object listeners are handed.
      *
      * <p>This node itself has no {@link Peer} — a node holds no address for itself — so
-     * {@link Leader#self} carries the name from the configuration instead. A peer that is not in
+     * {@link Leader#isSelf()} carries the name from the configuration instead. A peer that is not in
      * the probe table can only happen on the witness server, which learns its voters from traffic
      * and so may hear a leader's heartbeat before {@link #learnPeer} has been called for it; every
      * other node answers only configured senders, so there the lookup always succeeds.

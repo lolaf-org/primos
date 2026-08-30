@@ -15,15 +15,18 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.extern.slf4j.Slf4j;
+import org.lolaf.primos.Peer;
+import org.lolaf.primos.time.MonotonicClock;
+import picocli.CommandLine;
+import picocli.CommandLine.*;
+import picocli.CommandLine.Model.CommandSpec;
+
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.time.MonotonicClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.time.Duration;
+import java.util.concurrent.Callable;
 
 /**
  * The process: parse a handful of arguments, open the configuration, serve until told to stop.
@@ -32,71 +35,80 @@ import org.slf4j.LoggerFactory;
  * {@link FileConfigStore} or {@link WitnessServer}, and both fail loudly at startup rather than
  * later, because the one thing worse than a witness that will not start is a witness that starts
  * and quietly is not doing its job.
+ *
+ * <p>The two exit codes are the ones an init system reads: <strong>2</strong> for anything the
+ * operator typed or configured wrongly — reported as a sentence and the usage text, never a stack
+ * trace — and <strong>1</strong> for a failure to start, which is logged with its cause because
+ * that one needs the detail.
  */
-public final class WitnessMain {
+@Command(
+        name = "primos-witness",
+        mixinStandardHelpOptions = true,
+        sortOptions = false,
+        sortSynopsis = false,
+        versionProvider = WitnessMain.BuildVersion.class,
+        description = {
+                "A leader-ineligible voter, deployed in a third failure domain, that lets a",
+                "two-node active/passive pair survive a partition without split brain. One",
+                "instance serves many clusters at once, keyed by application name."},
+        footer = {
+                "",
+                "The configuration directory holds witness.properties and an applications/",
+                "directory with one <name>.properties file per served cluster. Both are re-read",
+                "while the server runs: onboarding an application never needs a restart, and a",
+                "restart is the one genuinely risky operation here, because while the witness is",
+                "down every two-node cluster it serves tolerates zero failures."})
+@Slf4j
+public final class WitnessMain implements Callable<Integer> {
 
-    private static final Logger log = LoggerFactory.getLogger(WitnessMain.class);
+    /**
+     * A {@code String} rather than a {@link Path}, because it is also the default picocli prints
+     * in the usage text and an annotation takes only constants.
+     */
+    private static final String DEFAULT_CONFIG_DIRECTORY = "/etc/primos-witness";
 
-    private static final Path DEFAULT_CONFIG_DIRECTORY = Paths.get("/etc/primos-witness");
+    /**
+     * How long a stop waits for the loop to close everything before giving up on it.
+     */
+    private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
-    /** How long a stop waits for the loop to close everything before giving up on it. */
-    private static final java.time.Duration SHUTDOWN_TIMEOUT = java.time.Duration.ofSeconds(10);
+    @Option(names = "--config", paramLabel = "<directory>", defaultValue = DEFAULT_CONFIG_DIRECTORY,
+            description = "Configuration directory. Default: ${DEFAULT-VALUE}")
+    private Path configDirectory;
 
-    private WitnessMain() {
+    @Option(names = "--node-id", paramLabel = "<id>", defaultValue = "" + Peer.MAX_ID,
+            converter = NodeIdConverter.class,
+            description = {
+                    "This witness's node id, " + Peer.MIN_ID + "-" + Peer.MAX_ID
+                            + ". Default: ${DEFAULT-VALUE}",
+                    "Every cluster must configure the same id for it, and it is durable in each"
+                            + " application's recorded vote, so treat it as fixed once deployed."})
+    private int nodeId;
+
+    @Option(names = "--bind", paramLabel = "<host:port>", converter = HostAndPortConverter.class,
+            description = "Overrides bind.host and bind.port from the configuration.")
+    private InetSocketAddress bindAddress;
+
+    @Spec
+    private CommandSpec spec;
+
+    WitnessMain() {
     }
 
     public static void main(String[] args) {
+        int status;
         try {
-            Arguments arguments = Arguments.parse(args);
-            if (arguments.help) {
-                System.out.println(usage());
-                return;
-            }
-            run(arguments);
-        } catch (IllegalArgumentException e) {
-            // Configuration and argument mistakes, which are the operator's to fix. The stack
-            // trace would bury the one sentence that matters.
-            System.err.println("primos-witness: " + e.getMessage());
-            System.err.println();
-            System.err.println(usage());
-            System.exit(2);
-        } catch (RuntimeException | Error e) {
+            status = new CommandLine(new WitnessMain())
+                    .setExecutionExceptionHandler(new StartupFailure())
+                    .execute(args);
+        } catch (Error e) {
+            // The handler above only sees Exception, and an Error escaping here would leave the
+            // process with a bare stack trace and no line anywhere saying the witness never
+            // started. An operator reading a log after the fact needs that sentence.
             log.error("the witness could not start", e);
-            System.exit(1);
+            status = ExitCode.SOFTWARE;
         }
-    }
-
-    private static void run(Arguments arguments) {
-        if (!Files.isDirectory(arguments.configDirectory)) {
-            throw new IllegalArgumentException(
-                    "no configuration directory at " + arguments.configDirectory
-                            + "; pass --config <directory>");
-        }
-
-        WitnessServer.Builder builder = WitnessServer.builder()
-                .configStore(new FileConfigStore(arguments.configDirectory, MonotonicClock.SYSTEM))
-                .nodeId(arguments.nodeId);
-        if (arguments.bindAddress != null) {
-            builder.bindAddress(arguments.bindAddress);
-        }
-
-        try (WitnessServer server = builder.build()) {
-            // The hook asks the loop to finish its turn and then waits for it, rather than closing
-            // anything itself. Two reasons, and both are the difference between a clean stop and a
-            // torn one. Closing a state store from the signal thread while the server thread is
-            // mid-write is exactly the corruption the store exists to prevent. And the JVM exits
-            // the moment its hooks return — without the join, SIGTERM would cut the server thread
-            // off before it had closed anything at all.
-            Thread serverThread = Thread.currentThread();
-            Thread shutdown = new Thread(() -> stopAndWaitFor(server, serverThread),
-                    "primos-witness-shutdown");
-            Runtime.getRuntime().addShutdownHook(shutdown);
-            try {
-                server.run();
-            } finally {
-                removeHook(shutdown);
-            }
-        }
+        System.exit(status);
     }
 
     /**
@@ -123,101 +135,139 @@ public final class WitnessMain {
         }
     }
 
+    /**
+     * The help text, rendered from the same command definition the process runs.
+     */
     static String usage() {
-        return String.join(System.lineSeparator(),
-                "usage: primos-witness [options]",
-                "",
-                "  --config <directory>   configuration directory (default "
-                        + DEFAULT_CONFIG_DIRECTORY + ")",
-                "  --node-id <id>         this witness's node id, " + Peer.MIN_ID + "-" + Peer.MAX_ID
-                        + " (default " + Peer.MAX_ID + ").",
-                "                         Every cluster must configure the same id for it, and it",
-                "                         is durable in each application's recorded vote, so treat",
-                "                         it as fixed once deployed.",
-                "  --bind <host:port>     overrides bind.host and bind.port from the configuration",
-                "  --help                 this text",
-                "",
-                "The configuration directory holds witness.properties and an applications/",
-                "directory with one <name>.properties file per served cluster. Both are re-read",
-                "while the server runs: onboarding an application never needs a restart, and a",
-                "restart is the one genuinely risky operation here, because while the witness is",
-                "down every two-node cluster it serves tolerates zero failures.");
+        return new CommandLine(new WitnessMain()).getUsageMessage(CommandLine.Help.Ansi.OFF);
     }
 
-    /** The parsed command line. */
-    static final class Arguments {
+    @Override
+    public Integer call() {
+        if (!Files.isDirectory(configDirectory)) {
+            // Thrown as a parameter problem rather than a runtime one so it is reported the way
+            // a mistyped option is: one sentence, then the usage text, then exit 2. A stack trace
+            // would bury the only line that matters.
+            throw new ParameterException(spec.commandLine(),
+                    "no configuration directory at " + configDirectory + "; pass --config <directory>");
+        }
+        run();
+        return ExitCode.OK;
+    }
 
-        private Path configDirectory = DEFAULT_CONFIG_DIRECTORY;
-        private int nodeId = Peer.MAX_ID;
-        private InetSocketAddress bindAddress;
-        private boolean help;
-
-        static Arguments parse(String[] args) {
-            Arguments parsed = new Arguments();
-            for (int i = 0; i < args.length; i++) {
-                String argument = args[i];
-                switch (argument) {
-                    case "--help":
-                    case "-h":
-                        parsed.help = true;
-                        break;
-                    case "--config":
-                        parsed.configDirectory = Paths.get(value(args, ++i, argument));
-                        break;
-                    case "--node-id":
-                        parsed.nodeId = Peer.requireValidId(
-                                number(value(args, ++i, argument), argument), "--node-id");
-                        break;
-                    case "--bind":
-                        parsed.bindAddress = address(value(args, ++i, argument));
-                        break;
-                    default:
-                        throw new IllegalArgumentException("unknown option '" + argument + "'");
-                }
-            }
-            return parsed;
+    private void run() {
+        WitnessServer.Builder builder = WitnessServer.builder()
+                .configStore(new FileConfigStore(configDirectory, MonotonicClock.SYSTEM))
+                .nodeId(nodeId);
+        if (bindAddress != null) {
+            builder.bindAddress(bindAddress);
         }
 
-        Path configDirectory() {
-            return configDirectory;
-        }
-
-        int nodeId() {
-            return nodeId;
-        }
-
-        InetSocketAddress bindAddress() {
-            return bindAddress;
-        }
-
-        boolean isHelp() {
-            return help;
-        }
-
-        private static String value(String[] args, int index, String option) {
-            if (index >= args.length) {
-                throw new IllegalArgumentException(option + " needs a value");
-            }
-            return args[index];
-        }
-
-        private static int number(String raw, String option) {
+        try (WitnessServer server = builder.build()) {
+            // The hook asks the loop to finish its turn and then waits for it, rather than closing
+            // anything itself. Two reasons, and both are the difference between a clean stop and a
+            // torn one. Closing a state store from the signal thread while the server thread is
+            // mid-write is exactly the corruption the store exists to prevent. And the JVM exits
+            // the moment its hooks return — without the join, SIGTERM would cut the server thread
+            // off before it had closed anything at all.
+            Thread serverThread = Thread.currentThread();
+            Thread shutdown = new Thread(() -> stopAndWaitFor(server, serverThread), "primos-witness-shutdown");
+            Runtime.getRuntime().addShutdownHook(shutdown);
             try {
-                return Integer.parseInt(raw);
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(option + " must be a number, but was '" + raw + "'");
+                server.run();
+            } finally {
+                removeHook(shutdown);
             }
         }
+    }
 
-        private static InetSocketAddress address(String raw) {
-            int colon = raw.lastIndexOf(':');
-            if (colon < 0) {
-                throw new IllegalArgumentException("--bind must be host:port, but was '" + raw + "'");
+    Path configDirectory() {
+        return configDirectory;
+    }
+
+    int nodeId() {
+        return nodeId;
+    }
+
+    InetSocketAddress bindAddress() {
+        return bindAddress;
+    }
+
+    /**
+     * Turns a failure to start into a logged cause and exit code 1.
+     *
+     * <p>picocli's default would print a stack trace to stderr. This one is what the operator
+     * finds in the log afterwards, which is where a startup failure is actually read.
+     */
+    static final class StartupFailure implements IExecutionExceptionHandler {
+
+        @Override
+        public int handleExecutionException(Exception e, CommandLine command, ParseResult parsed) {
+            log.error("the witness could not start", e);
+            return ExitCode.SOFTWARE;
+        }
+    }
+
+    /**
+     * Reports the version from the jar manifest, so an operator can answer "what is this box
+     * running?" without unpacking anything.
+     */
+    static final class BuildVersion implements IVersionProvider {
+
+        @Override
+        public String[] getVersion() {
+            String version = WitnessMain.class.getPackage().getImplementationVersion();
+            return new String[]{
+                    "primos-witness " + (version == null ? "(development build)" : version)};
+        }
+    }
+
+    /**
+     * A node id that is checked against the range the wire and the logs assume, at the moment it
+     * is typed rather than several layers down.
+     */
+    static final class NodeIdConverter implements ITypeConverter<Integer> {
+
+        @Override
+        public Integer convert(String value) {
+            int id;
+            try {
+                id = Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                throw new TypeConversionException("must be a number, but was '" + value + "'");
             }
-            String host = raw.substring(0, colon);
-            int port = number(raw.substring(colon + 1), "--bind");
-            if (port < 1 || port > 65535) {
-                throw new IllegalArgumentException("--bind port must be 1-65535, but was " + port);
+            try {
+                return Peer.requireValidId(id, "--node-id");
+            } catch (IllegalArgumentException e) {
+                throw new TypeConversionException(e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * {@code host:port}, or {@code :port} for the wildcard address.
+     *
+     * <p>Split on the <em>last</em> colon, so a bare IPv6 address is not mistaken for a
+     * host-and-port pair on its first one.
+     */
+    static final class HostAndPortConverter implements ITypeConverter<InetSocketAddress> {
+
+        @Override
+        public InetSocketAddress convert(String value) {
+            int colon = value.lastIndexOf(':');
+            if (colon < 0) {
+                throw new TypeConversionException("must be host:port, but was '" + value + "'");
+            }
+            String host = value.substring(0, colon);
+            int port;
+            try {
+                port = Integer.parseInt(value.substring(colon + 1));
+            } catch (NumberFormatException e) {
+                throw new TypeConversionException(
+                        "port must be a number, but was '" + value.substring(colon + 1) + "'");
+            }
+            if (port < 1 || port > 65_535) {
+                throw new TypeConversionException("port must be 1-65535, but was " + port);
             }
             return host.isEmpty() ? new InetSocketAddress(port) : new InetSocketAddress(host, port);
         }

@@ -15,9 +15,9 @@
  */
 package org.lolaf.primos.witness;
 
-import java.util.Objects;
-
 import org.lolaf.primos.wire.MessageAuthenticator;
+
+import java.util.Objects;
 
 /**
  * One clustered application this witness serves.
@@ -49,7 +49,9 @@ public final class ApplicationConfig {
         return name;
     }
 
-    /** The secret in force, or null when this application is served without authentication. */
+    /**
+     * The secret in force, or null when this application is served without authentication.
+     */
     public byte[] secret() {
         return secret == null ? null : secret.clone();
     }
@@ -82,7 +84,9 @@ public final class ApplicationConfig {
         return secret != null;
     }
 
-    /** Whether this application appeared by itself rather than being configured. */
+    /**
+     * Whether this application appeared by itself rather than being configured.
+     */
     public boolean isAutoRegistered() {
         return autoRegistered;
     }
@@ -109,7 +113,9 @@ public final class ApplicationConfig {
                 java.util.Arrays.hashCode(previousSecret));
     }
 
-    /** Never includes the secret. */
+    /**
+     * Never includes the secret.
+     */
     @Override
     public String toString() {
         return "ApplicationConfig(" + name + ", secret=" + (secret != null ? "set" : "none")

@@ -113,7 +113,12 @@ bin/primos-witness --config /etc/primos-witness
 | `--config <directory>` | `/etc/primos-witness` | must exist |
 | `--node-id <id>` | `1023` | 0–1023. **Fixed once deployed** — see below |
 | `--bind <host:port>` | from configuration | overrides `bind.host`/`bind.port` |
-| `--help` | | |
+| `-h`, `--help` | | |
+| `-V`, `--version` | | which build this box is running |
+
+Exit codes, for whatever supervises it: **0** normal, **2** for a mistyped option or a missing
+configuration directory — reported as one sentence and the usage text — and **1** for a failure to
+start, which is logged with its cause.
 
 **The node id is durable.** It is recorded in every served application's `votedFor`, and every
 cluster must configure the same value as its witness peer's id. Changing it on a running witness
