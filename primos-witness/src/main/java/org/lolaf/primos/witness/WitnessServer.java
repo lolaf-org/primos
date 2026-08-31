@@ -533,7 +533,6 @@ public final class WitnessServer implements AutoCloseable {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName(application.name())
                 .nodeId(nodeId)
-                .nodeName("witness-" + nodeId)
                 .asWitness()
                 .learnedMembership()
                 .timings(timings)

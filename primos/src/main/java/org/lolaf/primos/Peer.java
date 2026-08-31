@@ -117,7 +117,11 @@ public class Peer {
         return port;
     }
 
-    private static String defaultName(int id, PeerType type) {
+    /**
+     * The naming convention for a member with no name of its own. Package-private so
+     * {@link Leader} derives a self-leader's name from the same rule rather than restating it.
+     */
+    static String defaultName(int id, PeerType type) {
         return (type.isWitness() ? "witness-" : "node-") + id;
     }
 

@@ -34,7 +34,6 @@ import java.util.List;
  * @param applicationName which cluster this is. Nothing is auto-configured until it is set, which
  *                        is what lets the module sit on a classpath doing nothing.
  * @param nodeId          this node's id, unique within the application
- * @param nodeName        a human-readable name for logs; defaults to {@code node-<id>}
  * @param stateDirectory  where the term and vote are kept. Required, and deliberately without a
  *                        default: a default under a temp directory is silently unsafe after a
  *                        reboot, which is worse than the friction of naming the path.
@@ -57,7 +56,6 @@ import java.util.List;
 public record PrimosProperties(
         String applicationName,
         int nodeId,
-        String nodeName,
         Path stateDirectory,
         String bindAddress,
         @DefaultValue("0") int bindPort,

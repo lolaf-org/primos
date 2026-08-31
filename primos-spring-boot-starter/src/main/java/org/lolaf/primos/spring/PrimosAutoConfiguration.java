@@ -96,9 +96,6 @@ public class PrimosAutoConfiguration {
                 .timings(timings)
                 .voteLogging(properties.voteLogging())
                 .peers(toPeers(properties.peers(), false));
-        if (properties.nodeName() != null) {
-            cluster.nodeName(properties.nodeName());
-        }
         if (properties.witness() != null) {
             cluster.witness(toPeer(properties.witness(), true));
         }
@@ -290,10 +287,16 @@ public class PrimosAutoConfiguration {
         return result;
     }
 
+    /**
+     * The name is passed through untouched, including when it is null.
+     *
+     * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
+     * and substituting anything here — the bare id, say — would give a peer configured through
+     * Spring a different default from the identical peer configured through the library.
+     */
     private static Peer toPeer(PeerProperties peer, boolean witness) {
-        String name = peer.name() == null ? String.valueOf(peer.id()) : peer.name();
         return witness
-                ? Peer.witness(peer.id(), name, peer.host(), peer.port())
-                : Peer.application(peer.id(), name, peer.host(), peer.port());
+                ? Peer.witness(peer.id(), peer.name(), peer.host(), peer.port())
+                : Peer.application(peer.id(), peer.name(), peer.host(), peer.port());
     }
 }

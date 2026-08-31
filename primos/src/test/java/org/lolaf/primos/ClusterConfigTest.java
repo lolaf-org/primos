@@ -51,10 +51,9 @@ class ClusterConfigTest {
     }
 
     @Test
-    void a_minimal_config_defaults_its_node_name_and_timings() {
+    void a_minimal_config_defaults_its_timings() {
         ClusterConfig config = valid().build();
 
-        assertThat(config.nodeName()).isEqualTo("node-1");
         assertThat(config.timings()).isEqualTo(Timings.lan());
         assertThat(config.witness()).isEmpty();
         assertThat(config.hasWitness()).isFalse();
@@ -158,7 +157,6 @@ class ClusterConfigTest {
         assertThat(config.hasWitness()).isTrue();
         assertThat(config.applicationNodeCount()).isEqualTo(2);
         assertThat(config.voterCount()).isEqualTo(3);
-        assertThat(config.nodeName()).isEqualTo("witness-99");
     }
 
     @Test

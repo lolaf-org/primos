@@ -28,10 +28,13 @@ class LeaderTest {
 
     @Test
     void this_node_leading_is_present_and_says_so() {
-        Leader leader = Leader.self(3, "orders-primary");
+        Leader leader = Leader.self(3);
 
         assertThat(leader.id()).isEqualTo(3);
-        assertThat(leader.name()).isEqualTo("orders-primary");
+        assertThat(leader.name())
+                .as("derived by the same rule Peer uses, rather than configured: a node handing its"
+                        + " own name back to the application that set it bought nothing")
+                .isEqualTo("node-3");
         assertThat(leader.isSelf()).isTrue();
         assertThat(leader.peer())
                 .as("there is nowhere to forward work to when the work is already here")
@@ -68,9 +71,9 @@ class LeaderTest {
     void an_absent_peer_is_never_the_same_question_as_an_absent_leader() {
         // The reason this type exists rather than Optional<Peer>: both of these lead, and a bare
         // Optional<Peer> would report both as empty — the value that means nobody leads.
-        assertThat(Leader.self(1, "node-1").peer()).isEmpty();
+        assertThat(Leader.self(1).peer()).isEmpty();
         assertThat(Leader.byId(1).peer()).isEmpty();
-        assertThat(Leader.self(1, "node-1")).isNotEqualTo(Leader.byId(1));
+        assertThat(Leader.self(1)).isNotEqualTo(Leader.byId(1));
     }
 
     @Test

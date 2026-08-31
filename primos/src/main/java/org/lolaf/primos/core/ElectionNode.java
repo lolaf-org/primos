@@ -409,7 +409,7 @@ public final class ElectionNode implements MessageHandler {
             return null;
         }
         if (id == config.nodeId()) {
-            return Leader.self(id, config.nodeName());
+            return Leader.self(id);
         }
         Probe probe = probes.get(id);
         return probe == null ? Leader.byId(id) : Leader.at(probe.peer);

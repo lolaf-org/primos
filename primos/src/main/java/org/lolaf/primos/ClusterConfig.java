@@ -44,7 +44,6 @@ public class ClusterConfig {
 
     String applicationName;
     int nodeId;
-    String nodeName;
     PeerType nodeType;
     List<Peer> peers;
 
@@ -66,9 +65,6 @@ public class ClusterConfig {
         this.applicationName = requireApplicationName(builder.applicationName);
         this.nodeId = Peer.requireValidId(builder.nodeId, "nodeId");
         this.nodeType = Objects.requireNonNull(builder.nodeType, "nodeType");
-        this.nodeName = (builder.nodeName == null || builder.nodeName.trim().isEmpty())
-                ? (this.nodeType.isWitness() ? "witness-" : "node-") + this.nodeId
-                : builder.nodeName.trim();
         this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
         this.witness = builder.witness;
         this.learnedMembership = builder.learnedMembership;
@@ -266,11 +262,6 @@ public class ClusterConfig {
          */
         @Setter
         private int nodeId;
-        /**
-         * A human-readable name for this node, used in logs. Defaults to {@code node-<id>}.
-         */
-        @Setter
-        private String nodeName;
         /**
          * Set through {@link #asWitness()} rather than directly, so that declaring a witness is one
          * named decision rather than a type a caller has to know to pass.

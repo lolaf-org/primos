@@ -93,7 +93,6 @@ dependency cycle, because the node is built from the listeners. Use `@EventListe
 |---|---|---|---|
 | `primos.application-name` | **yes** | none | which cluster this is, and the switch that activates everything |
 | `primos.node-id` | **yes** | `0` | this node's id, unique within the application |
-| `primos.node-name` | no | `node-<id>` | a readable name for logs |
 | `primos.state-directory` | **yes** | none | where the term and vote are fsynced |
 | `primos.bind-address` | no | wildcard | local address to bind |
 | `primos.bind-port` | in practice | `0` | local port. `0` takes an ephemeral one, which peers cannot be told about |

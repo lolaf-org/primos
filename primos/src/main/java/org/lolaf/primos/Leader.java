@@ -78,9 +78,14 @@ public class Leader {
 
     /**
      * This node is the leader.
+     *
+     * <p>The name is derived rather than configured, by the same rule {@link Peer} uses for a
+     * member that was not given one. A node handing its own name back to the application that
+     * configured it was a round trip that bought nothing — a peer's name saves a lookup the caller
+     * may not be able to do, and its own never did.
      */
-    public static Leader self(int id, String name) {
-        return new Leader(id, name, true, null);
+    public static Leader self(int id) {
+        return new Leader(id, Peer.defaultName(id, PeerType.APPLICATION), true, null);
     }
 
     /**
