@@ -107,6 +107,20 @@ public interface PrimosNode extends AutoCloseable {
     PrimosStats stats();
 
     /**
+     * Whether this node has been started and not yet stopped.
+     *
+     * <p>Distinguishes <em>not started yet</em> from every other state, which nothing else here
+     * does: a node that has never joined reports {@link Role#FOLLOWER} exactly like a healthy one
+     * that has. That matters wherever the start is deferred — a framework integration that hands
+     * the application a built node and lets it choose when to join has no other way to tell a
+     * deliberate wait from an application that forgot, and the second is silent.
+     *
+     * <p>Not a guard for anything. It is false both before {@link #start()} and after
+     * {@link #stop()}, and says nothing about leadership: use {@link #roleAndTerm()} for that.
+     */
+    boolean isRunning();
+
+    /**
      * The configuration this node was built with.
      */
     ClusterConfig config();

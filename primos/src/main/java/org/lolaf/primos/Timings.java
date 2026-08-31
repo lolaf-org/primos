@@ -122,11 +122,23 @@ public class Timings {
                             + electionTimeoutMin.toMillis() + "ms: a leader must be allowed to miss"
                             + " several heartbeats before anyone campaigns");
         }
+        if (electionTimeoutMin.compareTo(electionTimeoutMax) > 0) {
+            throw new IllegalArgumentException(
+                    "electionTimeoutMin (" + electionTimeoutMin.toMillis()
+                            + "ms) is above electionTimeoutMax (" + electionTimeoutMax.toMillis()
+                            + "ms), so no timeout could ever be drawn from that range. Setting one"
+                            + " bound on its own leaves the other at its default, which is the"
+                            + " usual way to arrive here — set both.");
+        }
+        // Only equality can still reach this, the inverted case having been rejected above. The
+        // comparison stays <= rather than == so that deleting the check above would fail loudly
+        // rather than let an inverted range through.
         if (electionTimeoutMax.compareTo(electionTimeoutMin) <= 0) {
             throw new IllegalArgumentException(
                     "electionTimeoutMax (" + electionTimeoutMax.toMillis()
                             + "ms) must be greater than electionTimeoutMin ("
-                            + electionTimeoutMin.toMillis() + "ms)");
+                            + electionTimeoutMin.toMillis() + "ms): a range of zero width means"
+                            + " every node draws the same timeout and campaigns in lockstep");
         }
         if (electionTimeoutSpread().compareTo(heartbeatInterval) < 0) {
             throw new IllegalArgumentException(
@@ -147,10 +159,17 @@ public class Timings {
     /**
      * Builder for {@link Timings}; every value defaults to the {@link Timings#lan()} profile.
      *
-     * <p>{@code @Setter} is on the fields that may be set individually, and deliberately not on
-     * {@code electionTimeoutMin}/{@code electionTimeoutMax}: those two are only ever set together,
-     * through {@link #electionTimeout}, because setting one alone is how an invalid range is
-     * built. Annotating per field rather than per class is what keeps that constraint.
+     * <p>Every interval can be set on its own, the two election bounds included. They are also
+     * settable together through {@link #electionTimeout}, which is the clearer way to say it when
+     * you are choosing a range rather than adjusting one end of one.
+     *
+     * <p><strong>Nothing is validated until {@link #build()}</strong>, and that is deliberate: a
+     * builder half-way through being configured is legitimately inconsistent, so rejecting a value
+     * as it is set would refuse orderings that are perfectly fine — raising both bounds, lowest
+     * first, among them. Setting {@code electionTimeoutMin} alone above the default
+     * {@code electionTimeoutMax} is the case worth knowing about, and it is rejected at
+     * {@code build()} with a message that names that cause rather than silently producing a range
+     * no timeout can be drawn from.
      */
     public static final class Builder {
 
@@ -159,8 +178,19 @@ public class Timings {
          */
         @Setter
         private Duration heartbeatInterval = Duration.ofMillis(50);
-
+        /**
+         * The low end of the range each election timeout is drawn from. Raising it above
+         * {@link #electionTimeoutMax} is rejected at {@link #build()}, not here.
+         */
+        @Setter
         private Duration electionTimeoutMin = Duration.ofMillis(300);
+
+        /**
+         * The high end of that range, which must stay above {@code electionTimeoutMin} by at least
+         * one heartbeat interval: nodes that draw the same timeout campaign in lockstep, split the
+         * vote and repeat, so the width of this range is what makes elections terminate at all.
+         */
+        @Setter
         private Duration electionTimeoutMax = Duration.ofMillis(600);
 
         /**
@@ -180,6 +210,10 @@ public class Timings {
 
         /**
          * The inclusive range each election timeout is drawn from, afresh on every reset.
+         *
+         * <p>Equivalent to setting both bounds, and preferred when choosing a range rather than
+         * adjusting one end of one: it puts the two numbers side by side, where the relationship
+         * between them can be seen.
          */
         public Builder electionTimeout(Duration min, Duration max) {
             this.electionTimeoutMin = min;

@@ -116,6 +116,7 @@ public final class WitnessServer implements AutoCloseable {
     private final MonotonicClock clock;
     private final Random random;
     private final Timings timings;
+    private final boolean voteLogging;
     private final int nodeId;
     private final StateStoreFactory stateStores;
     private final DatagramChannel channel;
@@ -143,6 +144,7 @@ public final class WitnessServer implements AutoCloseable {
         ConfigSnapshot snapshot = configStore.current();
         WitnessSettings settings = snapshot.settings();
         this.timings = builder.timings != null ? builder.timings : settings.timings();
+        this.voteLogging = settings.voteLogging();
         this.stateStores = builder.stateStores != null
                 ? builder.stateStores
                 : StateStoreFactory.perApplicationDirectory(settings.stateDirectory());
@@ -535,6 +537,7 @@ public final class WitnessServer implements AutoCloseable {
                 .asWitness()
                 .learnedMembership()
                 .timings(timings)
+                .voteLogging(voteLogging)
                 .build();
         return new ElectionNode(config, store, transport, clock, random,
                 authenticatorFor(application));

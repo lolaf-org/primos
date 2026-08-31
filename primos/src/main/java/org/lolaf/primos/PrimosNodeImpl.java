@@ -295,6 +295,14 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         leader = election.leaderOrNull();
     }
 
+    @Override
+    public boolean isRunning() {
+        // The loop's own flag, which is already exactly "started and not stopped" and already
+        // volatile because the node thread reads it. A second field would be a second thing to
+        // keep in step with this one.
+        return running;
+    }
+
     private void closeQuietly() {
         try {
             transport.close();

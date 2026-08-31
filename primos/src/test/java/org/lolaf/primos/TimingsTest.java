@@ -54,6 +54,32 @@ class TimingsTest {
                 .hasMessageContaining("at least 5 heartbeat intervals");
     }
 
+    /**
+     * Reachable only because the two bounds have setters of their own: raising the low one past the
+     * high one's default inverts the range, and the message has to name that cause rather than
+     * point at the bound the caller never touched.
+     */
+    @Test
+    void raising_one_election_bound_past_the_others_default_is_refused() {
+        assertThatThrownBy(() -> Timings.builder()
+                .electionTimeoutMin(Duration.ofSeconds(5))
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("electionTimeoutMin (5000ms) is above electionTimeoutMax")
+                .hasMessageContaining("set both");
+    }
+
+    @Test
+    void the_two_bounds_can_be_set_one_at_a_time_as_long_as_the_result_holds() {
+        Timings timings = Timings.builder()
+                .electionTimeoutMax(Duration.ofSeconds(4))
+                .electionTimeoutMin(Duration.ofSeconds(2))
+                .build();
+
+        assertThat(timings.electionTimeoutMin()).isEqualTo(Duration.ofSeconds(2));
+        assertThat(timings.electionTimeoutMax()).isEqualTo(Duration.ofSeconds(4));
+    }
+
     @Test
     void the_randomisation_range_must_not_be_empty() {
         assertThatThrownBy(() -> Timings.builder()

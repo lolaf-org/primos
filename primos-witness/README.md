@@ -197,6 +197,12 @@ which one shared file makes impossible.
 | `secret` | none | yes |
 | `secret.algorithm` | `HmacSHA256` | yes |
 | `timings.profile` | `lan` | yes |
+| `timings.heartbeat.millis` | profile | yes |
+| `timings.election.min.millis` | profile | yes |
+| `timings.election.max.millis` | profile | yes |
+| `timings.probe.millis` | profile | yes |
+| `timings.failure.threshold` | profile | yes |
+| `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
 
@@ -213,6 +219,34 @@ by a mismatch; failover just gets slower in a way that is very hard to see from 
 
 The full derivation, including the garbage-collection floor that matters more than the network on
 a JVM, is in the [project README](../README.md#timing).
+
+**If the clusters you serve run neither profile, spell the intervals out instead** — as whole
+milliseconds, because this file is parsed with `java.util.Properties` and nothing else:
+
+```properties
+timings.heartbeat.millis=250
+timings.election.min.millis=2000
+timings.election.max.millis=4000
+timings.probe.millis=3000
+timings.failure.threshold=5
+```
+
+**A profile and an individual interval together are refused**, naming both. A profile is a set of
+values picked so the relationships between them hold, so overriding part of one leaves a custom set
+whose author has not seen the rest. The two election bounds are a pair and must be set together.
+Anything omitted falls back to the library default, and every relationship between them is validated
+at load — a witness that would thrash refuses to start rather than doing it in production.
+
+`vote.logging` logs who voted for whom at INFO instead of DEBUG, for every application this witness
+serves. It is on by default and it is worth more here than anywhere else: the witness holds the vote
+that breaks the tie, so *did the witness grant it, and to whom?* is the first question asked after a
+two-node pair failed over — or failed to — and afterwards nothing else records the answer. It costs
+nothing while leaders are healthy, because a cluster that is not electing never reaches the code
+that logs. Turn it off for a deployment that elects often enough for the lines to be noise, or one
+whose log ingestion is charged by the line; the decisions are still there at DEBUG.
+
+A witness serving many tenants logs each line with its application name, so one cluster's election
+is greppable out of the rest.
 
 ### `applications/<name>.properties`
 

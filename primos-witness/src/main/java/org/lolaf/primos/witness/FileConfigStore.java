@@ -29,9 +29,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.*;
 import java.util.Comparator;
 import java.util.Locale;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -92,13 +94,71 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     /**
-     * A named profile rather than seven separate intervals.
+     * The intervals the served nodes run with: <strong>either</strong> a named profile
+     * <strong>or</strong> the values spelled out, never both.
      *
-     * <p>The relationships between them are what has to hold — the election timeout an order of
-     * magnitude above the round trip, and so on — and those are far easier to get wrong one key at
-     * a time than to choose between two profiles that are each internally consistent. A witness on
-     * a third network wants {@code wan}; one in the same datacentre wants the default.
+     * <p>A profile is a set of intervals chosen so the relationships between them hold — the
+     * election timeout an order of magnitude above the round trip, and so on. Overriding part of
+     * one leaves a custom set whose author has not seen the other values, so the mixture is refused
+     * rather than merged.
+     *
+     * <p><strong>Whatever is set here must match the clusters this witness serves.</strong> A node
+     * refuses a pre-vote while it has heard from a leader within {@code electionTimeoutMin}, so a
+     * witness with a longer one is proportionally more reluctant to agree to the failover its vote
+     * is needed for — and for a two-node pair the witness's vote is the one everything waits on.
+     * Nothing detects the mismatch; failover just gets slower.
+     *
+     * <p>Durations are milliseconds rather than {@code 250ms} strings, because this file is parsed
+     * with {@link Properties} and nothing else, and a duration parser is not worth writing twice.
      */
+    private static Timings timings(Properties properties) {
+        String profile = properties.getProperty("timings.profile");
+        List<String> explicit = new ArrayList<>(5);
+        Integer heartbeat = optionalInt(properties, "timings.heartbeat.millis", explicit);
+        Integer electionMin = optionalInt(properties, "timings.election.min.millis", explicit);
+        Integer electionMax = optionalInt(properties, "timings.election.max.millis", explicit);
+        Integer probe = optionalInt(properties, "timings.probe.millis", explicit);
+        Integer failureThreshold = optionalInt(properties, "timings.failure.threshold", explicit);
+
+        if (profile != null && !profile.trim().isEmpty() && !explicit.isEmpty()) {
+            throw new IllegalArgumentException("timings.profile is set to '" + profile.trim()
+                    + "' and so is " + String.join(", ", explicit) + ". Choose one: a profile is a"
+                    + " set of intervals picked to hold together, so overriding part of one leaves"
+                    + " a custom set whose author has not seen the other values. Either drop"
+                    + " timings.profile and name every interval, or drop the individual keys.");
+        }
+        if (profile != null && !profile.trim().isEmpty()) {
+            return timingsProfile(profile);
+        }
+        if (explicit.isEmpty()) {
+            return Timings.lan();
+        }
+        // The two bounds are a pair. Timings.Builder deliberately offers no setter for either
+        // alone, because setting one against the other's default is how an invalid range is built.
+        if ((electionMin == null) != (electionMax == null)) {
+            throw new IllegalArgumentException("timings.election."
+                    + (electionMin != null ? "min" : "max") + ".millis is set without its pair. The"
+                    + " election timeout is a range drawn from afresh on every reset, and setting"
+                    + " one end against the other's default is how an invalid or too-narrow range"
+                    + " is built. Set both.");
+        }
+        Timings.Builder builder = Timings.builder();
+        if (heartbeat != null) {
+            builder.heartbeatInterval(Duration.ofMillis(heartbeat));
+        }
+        if (electionMin != null) {
+            builder.electionTimeout(Duration.ofMillis(electionMin), Duration.ofMillis(electionMax));
+        }
+        if (probe != null) {
+            builder.probeInterval(Duration.ofMillis(probe));
+        }
+        if (failureThreshold != null) {
+            builder.failureThreshold(failureThreshold);
+        }
+        // Every relationship between these is validated in here, with its own message.
+        return builder.build();
+    }
+
     private static Timings timingsProfile(String profile) {
         String name = profile.trim().toLowerCase(Locale.ROOT);
         if ("lan".equals(name)) {
@@ -109,6 +169,38 @@ public final class FileConfigStore implements ConfigStore {
         }
         throw new IllegalArgumentException(
                 "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
+    }
+
+    /**
+     * Reads an optional integer, recording the key in {@code explicit} when it was actually set —
+     * which is the question the exclusivity check has to answer, and the reason this cannot simply
+     * default.
+     */
+    private static Integer optionalInt(Properties properties, String key, List<String> explicit) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        explicit.add(key);
+        try {
+            return Integer.valueOf(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(key + " must be a whole number of "
+                    + (key.endsWith(".millis") ? "milliseconds" : "probes") + ", but was '"
+                    + raw.trim() + "'", e);
+        }
+    }
+
+    /**
+     * Anything but an explicit {@code false} is true, because a setting that is on by default
+     * should not be turned off by a typo.
+     */
+    private static boolean booleanValue(Properties properties, String key, boolean fallback) {
+        String value = properties.getProperty(key);
+        if (value == null || value.trim().isEmpty()) {
+            return fallback;
+        }
+        return !"false".equalsIgnoreCase(value.trim());
     }
 
     private static int intValue(Properties properties, String key, int fallback) {
@@ -340,7 +432,8 @@ public final class FileConfigStore implements ConfigStore {
         }
         builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
-        builder.timings(timingsProfile(properties.getProperty("timings.profile", "lan")));
+        builder.timings(timings(properties));
+        builder.voteLogging(booleanValue(properties, "vote.logging", true));
         return builder.build();
     }
 

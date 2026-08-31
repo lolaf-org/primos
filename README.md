@@ -140,6 +140,7 @@ consensus mechanism onto the first.
 
 | configuration | voters | quorum | tolerates |
 |---|---|---|---|
+| 1 node | 1 | 1 | 0 — and see below |
 | 2 nodes | 2 | 2 | **0** |
 | 2 nodes + witness | 3 | 2 | 1 |
 | 3 nodes | 3 | 2 | 1 |
@@ -148,6 +149,39 @@ consensus mechanism onto the first.
 A witness helps even-sized clusters and hurts odd-sized ones, so primos **warns and continues**
 rather than refusing — every node logs a quorum summary at startup, plus a warning when the
 configuration is strictly dominated by an alternative.
+
+### One node leads itself, permanently
+
+**A node configured with no peers is a one-voter cluster, and it becomes the leader.** Quorum is
+one, so it elects itself about an election timeout after starting, and then nothing can depose it:
+there is no majority for it to lose contact with, so the check that stands a partitioned leader down
+never fires. It stays leader for as long as the process runs.
+
+That is deliberate and supported. It makes development and testing trivial, and it lets an
+application run the same code path in a single-instance deployment instead of branching around
+primos entirely.
+
+**It is also exactly what a peer list that failed to load looks like** — a mistyped property, an
+environment variable that did not interpolate, a YAML block at the wrong indentation. Made once, you
+get a node that quietly leads alone. Made on every node of an intended cluster, you get one
+permanent leader per node, each of them reporting perfect health and each of them right about its
+own arithmetic. Nothing in the protocol can detect this, because from inside, a one-node cluster is
+behaving correctly.
+
+So primos warns at startup whenever it is configured this way:
+
+```
+cluster 'orders': 1 voter (1 node), quorum 1, tolerates 0 failures
+cluster 'orders': one node and no witness, so this node is the only voter. It elects itself about
+one election timeout after starting and leads for as long as it runs, and nothing can depose it —
+there is no majority to lose contact with. That is a legitimate single instance deployment, and it
+is also what a mistyped or unread peer list looks like, in which case every node of the intended
+cluster is doing this at once and each of them is the leader. Check that peers were meant to be
+omitted.
+```
+
+If you meant it, the warning is one line at startup. If you did not, it is the only thing that will
+tell you.
 
 ### The witness server
 
@@ -351,10 +385,14 @@ JDK 11 or newer. The library targets Java 11 (`maven.compiler.release`) and the 
 | module | what |
 |---|---|
 | `primos` | the library: API, role state machine, wire codec, transports, state store |
-| `primos-witness` | the standalone witness server, its config store, and its distribution |
+| `primos-witness` | the standalone witness server, its config store, and its distribution — [README](primos-witness/README.md) |
+| `primos-spring-boot-starter` | Spring Boot auto-configuration and a leadership-gated lifecycle — [README](primos-spring-boot-starter/README.md) |
 
-Two artifacts rather than the usual api/impl split, deliberately: module splits exist to isolate
-dependencies, and primos has none to isolate.
+The library and the witness are two artifacts rather than the usual api/impl split, deliberately:
+module splits exist to isolate dependencies, and primos has none to isolate. The starter is the
+exception that proves the rule — Spring Boot is exactly the transitive tree a consumer must be able
+to decline, so it lives in its own artifact and the library references no Spring type. It is also
+the only module not on Java 11, because Spring Boot's floor is 17.
 
 ## License
 

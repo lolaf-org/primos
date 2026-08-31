@@ -532,7 +532,8 @@ public final class ElectionNode implements MessageHandler {
         electionsStarted++;
         resetElectionTimer();
 
-        log.debug("node {} started an election for term {}", config.nodeId(), currentTerm);
+        logVote("cluster '{}': node {} is standing for election in term {} and voted for itself, needing {} of {} votes",
+                config.applicationName(), config.nodeId(), currentTerm, quorum.required(), quorum.voters());
 
         if (quorum.isReached(votesGranted.size())) {
             becomeLeader();
@@ -593,7 +594,13 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    // ---------------------------------------------------------------- messages
+    private void logVote(String message, Object... args) {
+        if (config.isVoteLogging()) {
+            log.info(message, args);
+        } else {
+            log.debug(message, args);
+        }
+    }
 
     @Override
     public void onRequestVote(int senderId, long term, boolean preVote) {
@@ -602,6 +609,14 @@ public final class ElectionNode implements MessageHandler {
             // answerable without changing anything, or it would inflate terms exactly as the real
             // vote it is meant to avoid, and a node could suppress elections by spamming them.
             boolean would = wouldGrantVote(term, clock.nanoTime());
+            // Worth a line even though nothing changed: a pre-vote that is refused is why an
+            // election never happens, and without this the outage it explains is silent.
+            logVote(would
+                            ? "cluster '{}': node {} would vote for node {} in a term {} election"
+                            : "cluster '{}': node {} would not vote for node {} in a term {}"
+                              + " election; it has heard from a leader too recently, or its own"
+                              + " term is ahead",
+                    config.applicationName(), config.nodeId(), senderId, term);
             send(senderId, encoder.requestVoteReply(sendBuffer, term, would, true));
             return;
         }
@@ -616,6 +631,17 @@ public final class ElectionNode implements MessageHandler {
             persist();
             resetElectionTimer();
         }
+        if (granted) {
+            logVote("cluster '{}': node {} granted its vote in term {} to node {}",
+                    config.applicationName(), config.nodeId(), currentTerm, senderId);
+        } else if (term < currentTerm) {
+            logVote("cluster '{}': node {} refused node {} a vote for term {}; it is already in term {}",
+                    config.applicationName(), config.nodeId(), senderId, term, currentTerm);
+        } else {
+            logVote("cluster '{}': node {} refused node {} a vote in term {}; it has already voted for {} in that term",
+                    config.applicationName(), config.nodeId(), senderId, currentTerm,
+                    votedFor == config.nodeId() ? "itself" : "node " + votedFor);
+        }
         send(senderId, encoder.requestVoteReply(sendBuffer, currentTerm, granted, preVote));
     }
 
@@ -627,8 +653,12 @@ public final class ElectionNode implements MessageHandler {
             if (!preVoting || term != preVoteTerm || !granted) {
                 return;
             }
-            if (preVotesGranted.add(senderId) && quorum.isReached(preVotesGranted.size())) {
-                startElection();
+            if (preVotesGranted.add(senderId)) {
+                logVote("cluster '{}': node {} has {} of the {} pre-votes it needs for term {}, after node {} agreed",
+                        config.applicationName(), config.nodeId(), preVotesGranted.size(), quorum.required(), term, senderId);
+                if (quorum.isReached(preVotesGranted.size())) {
+                    startElection();
+                }
             }
             return;
         }
@@ -644,8 +674,12 @@ public final class ElectionNode implements MessageHandler {
             return;
         }
         // A set, not a counter: a duplicated datagram must not be a second vote.
-        if (votesGranted.add(senderId) && quorum.isReached(votesGranted.size())) {
-            becomeLeader();
+        if (votesGranted.add(senderId)) {
+            logVote("cluster '{}': node {} has {} of the {} votes it needs in term {}, after node {} voted for it",
+                    config.applicationName(), config.nodeId(), votesGranted.size(), quorum.required(), currentTerm, senderId);
+            if (quorum.isReached(votesGranted.size())) {
+                becomeLeader();
+            }
         }
     }
 

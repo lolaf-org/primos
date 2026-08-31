@@ -102,6 +102,23 @@ class PrimosNodeTest {
         }).doesNotThrowAnyException();
     }
 
+    /**
+     * Nothing else distinguishes a node that has never joined from a healthy one: both report
+     * {@code FOLLOWER}. That matters wherever the start is deferred, because an application that
+     * meant to start its node and did not looks identical from every other angle.
+     */
+    @Test
+    void isRunning_separates_a_node_that_never_joined_from_one_that_did() {
+        PrimosNode node = builder(1).build();
+        assertThat(node.isRunning()).isFalse();
+
+        node.start();
+        assertThat(node.isRunning()).isTrue();
+
+        node.stop();
+        assertThat(node.isRunning()).isFalse();
+    }
+
     @Test
     void a_stopped_node_is_terminal() {
         PrimosNode node = start(builder(1));

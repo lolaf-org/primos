@@ -52,6 +52,7 @@
         <assertj-core.version>3.27.7</assertj-core.version>
         <awaitility.version>4.3.0</awaitility.version>
         <picocli.version>4.7.7</picocli.version>
+        <spring-boot.version>4.1.0</spring-boot.version>
 
         <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
@@ -88,6 +89,7 @@
     <modules>
         <module>primos</module>
         <module>primos-witness</module>
+        <module>primos-spring-boot-starter</module>
     </modules>
 
     <scm child.scm.connection.inherit.append.path="false"

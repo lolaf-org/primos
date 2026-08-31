@@ -86,6 +86,17 @@ public final class WitnessSettings {
      */
     private final Timings timings;
 
+    /**
+     * Whether the served nodes log who voted for whom at INFO rather than DEBUG.
+     *
+     * <p>On by default, and worth more here than anywhere else: the witness is the vote that breaks
+     * the tie, so "did the witness grant it, and to whom?" is the first question asked after a
+     * two-node pair failed over — or failed to. Witness-wide rather than per application, like the
+     * timing profile, because it describes how this process talks about its work rather than
+     * anything about a tenant's cluster.
+     */
+    private final boolean voteLogging;
+
     private WitnessSettings(Builder builder) {
         this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
         this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
@@ -98,6 +109,7 @@ public final class WitnessSettings {
         this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
         this.timings = Objects.requireNonNull(builder.timings, "timings");
+        this.voteLogging = builder.voteLogging;
     }
 
     public static Builder builder() {
@@ -173,6 +185,12 @@ public final class WitnessSettings {
          */
         @Setter
         private Timings timings = Timings.lan();
+
+        /**
+         * Whether the served nodes log who voted for whom at INFO rather than DEBUG. On by default.
+         */
+        @Setter
+        private boolean voteLogging = true;
 
         private Builder() {
         }

@@ -112,8 +112,21 @@ class QuorumTest {
         assertThat(q.required()).isEqualTo(1);
         assertThat(q.faultTolerance()).isZero();
         assertThat(q.summary())
-                .isEqualTo("cluster 'orders': 1 voters (1 node), quorum 1, tolerates 0 failures");
-        assertThat(q.warnings()).isEmpty();
+                .isEqualTo("cluster 'orders': 1 voter (1 node), quorum 1, tolerates 0 failures");
+    }
+
+    /**
+     * The behaviour is legitimate; the warning is because an empty or mistyped peer list is
+     * indistinguishable from it, and that mistake made on every node of a cluster is a set of
+     * permanent leaders each reporting perfect health.
+     */
+    @Test
+    void a_single_node_is_warned_about_because_it_is_what_a_lost_peer_list_looks_like() {
+        assertThat(quorum(1, false).warnings())
+                .singleElement(org.assertj.core.api.InstanceOfAssertFactories.STRING)
+                .contains("only voter")
+                .contains("nothing can depose it")
+                .contains("mistyped or unread peer list");
     }
 
     @Test

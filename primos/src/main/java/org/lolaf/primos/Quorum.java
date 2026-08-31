@@ -37,6 +37,11 @@ import java.util.Objects;
  * than an available alternative without being wrong, and primos says so rather than refusing to
  * start — refusing would break a legitimate transient, such as keeping a witness while scaling a
  * pair up to three nodes.
+ *
+ * <p>Two shapes are worth knowing before they are met in production. <strong>Two nodes with no
+ * witness tolerates zero failures</strong> — it looks redundant and is not. And <strong>one node is
+ * permanently the leader</strong>: quorum is one, so it elects itself and nothing can ever depose
+ * it. Both are allowed, and both are warned about.
  */
 @Value
 public class Quorum {
@@ -141,7 +146,8 @@ public class Quorum {
             return "cluster '" + applicationName + "': served by a witness whose voter set is"
                     + " learned from traffic rather than configured";
         }
-        return "cluster '" + applicationName + "': " + voters + " voters ("
+        return "cluster '" + applicationName + "': " + voters
+                + (voters == 1 ? " voter (" : " voters (")
                 + composition() + "), quorum " + required + ", tolerates " + failures(faultTolerance);
     }
 
@@ -164,7 +170,20 @@ public class Quorum {
                     + " square of the cluster size. Three or five is the usual answer.");
         }
 
-        if (witness && applicationNodes % 2 == 1) {
+        if (!witness && applicationNodes == 1) {
+            // Deliberately allowed, and deliberately warned about. The behaviour is fine; what is
+            // not fine is that an empty peer list looks exactly like this, and a cluster whose
+            // nodes each failed to read their peers is a set of permanent leaders that all believe
+            // they are healthy.
+            warnings.add("cluster '" + applicationName + "': one node and no witness, so this node"
+                    + " is the only voter. It elects itself about one election timeout after"
+                    + " starting and leads for as long as it runs, and nothing can depose it —"
+                    + " there is no majority to lose contact with.\nThat is a legitimate single"
+                    + " instance deployment, and it is also what a mistyped or unread peer list"
+                    + " looks like, in which case every node of the intended cluster is doing this"
+                    + " at once and each of them is the leader.\nCheck that peers were meant to be"
+                    + " omitted.");
+        } else if (witness && applicationNodes % 2 == 1) {
             int withoutWitness = applicationNodes / 2 + 1;
             warnings.add("cluster '" + applicationName + "': the witness does not help here."
                     + " With it, " + voters + " voters need " + required + " for quorum; the "

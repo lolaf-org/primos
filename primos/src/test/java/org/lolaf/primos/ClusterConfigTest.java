@@ -30,6 +30,27 @@ class ClusterConfigTest {
     }
 
     @Test
+    void vote_logging_is_on_by_default_because_an_election_leaves_no_other_evidence() {
+        assertThat(ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1)
+                .peers(Peer.application(2, "host-b", 7000))
+                .build()
+                .isVoteLogging()).isTrue();
+    }
+
+    @Test
+    void vote_logging_can_be_turned_off() {
+        assertThat(ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1)
+                .peers(Peer.application(2, "host-b", 7000))
+                .voteLogging(false)
+                .build()
+                .isVoteLogging()).isFalse();
+    }
+
+    @Test
     void a_minimal_config_defaults_its_node_name_and_timings() {
         ClusterConfig config = valid().build();
 

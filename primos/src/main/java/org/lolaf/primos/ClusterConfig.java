@@ -54,6 +54,12 @@ public class ClusterConfig {
     @Getter(AccessLevel.NONE)
     boolean learnedMembership;
 
+    /**
+     * Read through {@link #isVoteLogging()}.
+     */
+    @Getter(AccessLevel.NONE)
+    boolean voteLogging;
+
     Timings timings;
 
     private ClusterConfig(Builder builder) {
@@ -66,6 +72,7 @@ public class ClusterConfig {
         this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
         this.witness = builder.witness;
         this.learnedMembership = builder.learnedMembership;
+        this.voteLogging = builder.voteLogging;
         this.timings = Objects.requireNonNull(builder.timings, "timings");
         validate();
     }
@@ -151,6 +158,22 @@ public class ClusterConfig {
      */
     public boolean isLearnedMembership() {
         return learnedMembership;
+    }
+
+    /**
+     * Whether who voted for whom is logged at INFO rather than DEBUG. On by default.
+     *
+     * <p>An election is the one moment a cluster makes a collective decision, and afterwards the
+     * only evidence left is which node ended up leading. Who asked, who agreed, who refused and why
+     * is what turns "the failover took eight seconds" into an answer, and none of it is
+     * reconstructable later — so it is on by default and costs nothing while a leader is healthy,
+     * because a cluster that is not electing says nothing at all.
+     *
+     * <p>Turn it off for a deployment that elects often enough for the lines to be noise, or one
+     * whose log ingestion is charged by the line. The decisions are still logged at DEBUG.
+     */
+    public boolean isVoteLogging() {
+        return voteLogging;
     }
 
     /**
@@ -266,6 +289,13 @@ public class ClusterConfig {
         private boolean learnedMembership;
 
         /**
+         * Whether to log who voted for whom at INFO rather than DEBUG. On by default; see
+         * {@link ClusterConfig#isVoteLogging()}.
+         */
+        @Setter
+        private boolean voteLogging = true;
+
+        /**
          * Election, heartbeat and probe intervals.
          */
         @Setter
@@ -285,6 +315,18 @@ public class ClusterConfig {
 
         /**
          * The other application instances. This node must not be among them.
+         *
+         * <p><strong>Leaving this empty is a one-node cluster, and a one-node cluster leads
+         * itself.</strong> Quorum is one, so the node elects itself about an election timeout after
+         * starting and stays leader for as long as it runs — nothing can depose it, because there
+         * is no majority for it to lose contact with. That is deliberate and supported: it makes
+         * development trivial and lets an application run the same code path in a non-clustered
+         * deployment instead of branching around primos entirely.
+         *
+         * <p>It is also, unavoidably, what a peer list that failed to load looks like. Made on
+         * every node of an intended cluster, that mistake produces one permanent leader per node,
+         * each reporting perfect health. {@link Quorum#warnings()} says so at startup for exactly
+         * this reason.
          */
         public Builder peers(Peer... peers) {
             return peers(Arrays.asList(peers));

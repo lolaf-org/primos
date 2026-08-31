@@ -28,6 +28,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.Timings;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.time.VirtualClock;
@@ -159,6 +160,92 @@ class FileConfigStoreTest {
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("printable ASCII");
+    }
+
+    // ------------------------------------------------------------ timings
+
+    @Test
+    void nothing_configured_is_the_lan_profile() throws IOException {
+        application("orders", "secret=x");
+
+        assertThat(open().current().settings().timings()).isEqualTo(Timings.lan());
+    }
+
+    @Test
+    void a_named_profile_is_taken_whole() throws IOException {
+        settings("timings.profile=wan");
+        application("orders", "secret=x");
+
+        assertThat(open().current().settings().timings()).isEqualTo(Timings.wan());
+    }
+
+    /**
+     * The reason the witness needs this at all: a cluster running intervals that are neither
+     * {@code lan} nor {@code wan} had no witness setting that could match it, and a witness with a
+     * longer {@code electionTimeoutMin} than its cluster is proportionally more reluctant to grant
+     * the pre-vote that failover waits on. Nothing detects that; it is just slow.
+     */
+    @Test
+    void the_intervals_can_be_spelled_out_so_a_witness_can_match_a_custom_cluster() throws IOException {
+        settings(String.join("\n",
+                "timings.heartbeat.millis=250",
+                "timings.election.min.millis=2000",
+                "timings.election.max.millis=4000",
+                "timings.probe.millis=3000",
+                "timings.failure.threshold=5"));
+        application("orders", "secret=x");
+
+        Timings timings = open().current().settings().timings();
+
+        assertThat(timings).isEqualTo(Timings.builder()
+                .heartbeatInterval(Duration.ofMillis(250))
+                .electionTimeout(Duration.ofSeconds(2), Duration.ofSeconds(4))
+                .probeInterval(Duration.ofSeconds(3))
+                .failureThreshold(5)
+                .build());
+    }
+
+    @Test
+    void a_profile_and_an_explicit_interval_together_are_refused() throws IOException {
+        settings(String.join("\n", "timings.profile=wan", "timings.heartbeat.millis=250"));
+        application("orders", "secret=x");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("timings.profile is set to 'wan'")
+                .hasMessageContaining("timings.heartbeat.millis")
+                .hasMessageContaining("Choose one");
+    }
+
+    @Test
+    void one_election_bound_without_its_pair_is_refused() throws IOException {
+        settings("timings.election.min.millis=2000");
+        application("orders", "secret=x");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("without its pair");
+    }
+
+    @Test
+    void an_incoherent_custom_set_fails_with_the_librarys_own_message() throws IOException {
+        settings("timings.heartbeat.millis=100");
+        application("orders", "secret=x");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("electionTimeoutMin must be at least");
+    }
+
+    @Test
+    void a_duration_that_is_not_a_number_says_which_key() throws IOException {
+        settings("timings.heartbeat.millis=250ms");
+        application("orders", "secret=x");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("timings.heartbeat.millis must be a whole number of"
+                        + " milliseconds");
     }
 
     // ------------------------------------------------------------ hot reload
