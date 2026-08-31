@@ -89,29 +89,40 @@ dependency cycle, because the node is built from the listeners. Use `@EventListe
 
 ## Configuration
 
-| key | default | meaning |
-|---|---|---|
-| `primos.application-name` | none | which cluster this is; **required**, and the switch that activates everything |
-| `primos.node-id` | none | this node's id, unique within the application |
-| `primos.node-name` | the id | a readable name for logs |
-| `primos.state-directory` | none | **required.** Where the term and vote are fsynced |
-| `primos.bind-address` | wildcard | local address to bind |
-| `primos.bind-port` | `0` | local port. Peers must be able to reach the port you name |
-| `primos.peers[n].id/name/host/port` | none | the other application instances, static |
-| `primos.witness.id/name/host/port` | none | the optional witness, at most one |
-| `primos.secret` | none | the shared cluster secret. **Set it** |
-| `primos.mac-algorithm` | `HmacSHA256` | any JCE `Mac` name; every member must agree |
-| `primos.timings.profile` | `lan` | `lan` or `wan` — see *Timings* |
-| `primos.timings.heartbeat-interval` | profile | how often a leader asserts itself |
-| `primos.timings.election-timeout-min` | profile | low end of the randomised election timeout |
-| `primos.timings.election-timeout-max` | profile | high end; set with its pair |
-| `primos.timings.probe-interval` | profile | how often every node probes every peer |
-| `primos.timings.failure-threshold` | profile | missed probes before a peer is reported down |
-| `primos.vote-logging` | `true` | log who voted for whom at INFO instead of DEBUG |
-| `primos.lifecycle` | `context` | `context` or `manual` — see below |
-| `primos.leader-lifecycle.enabled` | `false` | whether leadership starts and stops beans |
-| `primos.leader-lifecycle.scope` | `beans` | `beans` or `context` |
-| `primos.leader-lifecycle.beans` | none | explicit bean names, winning over `@LeaderOnly` |
+| key | required | default | meaning |
+|---|---|---|---|
+| `primos.application-name` | **yes** | none | which cluster this is, and the switch that activates everything |
+| `primos.node-id` | **yes** | `0` | this node's id, unique within the application |
+| `primos.node-name` | no | `node-<id>` | a readable name for logs |
+| `primos.state-directory` | **yes** | none | where the term and vote are fsynced |
+| `primos.bind-address` | no | wildcard | local address to bind |
+| `primos.bind-port` | in practice | `0` | local port. `0` takes an ephemeral one, which peers cannot be told about |
+| `primos.peers[n].id/name/host/port` | in practice | none | the other application instances, static. None means a one-node cluster |
+| `primos.witness.id/name/host/port` | no | none | the optional witness, at most one |
+| `primos.secret` | strongly advised | none | the shared cluster secret |
+| `primos.mac-algorithm` | no | `HmacSHA256` | any JCE `Mac` name; every member must agree |
+| `primos.timings.profile` | no | `lan` | `lan` or `wan` — see *Timings* |
+| `primos.timings.heartbeat-interval` | no | `50ms` | how often a leader asserts itself |
+| `primos.timings.election-timeout-min` | no | `300ms` | low end of the randomised election timeout |
+| `primos.timings.election-timeout-max` | no | `600ms` | high end; set with its pair |
+| `primos.timings.probe-interval` | no | `1s` | how often every node probes every peer |
+| `primos.timings.failure-threshold` | no | `3` | missed probes before a peer is reported down |
+| `primos.vote-logging` | no | `true` | log who voted for whom at INFO instead of DEBUG |
+| `primos.lifecycle` | no | `context` | `context` or `manual` — see below |
+| `primos.leader-lifecycle.enabled` | no | `false` | whether leadership starts and stops beans |
+| `primos.leader-lifecycle.scope` | no | `beans` | `beans` or `context` |
+| `primos.leader-lifecycle.beans` | no | none | explicit bean names, winning over `@LeaderOnly` |
+
+Only two keys fail fast when missing: `application-name` leaves everything unconfigured, and
+`state-directory` refuses to start. The other three marked above fail *quietly*, which is worse:
+
+- **`node-id` binds to `0` when unset**, and `0` is a valid id. A cluster whose nodes all forgot it
+  is a cluster of node `0`s.
+- **`bind-port: 0`** takes whatever ephemeral port the OS hands out, which no peer can be configured
+  to reach. Fine for a test, never for a deployment.
+- **No `peers`** is a one-voter cluster that elects itself and leads permanently — supported and
+  useful, and also exactly what a peer list that failed to bind looks like. primos warns at startup
+  when it sees it.
 
 There is deliberately **no default for `state-directory`**. A default under a temp directory is
 silently unsafe after a reboot, and a node that forgets its vote can elect a second leader.
@@ -148,10 +159,17 @@ electionTimeout << MTBF` — so "`wan` but with a different heartbeat" is not a 
 a custom set whose author has not seen the other four numbers. Naming all five is a small price for
 knowing what you configured.
 
-You do not have to set all five. Anything omitted falls back to the library's default, and **the
-relationships are validated for you**: set only `heartbeat-interval: 100ms` and startup fails with
-*"electionTimeoutMin must be at least 5 heartbeat intervals (500ms) but was 300ms"*. The rules are
-enforced in one place — `Timings` — rather than restated here.
+You do not have to set all five. Anything omitted falls back to the default in the table above, and
+**the relationships are validated for you**: set only `heartbeat-interval: 100ms` and startup fails
+with *"electionTimeoutMin must be at least 5 heartbeat intervals (500ms) but was 300ms"*. The rules
+are enforced in one place — `Timings` — rather than restated here.
+
+**Those fallbacks are the LAN values, never the profile's** — a profile and an individual interval
+cannot both be set, so when you are naming intervals there is no profile for them to fall back to.
+The trap that follows is worth stating plainly: on a WAN, `probe-interval: 3s` on its own is a valid
+configuration that silently keeps the 50ms heartbeat and the 300–600ms election timeout, and no
+validation will object, because nothing about it is incoherent — only wrong for your network. **If
+you are not on a LAN, name every value you care about**, not just the one you wanted to change.
 
 The two election bounds are a **pair**: setting one without the other is refused. The timeout is a
 range drawn from afresh on every reset, and setting one end against the other's default is how an

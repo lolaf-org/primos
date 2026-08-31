@@ -196,12 +196,12 @@ which one shared file makes impossible.
 | `registration.limit` | `64` | yes |
 | `secret` | none | yes |
 | `secret.algorithm` | `HmacSHA256` | yes |
-| `timings.profile` | `lan` | yes |
-| `timings.heartbeat.millis` | profile | yes |
-| `timings.election.min.millis` | profile | yes |
-| `timings.election.max.millis` | profile | yes |
-| `timings.probe.millis` | profile | yes |
-| `timings.failure.threshold` | profile | yes |
+| `timings.profile` | `lan` | **no** — read at startup |
+| `timings.heartbeat.millis` | `50` | **no** |
+| `timings.election.min.millis` | `300` | **no** |
+| `timings.election.max.millis` | `600` | **no** |
+| `timings.probe.millis` | `1000` | **no** |
+| `timings.failure.threshold` | `3` | **no** |
 | `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
@@ -233,9 +233,20 @@ timings.failure.threshold=5
 
 **A profile and an individual interval together are refused**, naming both. A profile is a set of
 values picked so the relationships between them hold, so overriding part of one leaves a custom set
-whose author has not seen the rest. The two election bounds are a pair and must be set together.
-Anything omitted falls back to the library default, and every relationship between them is validated
-at load — a witness that would thrash refuses to start rather than doing it in production.
+whose author has not seen the rest. The two election bounds are a pair and must be set together, and
+every relationship between them is validated at load — a witness that would thrash refuses to start
+rather than doing it in production.
+
+**None of the timing keys is hot-reloadable**, `timings.profile` included — the server reads them
+once at startup and hands them to every application it serves, including ones registered later.
+Changing them needs a restart, which for a witness is its one genuinely risky operation, so plan it
+rather than dropping the file in and assuming.
+
+**Anything omitted falls back to the LAN value in the table, never to a profile's** — the two cannot
+both be set, so when you are naming intervals there is no profile for the rest to come from. A
+witness on a third network that sets only `timings.probe.millis` therefore keeps a 50ms heartbeat and
+a 300–600ms election timeout, which nothing will object to and which is wrong for a WAN round trip.
+Name every value, or name the profile.
 
 `vote.logging` logs who voted for whom at INFO instead of DEBUG, for every application this witness
 serves. It is on by default and it is worth more here than anywhere else: the witness holds the vote
