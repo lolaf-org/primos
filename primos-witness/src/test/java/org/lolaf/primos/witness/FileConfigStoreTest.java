@@ -200,7 +200,8 @@ class FileConfigStoreTest {
 
         assertThat(timings).isEqualTo(Timings.builder()
                 .heartbeatInterval(Duration.ofMillis(250))
-                .electionTimeout(Duration.ofSeconds(2), Duration.ofSeconds(4))
+                .electionTimeoutMin(Duration.ofSeconds(2))
+                .electionTimeoutMax(Duration.ofSeconds(4))
                 .probeInterval(Duration.ofSeconds(3))
                 .advertisementInterval(Duration.ofSeconds(60))
                 .failureThreshold(5)
@@ -248,6 +249,66 @@ class FileConfigStoreTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("timings.heartbeat.millis must be a whole number of"
                         + " milliseconds");
+    }
+
+    /**
+     * The reason these moved out of {@code witness.properties}: a witness serves clusters it does
+     * not own, and one of them being on another network must not decide the intervals for all of
+     * them. Before this, a witness serving a LAN cluster and a WAN one was configured wrongly for
+     * whichever it was not — and, since nodes advertise their intervals, said so in an error
+     * nobody could act on.
+     */
+    @Test
+    void two_applications_can_run_different_profiles() throws IOException {
+        settings("timings.profile=lan");
+        application("orders", "secret=x");
+        application("billing", String.join("\n", "secret=y", "timings.profile=wan"));
+
+        ConfigSnapshot snapshot = open().current();
+
+        assertThat(snapshot.application("orders").timings()).isEqualTo(Timings.lan());
+        assertThat(snapshot.application("billing").timings()).isEqualTo(Timings.wan());
+    }
+
+    @Test
+    void an_application_that_says_nothing_takes_the_witness_wide_intervals() throws IOException {
+        settings("timings.profile=wan");
+        application("orders", "secret=x");
+
+        assertThat(open().current().application("orders").timings())
+                .as("the same fallback the secret and the algorithm already use")
+                .isEqualTo(Timings.wan());
+    }
+
+    @Test
+    void an_application_can_spell_its_intervals_out() throws IOException {
+        application("orders", String.join("\n",
+                "secret=x",
+                "timings.heartbeat.millis=250",
+                "timings.election.min.millis=2000",
+                "timings.election.max.millis=4000",
+                "timings.probe.millis=3000",
+                "timings.advertisement.millis=60000",
+                "timings.failure.threshold=5"));
+
+        assertThat(open().current().application("orders").timings()).isEqualTo(Timings.builder()
+                .heartbeatInterval(Duration.ofMillis(250))
+                .electionTimeoutMin(Duration.ofSeconds(2))
+                .electionTimeoutMax(Duration.ofSeconds(4))
+                .probeInterval(Duration.ofSeconds(3))
+                .advertisementInterval(Duration.ofSeconds(60))
+                .failureThreshold(5)
+                .build());
+    }
+
+    @Test
+    void an_applications_profile_and_explicit_interval_together_are_refused() throws IOException {
+        application("orders", String.join("\n",
+                "secret=x", "timings.profile=wan", "timings.heartbeat.millis=250"));
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Choose one");
     }
 
     // ------------------------------------------------------------ hot reload
@@ -327,6 +388,25 @@ class FileConfigStoreTest {
             rescan(store);
 
             assertThat(store.current().applicationNames()).containsExactly("billing", "orders");
+        }
+    }
+
+    /**
+     * Onboarding a tenant, or moving one to another network, must not need a witness restart —
+     * that is the one genuinely risky operation in its lifecycle, since every two-node cluster it
+     * serves tolerates zero failures while it is down. The witness-wide keys are read at startup;
+     * per-application ones are not, and this is what says so.
+     */
+    @Test
+    void an_applications_intervals_can_be_changed_without_a_restart() throws IOException {
+        application("orders", "secret=s3cret");
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().application("orders").timings()).isEqualTo(Timings.lan());
+
+            application("orders", String.join("\n", "secret=s3cret", "timings.profile=wan"));
+            assertThat(rescan(store)).isTrue();
+
+            assertThat(store.current().application("orders").timings()).isEqualTo(Timings.wan());
         }
     }
 

@@ -106,8 +106,8 @@ class TimingsPropertiesTest {
     }
 
     /**
-     * The bounds are a pair; {@code Timings.Builder} offers no setter for either alone for exactly
-     * this reason, and the properties layer must not reopen the hole.
+     * The bounds are a pair. {@code Timings} rejects an inverted range at {@code build()}, but a
+     * message naming the property beats one naming a Java field, so this layer catches it first.
      */
     @Test
     void one_election_bound_without_its_pair_is_refused() {

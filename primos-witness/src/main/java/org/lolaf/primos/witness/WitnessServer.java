@@ -113,7 +113,17 @@ public final class WitnessServer implements AutoCloseable {
     private final ConfigStore configStore;
     private final MonotonicClock clock;
     private final Random random;
-    private final Timings timings;
+    /**
+     * A programmatic override for every served application's intervals, or null to use each
+     * application's own.
+     *
+     * <p>Configuration is the ordinary way to set these, per application, so that one tenant's
+     * profile is not every tenant's. This exists for a caller constructing a server in code —
+     * chiefly a test driving nodes on deliberately fast timings — and it deliberately wins over the
+     * files, because a caller that passed it meant it.
+     */
+    private final Timings timingsOverride;
+
     private final boolean voteLogging;
     private final int nodeId;
     private final StateStoreFactory stateStores;
@@ -141,7 +151,7 @@ public final class WitnessServer implements AutoCloseable {
 
         ConfigSnapshot snapshot = configStore.current();
         WitnessSettings settings = snapshot.settings();
-        this.timings = builder.timings != null ? builder.timings : settings.timings();
+        this.timingsOverride = builder.timings;
         this.voteLogging = settings.voteLogging();
         this.stateStores = builder.stateStores != null
                 ? builder.stateStores
@@ -421,8 +431,10 @@ public final class WitnessServer implements AutoCloseable {
                     application, nearMiss);
         }
         autoRegistrations++;
+        // An auto-registered application has no file to say otherwise, so it takes the
+        // witness-wide intervals. If those are wrong for it, its nodes will now say so.
         return open(new ApplicationConfig(application, settings.defaultSecret(), null,
-                settings.defaultMacAlgorithm(), true));
+                settings.defaultMacAlgorithm(), settings.timings(), true));
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
@@ -533,7 +545,7 @@ public final class WitnessServer implements AutoCloseable {
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
-                .timings(timings)
+                .timings(timingsOverride != null ? timingsOverride : application.timings())
                 .voteLogging(voteLogging)
                 .build();
         return new ElectionNode(config, store, transport, clock, random,

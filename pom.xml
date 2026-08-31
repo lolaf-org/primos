@@ -318,9 +318,19 @@
                 <version>${license-maven-plugin.version}</version>
                 <inherited>false</inherited>
                 <configuration>
+                    <!-- The check runs from the aggregator alone (inherited=false), which by
+                         default excludes every module directory and so checks nothing at all.
+                         aggregate=true is what makes the parent walk the modules too. -->
+                    <aggregate>true</aggregate>
                     <licenseSets>
                         <licenseSet>
                             <header>${project.basedir}/HEADER.txt</header>
+                            <!-- HEADER.txt is a template; without these the placeholders would
+                                 never match a real file. -->
+                            <properties>
+                                <year>2026</year>
+                                <owner>Lolaf.org</owner>
+                            </properties>
                             <excludes>
                                 <exclude>**/LICENSE.txt</exclude>
                                 <exclude>**/*.txt</exclude>
@@ -334,9 +344,17 @@
                                 <exclude>**/lombok.config</exclude>
                                 <exclude>**/src/main/resources/**</exclude>
                                 <exclude>**/src/test/resources/**</exclude>
+                                <!-- Shipped sample config an operator copies and edits; the same
+                                     reasoning as the resources above. -->
+                                <exclude>**/src/main/dist/conf/**</exclude>
                             </excludes>
                         </licenseSet>
                     </licenseSets>
+                    <!-- The launcher has no extension, so nothing maps it to a comment style
+                         and it would be reported as Unknown rather than checked. -->
+                    <mapping>
+                        <primos-witness>SCRIPT_STYLE</primos-witness>
+                    </mapping>
                 </configuration>
                 <executions>
                     <execution>

@@ -69,7 +69,8 @@ class MultiApplicationSoakTest {
     /** Fast enough to finish, slow enough that a loaded CI machine is not the thing under test. */
     private static final Timings FAST = Timings.builder()
             .heartbeatInterval(Duration.ofMillis(25))
-            .electionTimeout(Duration.ofMillis(150), Duration.ofMillis(300))
+            .electionTimeoutMin(Duration.ofMillis(150))
+            .electionTimeoutMax(Duration.ofMillis(300))
             .probeInterval(Duration.ofMillis(100))
             .build();
 
@@ -237,7 +238,7 @@ class MultiApplicationSoakTest {
                 .clusterConfig(ClusterConfig.builder()
                         .applicationName(application)
                         .nodeId(nodeId)
-                        .peers(peer)
+                        .peer(peer)
                         .witness(witness)
                         .timings(FAST)
                         .build())

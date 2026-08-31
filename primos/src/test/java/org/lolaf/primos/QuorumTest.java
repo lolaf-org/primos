@@ -15,12 +15,12 @@
  */
 package org.lolaf.primos;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class QuorumTest {
 
@@ -170,7 +170,8 @@ class QuorumTest {
                 .applicationName("orders")
                 .nodeId(99)
                 .asWitness()
-                .peers(Peer.application(1, "host-1", 7000), Peer.application(2, "host-2", 7000))
+                .peer(Peer.application(1, "host-1", 7000))
+                .peer(Peer.application(2, "host-2", 7000))
                 .build());
 
         assertThat(fromWitness.voters()).isEqualTo(fromApplicationNode.voters());

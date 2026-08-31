@@ -196,13 +196,7 @@ which one shared file makes impossible.
 | `registration.limit` | `64` | yes |
 | `secret` | none | yes |
 | `secret.algorithm` | `HmacSHA256` | yes |
-| `timings.profile` | `lan` | **no** — read at startup |
-| `timings.heartbeat.millis` | `50` | **no** |
-| `timings.election.min.millis` | `300` | **no** |
-| `timings.election.max.millis` | `600` | **no** |
-| `timings.probe.millis` | `1000` | **no** |
-| `timings.advertisement.millis` | `30000` | **no** |
-| `timings.failure.threshold` | `3` | **no** |
+| `timings.*` | see below | **no** here — but yes per application |
 | `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
@@ -239,10 +233,15 @@ whose author has not seen the rest. The two election bounds are a pair and must 
 every relationship between them is validated at load — a witness that would thrash refuses to start
 rather than doing it in production.
 
-**None of the timing keys is hot-reloadable**, `timings.profile` included — the server reads them
-once at startup and hands them to every application it serves, including ones registered later.
-Changing them needs a restart, which for a witness is its one genuinely risky operation, so plan it
-rather than dropping the file in and assuming.
+**The timing keys belong in an application's own file.** Setting them in `witness.properties` sets
+the *default* for tenants that say nothing, and that default is read once at startup. Set per
+application they are hot-reloadable like everything else there, because a reconfigured application
+has its node rebuilt.
+
+**Set them per application, not witness-wide, whenever you serve more than one cluster.** A witness
+serving a LAN cluster and a WAN one has to match both, and one witness-wide value cannot. It is not
+merely suboptimal: nodes advertise their intervals and compare them, so the mismatched tenant logs
+an error about a disagreement its operator has no way to resolve.
 
 **Anything omitted falls back to the LAN value in the table, never to a profile's** — the two cannot
 both be set, so when you are naming intervals there is no profile for the rest to come from. A
@@ -273,8 +272,26 @@ silently truncated.
 | `secret` | falls back to the witness-wide `secret` if absent |
 | `secret.previous` | also accepted, for rotation |
 | `secret.algorithm` | the JCE `Mac` name, e.g. `HmacSHA512`; falls back to the witness-wide one, which defaults to `HmacSHA256` |
+| `timings.profile` | `lan` or `wan`; falls back to the witness-wide value |
+| `timings.heartbeat.millis` | `50` by default |
+| `timings.election.min.millis` | `300` |
+| `timings.election.max.millis` | `600`; set with its pair |
+| `timings.probe.millis` | `1000` |
+| `timings.advertisement.millis` | `30000`; never shorter than the probe interval |
+| `timings.failure.threshold` | `3` |
 
 An empty file is valid and means "serve this cluster with the witness-wide secret".
+
+**The timings must match what that cluster's nodes run**, and this is where to say so when tenants
+differ. A node refuses a pre-vote while it has heard from a leader within its own
+`electionTimeoutMin`, so a witness with a longer one is proportionally more reluctant to grant the
+vote a failover is waiting on — and for a two-node pair the witness's vote is the one everything
+waits on. Nothing is corrupted by a mismatch; failover just gets slower. Since nodes advertise their
+intervals, a mismatch is now logged at ERROR by both sides rather than being invisible.
+
+Either a profile or the values spelled out, never both, exactly as in `witness.properties`.
+Changing them does **not** need a restart: a reconfigured application has its node rebuilt, keeping
+its state store and its learned addresses.
 
 `secret.algorithm` is per application because a witness serves clusters it does not own: one of
 them moving to another algorithm must not be a flag day for every other tenant. **It has to match
@@ -338,6 +355,22 @@ and logged once per unseen name.
 
 Serves any application name it hears, creating state for it. Less operational burden, a legitimate
 choice — and the way a typo becomes a split brain.
+
+**Its precondition, which is easy to miss:** an auto-registered application has no file, so it takes
+the witness-wide `secret`, `secret.algorithm` and timings. Permissive mode therefore only serves
+clusters that are **identical in all three**. That is not a small print detail — it is what the mode
+is for. It suits a platform team running many clusters from one template, on one network, with one
+secret injected by the deploy system; the witness-wide values are then correct by construction. It
+does not suit clusters that differ, and the failures are not alike:
+
+| differs | what happens |
+|---|---|
+| `secret` or `secret.algorithm` | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious |
+| timings | failover is slower than it looks, and both sides log an `ERROR` naming the two interval sets |
+
+The timing case used to be the dangerous one, because it was silent. Since nodes advertise their
+intervals, it is not: a cluster that does not fit the template now says so. **Give any such cluster
+its own file** — a file may exist in `applications/` while the mode is permissive, and it wins.
 
 **The walkthrough that is the reason `strict` is the default:**
 

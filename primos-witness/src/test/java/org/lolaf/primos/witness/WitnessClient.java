@@ -121,6 +121,25 @@ final class WitnessClient implements AutoCloseable {
         return null;
     }
 
+    /**
+     * Waits for the witness to state the intervals it is running for <em>this</em> application.
+     *
+     * <p>The witness has to have learned this node first, so send it something before calling
+     * this. Anything else arriving meanwhile is ignored, the same discipline {@link #exchange}
+     * follows: the witness probes every voter it knows, so a probe landing here is ordinary.
+     */
+    Reply awaitTimings(WitnessServer server) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            server.runOnce(Duration.ofMillis(5).toNanos());
+            Reply reply = tryReceive();
+            if (reply != null && reply.timings) {
+                return reply;
+            }
+        }
+        return null;
+    }
+
     private void write(ByteBuffer datagram) {
         try {
             channel.send(datagram, witness);
@@ -162,6 +181,13 @@ final class WitnessClient implements AutoCloseable {
         private boolean handedOver;
         private boolean leaving;
         private boolean timings;
+
+        /** The advertised intervals, package-private so a test can compare them with the file. */
+        int heartbeatMillis;
+        int electionMinMillis;
+        int electionMaxMillis;
+        int probeMillis;
+        int failureThreshold;
 
         @Override
         public void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote) {
@@ -211,6 +237,11 @@ final class WitnessClient implements AutoCloseable {
         public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
                               int electionMaxMillis, int probeMillis, int failureThreshold) {
             this.timings = true;
+            this.heartbeatMillis = heartbeatMillis;
+            this.electionMinMillis = electionMinMillis;
+            this.electionMaxMillis = electionMaxMillis;
+            this.probeMillis = probeMillis;
+            this.failureThreshold = failureThreshold;
         }
     }
 }

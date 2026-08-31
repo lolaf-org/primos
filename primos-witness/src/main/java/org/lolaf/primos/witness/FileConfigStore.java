@@ -110,7 +110,7 @@ public final class FileConfigStore implements ConfigStore {
      * <p>Durations are milliseconds rather than {@code 250ms} strings, because this file is parsed
      * with {@link Properties} and nothing else, and a duration parser is not worth writing twice.
      */
-    private static Timings timings(Properties properties) {
+    private static Timings timings(Properties properties, Timings fallback) {
         String profile = properties.getProperty("timings.profile");
         List<String> explicit = new ArrayList<>(5);
         Integer heartbeat = optionalInt(properties, "timings.heartbeat.millis", explicit);
@@ -131,10 +131,11 @@ public final class FileConfigStore implements ConfigStore {
             return timingsProfile(profile);
         }
         if (explicit.isEmpty()) {
-            return Timings.lan();
+            return fallback;
         }
-        // The two bounds are a pair. Timings.Builder deliberately offers no setter for either
-        // alone, because setting one against the other's default is how an invalid range is built.
+        // The two bounds are a pair: setting one against the other's default is how an invalid
+        // range is built. Timings rejects that at build(), but naming the property is a better
+        // error than naming a Java field, so it is caught here first.
         if ((electionMin == null) != (electionMax == null)) {
             throw new IllegalArgumentException("timings.election."
                     + (electionMin != null ? "min" : "max") + ".millis is set without its pair. The"
@@ -147,7 +148,8 @@ public final class FileConfigStore implements ConfigStore {
             builder.heartbeatInterval(Duration.ofMillis(heartbeat));
         }
         if (electionMin != null) {
-            builder.electionTimeout(Duration.ofMillis(electionMin), Duration.ofMillis(electionMax));
+            builder.electionTimeoutMin(Duration.ofMillis(electionMin));
+            builder.electionTimeoutMax(Duration.ofMillis(electionMax));
         }
         if (probe != null) {
             builder.probeInterval(Duration.ofMillis(probe));
@@ -435,7 +437,7 @@ public final class FileConfigStore implements ConfigStore {
         }
         builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
-        builder.timings(timings(properties));
+        builder.timings(timings(properties, Timings.lan()));
         builder.voteLogging(booleanValue(properties, "vote.logging", true));
         return builder.build();
     }
@@ -458,7 +460,11 @@ public final class FileConfigStore implements ConfigStore {
         if (algorithm == null || algorithm.trim().isEmpty()) {
             algorithm = settings.defaultMacAlgorithm();
         }
-        return new ApplicationConfig(name, secret, previous, algorithm.trim(), false);
+        // Per application, falling back to the witness-wide value, exactly as the secret and the
+        // algorithm above do. A tenant that says nothing gets what the witness was told; a tenant
+        // on another network says so in its own file, without touching anyone else's.
+        Timings timings = timings(properties, settings.timings());
+        return new ApplicationConfig(name, secret, previous, algorithm.trim(), timings, false);
     }
 
     /**

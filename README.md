@@ -331,7 +331,8 @@ volume is neither. (There is no warning for this yet — see PLAN.md.)
 ```java
 Timings.builder()
         .heartbeatInterval(Duration.ofMillis(200))
-        .electionTimeout(Duration.ofMillis(1_500), Duration.ofMillis(3_000))
+        .electionTimeoutMin(Duration.ofMillis(1_500))
+        .electionTimeoutMax(Duration.ofMillis(3_000))
         .probeInterval(Duration.ofSeconds(2))
         .failureThreshold(3)
         .build();

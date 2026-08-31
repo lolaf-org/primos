@@ -41,7 +41,8 @@ class PrimosNodeTest {
 
     private static final Timings FAST = Timings.builder()
             .heartbeatInterval(Duration.ofMillis(20))
-            .electionTimeout(Duration.ofMillis(100), Duration.ofMillis(200))
+            .electionTimeoutMin(Duration.ofMillis(100))
+            .electionTimeoutMax(Duration.ofMillis(200))
             .probeInterval(Duration.ofMillis(100))
             .build();
 

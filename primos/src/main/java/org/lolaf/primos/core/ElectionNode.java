@@ -546,7 +546,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void logVote(String message, Object... args) {
-        if (config.isVoteLogging()) {
+        if (config.voteLogging()) {
             log.info(message, args);
         } else {
             log.debug(message, args);

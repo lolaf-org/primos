@@ -17,14 +17,7 @@ package org.lolaf.primos.spring;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.lolaf.primos.ClusterConfig;
-import org.lolaf.primos.Leader;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.PrimosNode;
-import org.lolaf.primos.PrimosStats;
-import org.lolaf.primos.Role;
-import org.lolaf.primos.RoleAndTerm;
+import org.lolaf.primos.*;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
@@ -108,10 +101,12 @@ class PrimosHealthIndicatorTest {
 
         @Override
         public void start() {
+            // nothing to do
         }
 
         @Override
         public void stop() {
+            // nothing to do
         }
 
         @Override
@@ -126,6 +121,7 @@ class PrimosHealthIndicatorTest {
 
         @Override
         public void addListener(PrimosListener listener) {
+            // nothing to do
         }
 
         @Override
@@ -143,7 +139,7 @@ class PrimosHealthIndicatorTest {
             return ClusterConfig.builder()
                     .applicationName("orders")
                     .nodeId(1)
-                    .peers(Peer.application(2, "127.0.0.1", 1))
+                    .peer(Peer.application(2, "127.0.0.1", 1))
                     .build();
         }
     }

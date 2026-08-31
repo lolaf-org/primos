@@ -39,7 +39,7 @@ import java.util.concurrent.Executor;
  * ClusterConfig cluster = ClusterConfig.builder()
  *         .applicationName("orders")
  *         .nodeId(1)
- *         .peers(Peer.application(2, "host-b", 7000))
+ *         .peer(Peer.application(2, "host-b", 7000))
  *         .witness(Peer.witness(9, "referee", 7000))
  *         .build();
  *

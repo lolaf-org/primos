@@ -48,7 +48,8 @@ class TimingsTest {
     void the_election_timeout_must_span_several_heartbeats() {
         assertThatThrownBy(() -> Timings.builder()
                 .heartbeatInterval(Duration.ofMillis(100))
-                .electionTimeout(Duration.ofMillis(200), Duration.ofMillis(400))
+                .electionTimeoutMin(Duration.ofMillis(200))
+                .electionTimeoutMax(Duration.ofMillis(400))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least 5 heartbeat intervals");
@@ -83,7 +84,8 @@ class TimingsTest {
     @Test
     void the_randomisation_range_must_not_be_empty() {
         assertThatThrownBy(() -> Timings.builder()
-                .electionTimeout(Duration.ofMillis(300), Duration.ofMillis(300))
+                .electionTimeoutMin(Duration.ofMillis(300))
+                .electionTimeoutMax(Duration.ofMillis(300))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must be greater than electionTimeoutMin");
@@ -93,7 +95,8 @@ class TimingsTest {
     void the_randomisation_range_must_be_wide_enough_to_break_a_tie() {
         assertThatThrownBy(() -> Timings.builder()
                 .heartbeatInterval(Duration.ofMillis(50))
-                .electionTimeout(Duration.ofMillis(300), Duration.ofMillis(310))
+                .electionTimeoutMin(Duration.ofMillis(300))
+                .electionTimeoutMax(Duration.ofMillis(310))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("split the vote");

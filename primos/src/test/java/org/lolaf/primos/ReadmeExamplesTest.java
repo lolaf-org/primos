@@ -89,7 +89,7 @@ class ReadmeExamplesTest {
                      .clusterConfig(ClusterConfig.builder()
                              .applicationName("orders")
                              .nodeId(1)
-                             .peers(Peer.application(2, "127.0.0.1", 7421))
+                             .peer(Peer.application(2, "127.0.0.1", 7421))
                              .build())
                      .store(new FileStateStore(directory))
                      .transport(transport)
@@ -131,7 +131,8 @@ class ReadmeExamplesTest {
     void the_derived_profile_the_readme_shows_is_accepted() {
         Timings custom = Timings.builder()
                 .heartbeatInterval(java.time.Duration.ofMillis(200))
-                .electionTimeout(java.time.Duration.ofMillis(1_500), java.time.Duration.ofMillis(3_000))
+                .electionTimeoutMin(java.time.Duration.ofMillis(1_500))
+                .electionTimeoutMax(java.time.Duration.ofMillis(3_000))
                 .probeInterval(java.time.Duration.ofSeconds(2))
                 .failureThreshold(3)
                 .build();
@@ -145,14 +146,16 @@ class ReadmeExamplesTest {
         // the documentation is wrong and this fails rather than the reader finding out later.
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
                         .heartbeatInterval(java.time.Duration.ofMillis(100))
-                        .electionTimeout(java.time.Duration.ofMillis(400), java.time.Duration.ofMillis(800))
+                        .electionTimeoutMin(java.time.Duration.ofMillis(400))
+                        .electionTimeoutMax(java.time.Duration.ofMillis(800))
                         .build())
                 .as("an election timeout under five heartbeats")
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("5 heartbeat intervals");
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
-                        .electionTimeout(java.time.Duration.ofMillis(300), java.time.Duration.ofMillis(320))
+                        .electionTimeoutMin(java.time.Duration.ofMillis(300))
+                        .electionTimeoutMax(java.time.Duration.ofMillis(320))
                         .build())
                 .as("a randomisation range narrower than one heartbeat")
                 .isInstanceOf(IllegalArgumentException.class)
@@ -194,7 +197,7 @@ class ReadmeExamplesTest {
                         .clusterConfig(ClusterConfig.builder()
                                 .applicationName("orders")
                                 .nodeId(1)
-                                .peers(Peer.application(2, "127.0.0.1", 7421))
+                                .peer(Peer.application(2, "127.0.0.1", 7421))
                                 .build())
                         .build())
                 .isInstanceOf(IllegalStateException.class)

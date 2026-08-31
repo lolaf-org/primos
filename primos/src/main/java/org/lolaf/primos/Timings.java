@@ -15,7 +15,7 @@
  */
 package org.lolaf.primos;
 
-import lombok.Setter;
+import lombok.Builder;
 import lombok.Value;
 
 import java.time.Duration;
@@ -31,8 +31,39 @@ import java.util.Objects;
  *
  * <p>Use {@link #lan()} for nodes on one network and {@link #wan()} when a witness sits on
  * another, where a fifty-millisecond round trip makes the LAN defaults marginal.
+ *
+ * <p><strong>A node runs three independent periodic mechanisms, and they are easy to confuse.</strong>
+ * They differ in who sends, what is at stake, and therefore in rate — three orders of magnitude
+ * between the fastest and the slowest, and the reason is entirely in the last column:
+ *
+ * <table border="1">
+ *   <caption>The three periodic mechanisms</caption>
+ *   <tr><th>interval</th><th>sent by</th><th>what it is for</th><th>cost of losing one</th></tr>
+ *   <tr>
+ *     <td>{@link #heartbeatInterval()} (50ms)</td>
+ *     <td>the leader only</td>
+ *     <td>stopping followers campaigning</td>
+ *     <td><strong>an election</strong> — a real failover</td>
+ *   </tr>
+ *   <tr>
+ *     <td>{@link #probeInterval()} (1s)</td>
+ *     <td>every node, to every peer</td>
+ *     <td>is that peer reachable?</td>
+ *     <td>a peer looks down after {@link #failureThreshold()} of them</td>
+ *   </tr>
+ *   <tr>
+ *     <td>{@link #advertisementInterval()} (30s)</td>
+ *     <td>every node, to every peer</td>
+ *     <td>do we agree on configuration?</td>
+ *     <td>a log line, later or not at all</td>
+ *   </tr>
+ * </table>
+ *
+ * <p>Put shortly: a missed heartbeat costs a leader, a missed advertisement costs a log line. That
+ * is the whole reason one is fifty milliseconds and the other is thirty seconds.
  */
 @Value
+@Builder(builderClassName = "Builder", buildMethodName = "buildUnvalidated")
 public class Timings {
 
     /**
@@ -48,29 +79,81 @@ public class Timings {
      * peer flapping rather than as a network setting.
      */
     public static final Duration MAX_PROBE_INTERVAL = Duration.ofSeconds(15);
+    /**
+     * How often a leader asserts itself, by sending an empty {@code AppendEntries} to every peer.
+     *
+     * <p>Sent by <strong>the leader alone</strong>, and its only job is to say <em>I am still here,
+     * do not campaign</em>: every one that arrives resets a follower's election timer. Miss enough
+     * of them and a follower concludes the leader is gone and stands for election, which is why
+     * this is the fastest thing in the system and why {@link #electionTimeoutMin()} must be at
+     * least {@value #MIN_ELECTION_TIMEOUT_HEARTBEATS} times it.
+     *
+     * <p>Not to be confused with {@link #probeInterval()}, which measures reachability, or
+     * {@link #advertisementInterval()}, which reports configuration. See the table on this class.
+     */
+    @lombok.Builder.Default
+    Duration heartbeatInterval = Duration.ofMillis(50);
 
-    Duration heartbeatInterval;
-    Duration electionTimeoutMin;
-    Duration electionTimeoutMax;
-    Duration probeInterval;
-    Duration advertisementInterval;
-    int failureThreshold;
+    /**
+     * The low end of the range an election timeout is drawn from, afresh on every reset.
+     */
+    @lombok.Builder.Default
+    Duration electionTimeoutMin = Duration.ofMillis(300);
 
-    private Timings(Duration heartbeatInterval,
-                    Duration electionTimeoutMin,
-                    Duration electionTimeoutMax,
-                    Duration probeInterval,
-                    Duration advertisementInterval,
-                    int failureThreshold) {
-        this.heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
-        this.electionTimeoutMin = requirePositive(electionTimeoutMin, "electionTimeoutMin");
-        this.electionTimeoutMax = requirePositive(electionTimeoutMax, "electionTimeoutMax");
-        this.probeInterval = requirePositive(probeInterval, "probeInterval");
-        this.advertisementInterval =
-                requirePositive(advertisementInterval, "advertisementInterval");
-        this.failureThreshold = failureThreshold;
-        validate();
-    }
+    /**
+     * The high end of that range. The width between the two is what stops nodes campaigning in
+     * lockstep, so it is never zero.
+     */
+    @lombok.Builder.Default
+    Duration electionTimeoutMax = Duration.ofMillis(600);
+
+    /**
+     * How often <strong>every</strong> node probes <strong>every</strong> peer, with a
+     * {@code Ping} that is answered with the sequence number it carried.
+     *
+     * <p>This is reachability — what turns into {@code onPeerUp} and {@code onPeerDown} after
+     * {@link #failureThreshold()} consecutive misses — and it is deliberately far slower than the
+     * heartbeat, because losing one costs nothing immediately. Every node probes rather than the
+     * leader reporting who it can see, so the answer still exists during an election, when nobody
+     * is leading and somebody is asking who is up.
+     *
+     * <p>Capped at {@link #MAX_PROBE_INTERVAL}: symmetric probing is what holds a NAT or firewall
+     * pinhole open to a witness on another network.
+     */
+    @lombok.Builder.Default
+    Duration probeInterval = Duration.ofSeconds(1);
+
+    /**
+     * How often every node restates its own intervals to its peers, so that a disagreement is
+     * reported.
+     *
+     * <p>Purely diagnostic, and the only one of the three that <strong>changes no decision</strong>:
+     * a node that discovers a mismatch logs it and behaves exactly as before. Acting on one would
+     * turn an ordinary rolling timing change into a partition.
+     *
+     * <p>Slower than everything else here by a wide margin, because the values it carries
+     * <em>cannot change while a process runs</em>. In principle one datagram would do; it repeats
+     * only because this is UDP and a single datagram may never arrive — and the case where it is
+     * dropped is exactly the misconfigured cluster it exists to report. The first goes out one
+     * {@link #probeInterval()} after start, so a mismatch surfaces within a second or two whatever
+     * this is set to: what this governs is how quickly a <em>changed</em> configuration is noticed,
+     * which is a rolling deploy rather than a startup.
+     *
+     * <p>Never shorter than {@link #probeInterval()}. Restating unchanging values more often than a
+     * node checks whether its peers are alive at all is pure traffic.
+     */
+    @lombok.Builder.Default
+    Duration advertisementInterval = Duration.ofSeconds(30);
+
+    /**
+     * How many consecutive probes a peer may miss before it is reported down.
+     *
+     * <p>Multiplied by {@link #probeInterval()}, this is how long a peer may be silent before
+     * anyone says so — and on the JVM that product has to clear the worst stop-the-world pause,
+     * because a collecting process is indistinguishable from a dead one.
+     */
+    @lombok.Builder.Default
+    int failureThreshold = 3;
 
     /**
      * Defaults for a cluster on one network: 50ms heartbeat, election timeout drawn from
@@ -87,21 +170,17 @@ public class Timings {
     public static Timings wan() {
         return builder()
                 .heartbeatInterval(Duration.ofMillis(200))
-                .electionTimeout(Duration.ofMillis(1_500), Duration.ofMillis(3_000))
+                .electionTimeoutMin(Duration.ofMillis(1_500))
+                .electionTimeoutMax(Duration.ofMillis(3_000))
                 .probeInterval(Duration.ofSeconds(2))
                 .build();
     }
 
-    public static Builder builder() {
-        return new Builder();
-    }
-
-    private static Duration requirePositive(Duration value, String what) {
+    private static void requirePositive(Duration value, String what) {
         Objects.requireNonNull(value, what);
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(what + " must be positive, but was " + value);
         }
-        return value;
     }
 
     /**
@@ -113,7 +192,20 @@ public class Timings {
         return electionTimeoutMax.minus(electionTimeoutMin);
     }
 
-    private void validate() {
+    /**
+     * Every rule, checked before a {@link Timings} escapes its builder.
+     *
+     * <p>Called from {@link Builder#build()} rather than from a constructor, because the
+     * constructor is Lombok's now — which is also why the generated build method is named
+     * {@code buildUnvalidated} and wrapped: it is the only seam where this can run without
+     * hand-writing the {@code @Builder.Default} machinery.
+     */
+    private Timings validate() {
+        requirePositive(heartbeatInterval, "heartbeatInterval");
+        requirePositive(electionTimeoutMin, "electionTimeoutMin");
+        requirePositive(electionTimeoutMax, "electionTimeoutMax");
+        requirePositive(probeInterval, "probeInterval");
+        requirePositive(advertisementInterval, "advertisementInterval");
         if (failureThreshold < 1) {
             throw new IllegalArgumentException(
                     "failureThreshold must be at least 1, but was " + failureThreshold);
@@ -166,90 +258,13 @@ public class Timings {
                             + "s but was " + probeInterval.toMillis()
                             + "ms: probing less often risks a NAT pinhole closing between probes");
         }
+        return this;
     }
 
-    /**
-     * Builder for {@link Timings}; every value defaults to the {@link Timings#lan()} profile.
-     *
-     * <p>Every interval can be set on its own, the two election bounds included. They are also
-     * settable together through {@link #electionTimeout}, which is the clearer way to say it when
-     * you are choosing a range rather than adjusting one end of one.
-     *
-     * <p><strong>Nothing is validated until {@link #build()}</strong>, and that is deliberate: a
-     * builder half-way through being configured is legitimately inconsistent, so rejecting a value
-     * as it is set would refuse orderings that are perfectly fine — raising both bounds, lowest
-     * first, among them. Setting {@code electionTimeoutMin} alone above the default
-     * {@code electionTimeoutMax} is the case worth knowing about, and it is rejected at
-     * {@code build()} with a message that names that cause rather than silently producing a range
-     * no timeout can be drawn from.
-     */
-    public static final class Builder {
-
-        /**
-         * How often a leader asserts itself. Must stay well below the election timeout.
-         */
-        @Setter
-        private Duration heartbeatInterval = Duration.ofMillis(50);
-        /**
-         * The low end of the range each election timeout is drawn from. Raising it above
-         * {@link #electionTimeoutMax} is rejected at {@link #build()}, not here.
-         */
-        @Setter
-        private Duration electionTimeoutMin = Duration.ofMillis(300);
-
-        /**
-         * The high end of that range, which must stay above {@code electionTimeoutMin} by at least
-         * one heartbeat interval: nodes that draw the same timeout campaign in lockstep, split the
-         * vote and repeat, so the width of this range is what makes elections terminate at all.
-         */
-        @Setter
-        private Duration electionTimeoutMax = Duration.ofMillis(600);
-
-        /**
-         * How often every node probes every peer. Independent of the heartbeat, and much slower.
-         */
-        @Setter
-        private Duration probeInterval = Duration.ofSeconds(1);
-
-        /**
-         * How often a node restates its own intervals to its peers, so that a mismatch is
-         * reported.
-         *
-         * <p>Much slower than everything else here, because the values cannot change while a node
-         * runs. It is repeated at all only because this is UDP and a single datagram may never
-         * arrive — and the case where it is lost is exactly the misconfigured cluster it exists to
-         * report. The first one goes out a probe interval after start, so a mismatch surfaces
-         * within a second or two whatever this is set to; this governs how quickly a
-         * <em>changed</em> configuration is noticed, which matters during a rolling deploy.
-         */
-        @Setter
-        private Duration advertisementInterval = Duration.ofSeconds(30);
-
-        /**
-         * How many consecutive probes a peer may miss before it is reported down.
-         */
-        @Setter
-        private int failureThreshold = 3;
-
-        private Builder() {
-        }
-
-        /**
-         * The inclusive range each election timeout is drawn from, afresh on every reset.
-         *
-         * <p>Equivalent to setting both bounds, and preferred when choosing a range rather than
-         * adjusting one end of one: it puts the two numbers side by side, where the relationship
-         * between them can be seen.
-         */
-        public Builder electionTimeout(Duration min, Duration max) {
-            this.electionTimeoutMin = min;
-            this.electionTimeoutMax = max;
-            return this;
-        }
+    public static class Builder {
 
         public Timings build() {
-            return new Timings(heartbeatInterval, electionTimeoutMin, electionTimeoutMax,
-                    probeInterval, advertisementInterval, failureThreshold);
+            return buildUnvalidated().validate();
         }
     }
 }

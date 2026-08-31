@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 # The witness server. Plain sh, no build tool, nothing fetched at run time: this process is meant
 # to be installed once and left alone for years, and every moving part is one more reason it might

@@ -239,8 +239,9 @@ public class PrimosAutoConfiguration {
         if (explicit.isEmpty()) {
             return Timings.lan();
         }
-        // The two bounds are a pair. Timings.Builder deliberately offers no setter for either alone,
-        // because setting one against the other's default is how an invalid range gets built.
+        // The two bounds are a pair: setting one against the other's default is how an invalid
+        // range gets built. Timings rejects that at build(), but naming the property is a better
+        // error than naming a Java field, so it is caught here first.
         boolean hasMin = timings.electionTimeoutMin() != null;
         boolean hasMax = timings.electionTimeoutMax() != null;
         if (hasMin != hasMax) {
@@ -254,7 +255,8 @@ public class PrimosAutoConfiguration {
             builder.heartbeatInterval(timings.heartbeatInterval());
         }
         if (hasMin) {
-            builder.electionTimeout(timings.electionTimeoutMin(), timings.electionTimeoutMax());
+            builder.electionTimeoutMin(timings.electionTimeoutMin());
+            builder.electionTimeoutMax(timings.electionTimeoutMax());
         }
         if (timings.probeInterval() != null) {
             builder.probeInterval(timings.probeInterval());

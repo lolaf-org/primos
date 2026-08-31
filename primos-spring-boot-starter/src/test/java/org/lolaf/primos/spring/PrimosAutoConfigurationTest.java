@@ -77,12 +77,12 @@ class PrimosAutoConfigurationTest {
     @Test
     void vote_logging_is_on_by_default_and_can_be_turned_off() {
         runner().withPropertyValues(singleNodeCluster())
-                .run(context -> assertThat(context.getBean(ClusterConfig.class).isVoteLogging())
+                .run(context -> assertThat(context.getBean(ClusterConfig.class).voteLogging())
                         .isTrue());
 
         runner().withPropertyValues(singleNodeCluster())
                 .withPropertyValues("primos.vote-logging=false")
-                .run(context -> assertThat(context.getBean(ClusterConfig.class).isVoteLogging())
+                .run(context -> assertThat(context.getBean(ClusterConfig.class).voteLogging())
                         .isFalse());
     }
 

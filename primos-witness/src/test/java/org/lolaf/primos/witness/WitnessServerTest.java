@@ -58,6 +58,61 @@ class WitnessServerTest {
         }
     }
 
+    // ------------------------------------------------- per-application timings
+
+    /**
+     * The whole point of moving the timing keys out of {@code witness.properties}: a witness serves
+     * clusters it does not own, and one of them being on another network must not decide the
+     * intervals for all of them.
+     *
+     * <p>Asserted through the advertisement rather than by reaching inside the server, because that
+     * is the mechanism this exists to serve — a node compares what the witness sends against its
+     * own, and before this change one of these two tenants would always have been told the wrong
+     * thing, in an error nobody could act on.
+     */
+    @Test
+    void each_application_is_served_with_its_own_intervals() {
+        applicationWith("orders", String.join("\n",
+                "secret=" + SECRET,
+                "timings.heartbeat.millis=20",
+                "timings.election.min.millis=100",
+                "timings.election.max.millis=200",
+                "timings.probe.millis=100",
+                "timings.advertisement.millis=100",
+                "timings.failure.threshold=3"));
+        applicationWith("billing", String.join("\n",
+                "secret=" + SECRET,
+                "timings.heartbeat.millis=40",
+                "timings.election.min.millis=400",
+                "timings.election.max.millis=800",
+                "timings.probe.millis=200",
+                "timings.advertisement.millis=200",
+                "timings.failure.threshold=5"));
+        start();
+
+        try (WitnessClient orders = client("orders", 1);
+             WitnessClient billing = client("billing", 2)) {
+            // The witness answers only senders it has heard from, so speak first.
+            orders.heartbeat(server, 1);
+            billing.heartbeat(server, 1);
+
+            WitnessClient.Reply toOrders = orders.awaitTimings(server);
+            WitnessClient.Reply toBilling = billing.awaitTimings(server);
+
+            assertThat(toOrders).as("the witness never advertised to 'orders'").isNotNull();
+            assertThat(toOrders.heartbeatMillis).isEqualTo(20);
+            assertThat(toOrders.electionMinMillis).isEqualTo(100);
+            assertThat(toOrders.failureThreshold).isEqualTo(3);
+
+            assertThat(toBilling).as("the witness never advertised to 'billing'").isNotNull();
+            assertThat(toBilling.heartbeatMillis)
+                    .as("one tenant's profile must not be every tenant's")
+                    .isEqualTo(40);
+            assertThat(toBilling.electionMinMillis).isEqualTo(400);
+            assertThat(toBilling.failureThreshold).isEqualTo(5);
+        }
+    }
+
     // ------------------------------------------------- per-application isolation
 
     @Test

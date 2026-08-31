@@ -16,13 +16,12 @@
 package org.lolaf.primos;
 
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
-import lombok.Setter;
-import lombok.Value;
+import lombok.Singular;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.Arrays;
 
 /**
  * The shape of one cluster: who is in it, which member this node is, and how fast it ticks.
@@ -32,7 +31,8 @@ import java.util.Arrays;
  * cluster of five with two down still needs three votes. Reading an unreachable peer as "the
  * cluster shrank" is how a split brain gets talked into existence.
  */
-@Value
+@Getter
+@Builder(builderClassName = "Builder", buildMethodName = "buildUnvalidated")
 public class ClusterConfig {
 
     /**
@@ -42,40 +42,61 @@ public class ClusterConfig {
      */
     public static final int APPLICATION_NAME_MAX_BYTES = 32;
 
-    String applicationName;
-    int nodeId;
-    PeerType nodeType;
-    List<Peer> peers;
-
-    @Getter(AccessLevel.NONE)
-    Peer witness;
-
-    @Getter(AccessLevel.NONE)
-    boolean learnedMembership;
+    private final String applicationName;
+    private final int nodeId;
 
     /**
-     * Read through {@link #isVoteLogging()}.
+     * Set through {@link Builder#asWitness()} rather than by naming the type, so that declaring a
+     * witness is one named decision.
      */
+    @lombok.Builder.Default
+    private final PeerType nodeType = PeerType.APPLICATION;
+
+    /**
+     * The other application instances. This node must not be among them.
+     *
+     * <p><strong>Leaving this empty is a one-node cluster, and a one-node cluster leads
+     * itself.</strong> Quorum is one, so the node elects itself about an election timeout after
+     * starting and stays leader for as long as it runs — nothing can depose it, because there is no
+     * majority for it to lose contact with. That is deliberate and supported: it makes development
+     * trivial and lets an application run the same code path in a non-clustered deployment instead
+     * of branching around primos entirely.
+     *
+     * <p>It is also, unavoidably, what a peer list that failed to load looks like. Made on every
+     * node of an intended cluster, that mistake produces one permanent leader per node, each
+     * reporting perfect health. {@link Quorum#warnings()} says so at startup for exactly this
+     * reason.
+     */
+    @Singular
+    private final List<Peer> peers;
+
     @Getter(AccessLevel.NONE)
-    boolean voteLogging;
+    private final Peer witness;
 
-    Timings timings;
+    @Getter(AccessLevel.NONE)
+    private final boolean learnedMembership;
 
-    private ClusterConfig(Builder builder) {
-        this.applicationName = requireApplicationName(builder.applicationName);
-        this.nodeId = Peer.requireValidId(builder.nodeId, "nodeId");
-        this.nodeType = Objects.requireNonNull(builder.nodeType, "nodeType");
-        this.peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
-        this.witness = builder.witness;
-        this.learnedMembership = builder.learnedMembership;
-        this.voteLogging = builder.voteLogging;
-        this.timings = Objects.requireNonNull(builder.timings, "timings");
-        validate();
-    }
+    /**
+     * Election, heartbeat, probe and advertisement intervals. Keep them uniform across a cluster,
+     * witness included.
+     */
+    @lombok.Builder.Default
+    private final Timings timings = Timings.lan();
 
-    public static Builder builder() {
-        return new Builder();
-    }
+    /**
+     * Whether who voted for whom is logged at INFO rather than DEBUG. On by default.
+     *
+     * <p>An election is the one moment a cluster makes a collective decision, and afterwards the
+     * only evidence left is which node ended up leading. Who asked, who agreed, who refused and why
+     * is what turns "the failover took eight seconds" into an answer, and none of it is
+     * reconstructable later — so it is on by default and costs nothing while a leader is healthy,
+     * because a cluster that is not electing says nothing at all.
+     *
+     * <p>Turn it off for a deployment that elects often enough for the lines to be noise, or one
+     * whose log ingestion is charged by the line. The decisions are still logged at DEBUG.
+     */
+    @lombok.Builder.Default
+    boolean voteLogging = true;
 
     /**
      * Whether a character may appear in an application name: printable ASCII with no space, which
@@ -95,34 +116,6 @@ public class ClusterConfig {
      */
     public static boolean isApplicationNameCharacter(char c) {
         return c >= '!' && c <= '~';
-    }
-
-    private static String requireApplicationName(String name) {
-        Objects.requireNonNull(name, "applicationName");
-        String trimmed = getTrimmed(name);
-        int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
-        if (bytes > APPLICATION_NAME_MAX_BYTES) {
-            throw new IllegalArgumentException(
-                    "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES
-                            + " bytes, but '" + trimmed + "' is " + bytes);
-        }
-        return trimmed;
-    }
-
-    private static String getTrimmed(String name) {
-        String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("applicationName must not be blank");
-        }
-        for (int i = 0; i < trimmed.length(); i++) {
-            char c = trimmed.charAt(i);
-            if (!isApplicationNameCharacter(c)) {
-                throw new IllegalArgumentException(
-                        "applicationName must be printable ASCII without spaces, but '" + trimmed
-                                + "' contains a character at index " + i + " that is not");
-            }
-        }
-        return trimmed;
     }
 
     /**
@@ -157,22 +150,6 @@ public class ClusterConfig {
     }
 
     /**
-     * Whether who voted for whom is logged at INFO rather than DEBUG. On by default.
-     *
-     * <p>An election is the one moment a cluster makes a collective decision, and afterwards the
-     * only evidence left is which node ended up leading. Who asked, who agreed, who refused and why
-     * is what turns "the failover took eight seconds" into an answer, and none of it is
-     * reconstructable later — so it is on by default and costs nothing while a leader is healthy,
-     * because a cluster that is not electing says nothing at all.
-     *
-     * <p>Turn it off for a deployment that elects often enough for the lines to be noise, or one
-     * whose log ingestion is charged by the line. The decisions are still logged at DEBUG.
-     */
-    public boolean isVoteLogging() {
-        return voteLogging;
-    }
-
-    /**
      * Every peer this node exchanges messages with, the witness included. Excludes this node.
      */
     public List<Peer> allPeers() {
@@ -193,22 +170,26 @@ public class ClusterConfig {
         return peers.size() + (nodeType.isWitness() ? 0 : 1);
     }
 
-    /**
-     * How many voters the cluster has: the application nodes plus the witness, if any.
-     */
-    public int voterCount() {
-        return applicationNodeCount() + (hasWitness() ? 1 : 0);
-    }
 
-    private void validate() {
+    /**
+     * Every rule, checked before a {@link ClusterConfig} escapes its builder.
+     *
+     * <p>Called from {@link Builder#build()} rather than from a constructor, because the
+     * constructor is Lombok's now — which is why the generated build method is named
+     * {@code buildUnvalidated} and wrapped.
+     */
+    private ClusterConfig validate() {
+        Objects.requireNonNull(nodeType, "nodeType");
+        Objects.requireNonNull(timings, "timings");
+        Peer.requireValidId(nodeId, "nodeId");
+
         Set<Integer> seen = new HashSet<>();
         seen.add(nodeId);
 
         for (Peer peer : peers) {
             if (peer.type() != PeerType.APPLICATION) {
                 throw new IllegalArgumentException(
-                        "peer " + peer.id() + " is a " + peer.type()
-                                + "; configure a witness with witness(...) rather than as a peer");
+                        "peer " + peer.id() + " is a " + peer.type() + "; configure a witness with witness(...) rather than as a peer");
             }
             requireDistinctId(seen, peer.id());
         }
@@ -231,105 +212,58 @@ public class ClusterConfig {
         if (witness != null) {
             if (witness.type() != PeerType.WITNESS) {
                 throw new IllegalArgumentException(
-                        "the configured witness has type " + witness.type()
-                                + "; build it with Peer.witness(...)");
+                        "the configured witness has type " + witness.type() + "; build it with Peer.witness(...)");
             }
             requireDistinctId(seen, witness.id());
         }
+        return this;
     }
 
     private void requireDistinctId(Set<Integer> seen, int id) {
         if (!seen.add(id)) {
-            throw new IllegalArgumentException(
-                    "duplicate node id " + id + ": ids must be unique within an application,"
-                            + " and this node's own id may not be repeated among its peers");
+            throw new IllegalArgumentException("duplicate node id " + id + ": ids must be unique within an application,"
+                    + " and this node's own id may not be repeated among its peers");
         }
     }
 
-    /**
-     * Builder for {@link ClusterConfig}. Validation happens in {@link #build()}.
-     */
-    public static final class Builder {
+    public static class Builder {
 
-        private final List<Peer> peers = new ArrayList<>();
-        /**
-         * Which clustered application this is. Every node of one cluster must agree on it.
-         */
-        @Setter
-        private String applicationName;
-        /**
-         * This node's id, unique within the application.
-         */
-        @Setter
-        private int nodeId;
-        /**
-         * Set through {@link #asWitness()} rather than directly, so that declaring a witness is one
-         * named decision rather than a type a caller has to know to pass.
-         */
-        private PeerType nodeType = PeerType.APPLICATION;
-        /**
-         * The witness, at most one. Two would give a two-node pair four voters needing three,
-         * which is strictly worse than one.
-         */
-        @Setter
-        private Peer witness;
+        private static String requireAndTrimApplicationName(String name) {
+            Objects.requireNonNull(name, "applicationName");
+            String trimmed = getTrimmed(name);
+            int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
+            if (bytes > APPLICATION_NAME_MAX_BYTES) {
+                throw new IllegalArgumentException(
+                        "applicationName must be at most " + APPLICATION_NAME_MAX_BYTES + " bytes, but '" + trimmed + "' is " + bytes);
+            }
+            return trimmed;
+        }
 
-        /**
-         * Set through {@link #learnedMembership()}, which documents what it costs.
-         */
-        private boolean learnedMembership;
-
-        /**
-         * Whether to log who voted for whom at INFO rather than DEBUG. On by default; see
-         * {@link ClusterConfig#isVoteLogging()}.
-         */
-        @Setter
-        private boolean voteLogging = true;
-
-        /**
-         * Election, heartbeat and probe intervals.
-         */
-        @Setter
-        private Timings timings = Timings.lan();
-
-        private Builder() {
+        private static String getTrimmed(String name) {
+            String trimmed = name.trim();
+            if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("applicationName must not be blank");
+            }
+            for (int i = 0; i < trimmed.length(); i++) {
+                char c = trimmed.charAt(i);
+                if (!isApplicationNameCharacter(c)) {
+                    throw new IllegalArgumentException(
+                            "applicationName must be printable ASCII without spaces, but '" + trimmed
+                                    + "' contains a character at index " + i + " that is not");
+                }
+            }
+            return trimmed;
         }
 
         /**
          * Declares this node to be the witness rather than an application instance: it votes, but
          * never campaigns and never leads. Its peers are the application nodes.
+         *
+         * <p>A named decision rather than {@code nodeType(WITNESS)}, which the generated setter
+         * also allows — this is the one that says what it means.
          */
         public Builder asWitness() {
-            this.nodeType = PeerType.WITNESS;
-            return this;
-        }
-
-        /**
-         * The other application instances. This node must not be among them.
-         *
-         * <p><strong>Leaving this empty is a one-node cluster, and a one-node cluster leads
-         * itself.</strong> Quorum is one, so the node elects itself about an election timeout after
-         * starting and stays leader for as long as it runs — nothing can depose it, because there
-         * is no majority for it to lose contact with. That is deliberate and supported: it makes
-         * development trivial and lets an application run the same code path in a non-clustered
-         * deployment instead of branching around primos entirely.
-         *
-         * <p>It is also, unavoidably, what a peer list that failed to load looks like. Made on
-         * every node of an intended cluster, that mistake produces one permanent leader per node,
-         * each reporting perfect health. {@link Quorum#warnings()} says so at startup for exactly
-         * this reason.
-         */
-        public Builder peers(Peer... peers) {
-            return peers(Arrays.asList(peers));
-        }
-
-        /**
-         * The other application instances. This node must not be among them.
-         */
-        public Builder peers(List<Peer> peers) {
-            this.peers.clear();
-            this.peers.addAll(Objects.requireNonNull(peers, "peers"));
-            return this;
+            return nodeType(PeerType.WITNESS);
         }
 
         /**
@@ -351,12 +285,15 @@ public class ClusterConfig {
          * <p>Only a witness may do this, and a witness that does may start with no peers at all.
          */
         public Builder learnedMembership() {
+            // Set directly rather than through a generated setter: Lombok skips generating one when
+            // a method of that name already exists, and this no-argument form is the name.
             this.learnedMembership = true;
             return this;
         }
 
         public ClusterConfig build() {
-            return new ClusterConfig(this);
+            this.applicationName = requireAndTrimApplicationName(this.applicationName);
+            return buildUnvalidated().validate();
         }
     }
 }

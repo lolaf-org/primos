@@ -46,7 +46,8 @@ class UdpClusterTest {
 
     private static final Timings FAST = Timings.builder()
             .heartbeatInterval(Duration.ofMillis(25))
-            .electionTimeout(Duration.ofMillis(150), Duration.ofMillis(300))
+            .electionTimeoutMin(Duration.ofMillis(150))
+            .electionTimeoutMax(Duration.ofMillis(300))
             .probeInterval(Duration.ofMillis(100))
             .build();
 

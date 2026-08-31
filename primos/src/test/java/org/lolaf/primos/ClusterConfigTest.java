@@ -15,10 +15,12 @@
  */
 package org.lolaf.primos;
 
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import org.junit.jupiter.api.Test;
 
 class ClusterConfigTest {
 
@@ -26,7 +28,7 @@ class ClusterConfigTest {
         return ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)
-                .peers(Peer.application(2, "host-b", 7000));
+                .peer(Peer.application(2, "host-b", 7000));
     }
 
     @Test
@@ -34,9 +36,9 @@ class ClusterConfigTest {
         assertThat(ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)
-                .peers(Peer.application(2, "host-b", 7000))
+                .peer(Peer.application(2, "host-b", 7000))
                 .build()
-                .isVoteLogging()).isTrue();
+                .voteLogging()).isTrue();
     }
 
     @Test
@@ -44,10 +46,10 @@ class ClusterConfigTest {
         assertThat(ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)
-                .peers(Peer.application(2, "host-b", 7000))
+                .peer(Peer.application(2, "host-b", 7000))
                 .voteLogging(false)
                 .build()
-                .isVoteLogging()).isFalse();
+                .voteLogging()).isFalse();
     }
 
     @Test
@@ -67,15 +69,18 @@ class ClusterConfigTest {
                 .build();
 
         assertThat(config.applicationNodeCount()).isEqualTo(1);
-        assertThat(config.voterCount()).isEqualTo(1);
+        assertThat(Quorum.of(config).voters()).isEqualTo(1);
     }
 
     @Test
     void the_witness_counts_as_a_voter_but_not_as_an_application_node() {
+        // Through Quorum, which is what production reads. ClusterConfig used to carry a
+        // voterCount() of its own that nothing but this assertion called, computing the same sum a
+        // second time — two places to keep in step for one number.
         ClusterConfig config = valid().witness(Peer.witness(9, "referee", 7000)).build();
 
         assertThat(config.applicationNodeCount()).isEqualTo(2);
-        assertThat(config.voterCount()).isEqualTo(3);
+        assertThat(Quorum.of(config).voters()).isEqualTo(3);
         assertThat(config.allPeers()).hasSize(2);
         assertThat(config.witness()).isPresent();
     }
@@ -102,13 +107,13 @@ class ClusterConfigTest {
     @Test
     void duplicate_ids_are_rejected_including_this_node_appearing_among_its_own_peers() {
         assertThatThrownBy(() -> valid()
-                .peers(Peer.application(2, "host-b", 7000), Peer.application(2, "host-c", 7000))
+                .peers(List.of(Peer.application(2, "host-b", 7000), Peer.application(2, "host-c", 7000)))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate node id 2");
 
         assertThatThrownBy(() -> valid()
-                .peers(Peer.application(1, "host-a", 7000))
+                .peer(Peer.application(1, "host-a", 7000))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate node id 1");
@@ -124,7 +129,7 @@ class ClusterConfigTest {
     @Test
     void a_witness_may_not_be_configured_as_an_ordinary_peer() {
         assertThatThrownBy(() -> valid()
-                .peers(Peer.witness(9, "referee", 7000))
+                .peer(Peer.witness(9, "referee", 7000))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("configure a witness with witness(...)");
@@ -150,13 +155,13 @@ class ClusterConfigTest {
                 .applicationName("orders")
                 .nodeId(99)
                 .asWitness()
-                .peers(Peer.application(1, "host-a", 7000), Peer.application(2, "host-b", 7000))
+                .peers(List.of(Peer.application(1, "host-a", 7000), Peer.application(2, "host-b", 7000)))
                 .build();
 
         assertThat(config.isWitness()).isTrue();
         assertThat(config.hasWitness()).isTrue();
         assertThat(config.applicationNodeCount()).isEqualTo(2);
-        assertThat(config.voterCount()).isEqualTo(3);
+        assertThat(Quorum.of(config).voters()).isEqualTo(3);
     }
 
     @Test
@@ -165,7 +170,7 @@ class ClusterConfigTest {
                 .applicationName("orders")
                 .nodeId(99)
                 .asWitness()
-                .peers(Peer.application(1, "host-a", 7000))
+                .peer(Peer.application(1, "host-a", 7000))
                 .witness(Peer.witness(98, "other", 7000))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
@@ -225,7 +230,7 @@ class ClusterConfigTest {
         assertThatThrownBy(() -> ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)
-                .peers(Peer.application(2, "host", 7000))
+                .peer(Peer.application(2, "host", 7000))
                 .learnedMembership()
                 .build())
                 .as("with a configured peer set an unknown sender is dropped; without one the tag"
