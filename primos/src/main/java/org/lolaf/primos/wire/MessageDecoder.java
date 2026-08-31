@@ -16,6 +16,7 @@
 package org.lolaf.primos.wire;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.slf4j.Logger;
@@ -50,9 +51,8 @@ import java.util.function.IntPredicate;
  *
  * <p>Not thread-safe: one decoder per node thread.
  */
+@Slf4j
 public final class MessageDecoder {
-
-    private static final Logger log = LoggerFactory.getLogger(MessageDecoder.class);
 
     private final byte[] expectedApplication;
     private final MessageAuthenticator authenticator;

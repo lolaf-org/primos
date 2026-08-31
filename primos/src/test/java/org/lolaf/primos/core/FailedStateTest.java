@@ -15,16 +15,6 @@
  */
 package org.lolaf.primos.core;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import java.nio.ByteBuffer;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
@@ -37,6 +27,14 @@ import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageEncoder;
 import org.lolaf.primos.wire.WireFormat;
+
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+import static org.assertj.core.api.Assertions.*;
 
 /**
  * A node that dies must look dead.
@@ -76,7 +74,7 @@ class FailedStateTest {
         assertThat(node.role())
                 .as("the application must not go on believing it is in charge")
                 .isEqualTo(Role.FAILED);
-        assertThat(node.roleAndTerm().isLeader()).isFalse();
+        assertThat(node.role().isLeader()).isFalse();
     }
 
     @Test
@@ -147,7 +145,9 @@ class FailedStateTest {
         return node;
     }
 
-    /** Drives a node of three all the way to leadership over the simulated wire. */
+    /**
+     * Drives a node of three all the way to leadership over the simulated wire.
+     */
     private ElectionNode electedLeader() {
         ElectionNode node = startedNode();
 
@@ -202,7 +202,9 @@ class FailedStateTest {
         return node;
     }
 
-    /** A transport whose poll always blows up. */
+    /**
+     * A transport whose poll always blows up.
+     */
     private static final class ThrowingTransport implements Transport {
 
         private final Throwable failure;

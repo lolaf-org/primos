@@ -92,7 +92,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         publish();
         started = true;
         running = true;
-
         thread = new Thread(this::loop,
                 "primos-" + config.applicationName() + "-" + config.nodeId());
         thread.setDaemon(true);
@@ -158,27 +157,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
     /**
      * A snapshot of the counters, built on the calling thread when it asks for one.
-     *
-     * <p>On demand rather than after every turn of the loop, because a snapshot is a good handful
-     * of objects — a map of per-peer observations, the drop counters, two durations per peer — and
-     * a leader turns its loop several times per heartbeat. Building all of that on the chance that
-     * somebody might ask was most of what a node thread allocated; nobody reads stats at heartbeat
-     * rate.
-     *
-     * <p><strong>Read without synchronisation, so the numbers are best-effort.</strong> Everything
-     * here is written by the node thread, and this method deliberately does not co-ordinate with
-     * it: a caller can therefore see values from slightly different instants — a role from just
-     * before an election beside a term from just after — and, on a 32-bit JVM, a torn long. That
-     * is a trade this method may make and nothing else in this class may: these are monitoring
-     * counters, and the alternatives were allocating a snapshot nobody asked for on every turn of
-     * the loop, or a handshake with the node thread costing more than the numbers are worth.
-     * Nothing the algorithm depends on is read this way — the fencing token comes from
-     * {@link #roleAndTerm()}, which is published as one immutable object.
-     *
-     * <p>What keeps this benign rather than merely cheap is that a node's peer set is fixed when it
-     * is built, so the map behind the per-peer stats is never structurally modified while it is
-     * read. Only the standalone witness server learns peers as it runs, and it drives its own
-     * {@link ElectionNode} from its own thread.
      */
     @Override
     public PrimosStats stats() {
@@ -189,8 +167,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     public ClusterConfig config() {
         return config;
     }
-
-    // ------------------------------------------------------------- the sink
 
     @Override
     public void onRoleChanged(Role previous, Role current, long term) {
@@ -230,18 +206,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         publish();
     }
 
-    /**
-     * Hands leadership on before this thread dies, so a clean stop does not cost an election
-     * timeout of leaderlessness.
-     *
-     * <p>Here rather than in {@link #stop()} because the transport belongs to this thread, and
-     * {@code stop()} runs on the caller's. The join in {@code stop()} covers it and the socket is
-     * still open, so the datagram is on its way before anything is closed.
-     *
-     * <p>Never allowed to throw. This runs while the node is already going away, so a failure here
-     * must not become an exception on a dying thread that nobody will ever see — the cluster falls
-     * back to its election timeout, which is what it would have done without any of this.
-     */
     private void announceShutdown() {
         if (election.isFailed()) {
             // A failed node has no leadership to give: it stood down when it failed, and it cannot
@@ -259,15 +223,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         }
     }
 
-    /**
-     * Makes a stopped node stop claiming leadership.
-     *
-     * <p>Without this, {@link #role()} would go on returning whatever the node was doing when it
-     * was stopped, and an application that checked it after shutdown would believe it was still in
-     * charge — the same lie as a partitioned leader that never stands down, arrived at by being
-     * switched off. A stopped node reports {@code FOLLOWER}: it leads nothing, and being terminal,
-     * it never will again.
-     */
     private void standDown() {
         RoleAndTerm last = roleAndTerm;
         leader = null;
@@ -278,21 +233,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         dispatcher.onLeaderChanged(Optional.empty(), last.term());
     }
 
-    /**
-     * Republishes what an application thread may read, after every turn of the loop.
-     *
-     * <p>Every turn, so it has to be cheap: a turn that changed nothing allocates nothing. The
-     * role and term are only re-boxed into a {@link RoleAndTerm} when one of them has actually
-     * moved, and stats are not published at all — {@link #stats()} builds those when asked.
-     */
     private void publish() {
         RoleAndTerm published = roleAndTerm;
-        Role role = election.role();
-        long term = election.currentTerm();
-        if (published.role() != role || published.term() != term) {
-            roleAndTerm = new RoleAndTerm(role, term);
+        if (published.role() != election.role() || published.term() != election.currentTerm()) {
+            roleAndTerm = new RoleAndTerm(election.role(), election.currentTerm());
         }
-        leader = election.leaderOrNull();
+        leader = election.leader();
     }
 
     @Override

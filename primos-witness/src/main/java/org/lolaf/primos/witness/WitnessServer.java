@@ -18,6 +18,7 @@ package org.lolaf.primos.witness;
 import lombok.AllArgsConstructor;
 import lombok.Setter;
 import lombok.Value;
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosStats;
@@ -27,8 +28,7 @@ import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageDecoder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -89,16 +89,14 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>One thread, like a node. {@link #stop()} is the only method another thread may call.
  */
+@Slf4j
 public final class WitnessServer implements AutoCloseable {
-
-    private static final Logger log = LoggerFactory.getLogger(WitnessServer.class);
 
     /**
      * One byte more than a datagram may legitimately be, so an oversized one is truncated into
      * failing the size check rather than being quietly accepted as a shorter message.
      */
-    private static final int RECEIVE_CAPACITY =
-            org.lolaf.primos.wire.WireFormat.MAX_DATAGRAM_BYTES + 1;
+    private static final int RECEIVE_CAPACITY = WireFormat.MAX_DATAGRAM_BYTES + 1;
 
     /**
      * How many distinct unknown names are remembered for once-per-name logging. Bounded because

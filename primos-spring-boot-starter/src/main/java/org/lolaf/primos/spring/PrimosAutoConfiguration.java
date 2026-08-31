@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.spring;
 
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosListener;
@@ -59,9 +60,8 @@ import java.util.concurrent.Executor;
 @ConditionalOnClass(PrimosNode.class)
 @ConditionalOnProperty(prefix = "primos", name = "application-name")
 @EnableConfigurationProperties(PrimosProperties.class)
+@Slf4j
 public class PrimosAutoConfiguration {
-
-    private static final Logger log = LoggerFactory.getLogger(PrimosAutoConfiguration.class);
 
     /**
      * The intervals governing elections and failure detection, from a named profile or from values

@@ -15,8 +15,7 @@
  */
 package org.lolaf.primos.store;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -56,6 +55,7 @@ import java.util.zip.CRC32;
  * value must be durable before the node acts on it. Keep the directory on local storage and the
  * election timeout comfortably above worst-case sync latency.
  */
+@Slf4j
 public final class FileStateStore implements StateStore {
 
     static final byte[] MAGIC = {'P', 'R', 'M', 'S'};
@@ -64,7 +64,7 @@ public final class FileStateStore implements StateStore {
      * magic(4) version(1) reserved(3) term(8) votedFor(4) crc(4)
      */
     static final int RECORD_BYTES = 24;
-    private static final Logger log = LoggerFactory.getLogger(FileStateStore.class);
+
     private static final int OFFSET_TERM = 8;
     private static final int OFFSET_VOTED_FOR = 16;
     private static final int OFFSET_CRC = 20;

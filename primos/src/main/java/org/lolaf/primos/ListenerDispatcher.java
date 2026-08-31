@@ -15,9 +15,8 @@
  */
 package org.lolaf.primos;
 
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.time.MonotonicClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
@@ -46,9 +45,8 @@ import java.util.function.Consumer;
  *       nor stop the other listeners hearing about the event.</li>
  * </ul>
  */
+@Slf4j
 final class ListenerDispatcher implements PrimosListener {
-
-    private static final Logger log = LoggerFactory.getLogger(ListenerDispatcher.class);
 
     private final List<PrimosListener> listeners = new CopyOnWriteArrayList<>();
     private final MonotonicClock clock;

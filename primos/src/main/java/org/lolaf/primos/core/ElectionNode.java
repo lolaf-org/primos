@@ -91,6 +91,7 @@ public final class ElectionNode implements MessageHandler {
     @Getter
     private int votedFor = PersistentState.NO_VOTE;
     private int leaderId = -1;
+    @Getter
     private Leader leader;
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
@@ -352,25 +353,8 @@ public final class ElectionNode implements MessageHandler {
     /**
      * Who is currently believed to be leading, if anyone.
      */
-    public Optional<Leader> leader() {
+    public Optional<Leader> leaderOptional() {
         return Optional.ofNullable(leader);
-    }
-
-    /**
-     * The believed leader, or null when there is none, without the {@link Optional} that
-     * {@link #leader()} allocates. The production loop republishes this after every turn, and a
-     * turn that changed nothing should allocate nothing — this is a field read, because the
-     * {@link Leader} is built once when leadership moves.
-     */
-    public Leader leaderOrNull() {
-        return leader;
-    }
-
-    /**
-     * Role and term read together, so the fencing token cannot be separated from the role.
-     */
-    public RoleAndTerm roleAndTerm() {
-        return new RoleAndTerm(role, currentTerm);
     }
 
     private void setRole(Role next) {
@@ -389,7 +373,7 @@ public final class ElectionNode implements MessageHandler {
         }
         leaderId = next;
         leader = identify(next);
-        listener.onLeaderChanged(leader(), currentTerm);
+        listener.onLeaderChanged(leaderOptional(), currentTerm);
     }
 
     private Leader identify(int id) {

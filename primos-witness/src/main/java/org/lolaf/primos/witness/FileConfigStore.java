@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.MonotonicClock;
@@ -55,10 +56,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * holds cluster secrets and is meant to run untouched for years, which makes every dependency a
  * future security notification and an unplanned upgrade of something whose job is never to move.
  */
+@Slf4j
 public final class FileConfigStore implements ConfigStore {
-
-
-    private static final Logger log = LoggerFactory.getLogger(FileConfigStore.class);
 
     private static final String APPLICATIONS_DIRECTORY = "applications";
     private static final String SETTINGS_FILE = "witness.properties";

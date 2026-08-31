@@ -15,14 +15,6 @@
  */
 package org.lolaf.primos.core;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.nio.ByteBuffer;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Leader;
@@ -38,6 +30,14 @@ import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageEncoder;
 import org.lolaf.primos.wire.WireFormat;
 
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
 /**
  * One node in isolation, for the two properties that are easiest to prove by reaching straight
  * into it rather than by waiting for a cluster to misbehave.
@@ -47,6 +47,14 @@ class ElectionNodeTest {
     private final VirtualClock clock = new VirtualClock();
     private final SimulatedNetwork network = new SimulatedNetwork(1L, clock);
     private final StateStore store = new MemoryStateStore();
+
+    private static List<Peer> peers(int... ids) {
+        List<Peer> peers = new ArrayList<>();
+        for (int id : ids) {
+            peers.add(Peer.application(id, "sim", 7000 + id));
+        }
+        return peers;
+    }
 
     @Test
     void the_same_grant_arriving_five_times_is_still_one_vote() {
@@ -146,12 +154,12 @@ class ElectionNodeTest {
 
         assertThat(node.currentTerm()).isEqualTo(6);
         assertThat(node.votedFor()).isEqualTo(PersistentState.NO_VOTE);
-        assertThat(node.leader()).map(Leader::id).hasValue(3);
-        assertThat(node.leader().flatMap(Leader::peer))
+        assertThat(node.leaderOptional()).map(Leader::id).hasValue(3);
+        assertThat(node.leaderOptional().flatMap(Leader::peer))
                 .as("a follower is told where the leader is, so it need not look the id up to"
                         + " forward work there")
                 .contains(Peer.application(3, "sim", 7003));
-        assertThat(node.leader().get().isSelf()).isFalse();
+        assertThat(node.leaderOptional().get().isSelf()).isFalse();
     }
 
     @Test
@@ -163,7 +171,7 @@ class ElectionNodeTest {
 
         assertThat(node.role()).isEqualTo(Role.LEADER);
 
-        Leader leader = node.leader().orElseThrow(AssertionError::new);
+        Leader leader = node.leaderOptional().orElseThrow(AssertionError::new);
         assertThat(leader.id()).isEqualTo(1);
         assertThat(leader.isSelf())
                 .as("this node holds it, which is the opposite of nobody holding it and must not"
@@ -191,7 +199,7 @@ class ElectionNodeTest {
         // configured senders, so this is the one place the peer can be missing.
         witness.onAppendEntries(7, 1);
 
-        Leader leader = witness.leader().orElseThrow(AssertionError::new);
+        Leader leader = witness.leaderOptional().orElseThrow(AssertionError::new);
         assertThat(leader.id()).isEqualTo(7);
         assertThat(leader.isSelf()).isFalse();
         assertThat(leader.peer()).isEmpty();
@@ -206,7 +214,7 @@ class ElectionNodeTest {
         node.onAppendEntries(3, 4);
 
         assertThat(node.currentTerm()).isEqualTo(7);
-        assertThat(node.leader()).isEmpty();
+        assertThat(node.leaderOptional()).isEmpty();
     }
 
     @Test
@@ -217,7 +225,7 @@ class ElectionNodeTest {
         node.onAppendEntries(4, term);
 
         assertThat(node.role()).isEqualTo(Role.FOLLOWER);
-        assertThat(node.leader()).map(Leader::id).hasValue(4);
+        assertThat(node.leaderOptional()).map(Leader::id).hasValue(4);
     }
 
     @Test
@@ -248,6 +256,8 @@ class ElectionNodeTest {
                 .isLessThan(Long.MAX_VALUE);
     }
 
+    // ------------------------------------------------------------------ pre-vote
+
     @Test
     void a_witness_still_grants_votes() {
         ClusterConfig config = ClusterConfig.builder()
@@ -265,8 +275,6 @@ class ElectionNodeTest {
         assertThat(witness.votedFor()).isEqualTo(1);
         assertThat(witness.currentTerm()).isEqualTo(3);
     }
-
-    // ------------------------------------------------------------------ pre-vote
 
     @Test
     void a_pre_vote_is_refused_while_a_leader_is_being_heard_from() {
@@ -377,6 +385,8 @@ class ElectionNodeTest {
         assertThat(node.currentTerm()).isEqualTo(1);
     }
 
+    // ------------------------------------------------------------------ timing advertisements
+
     /**
      * A node of five that has timed out, won its pre-vote and is now genuinely campaigning, so
      * quorum is three.
@@ -402,8 +412,6 @@ class ElectionNodeTest {
         assertThat(node.votedFor()).isEqualTo(1);
         return node;
     }
-
-    // ------------------------------------------------------------------ timing advertisements
 
     /**
      * Logged and counted on the transition, not on every advert. A peer restates its intervals
@@ -510,13 +518,5 @@ class ElectionNodeTest {
                 new Random(1L), MessageAuthenticator.disabled());
         node.start();
         return node;
-    }
-
-    private static List<Peer> peers(int... ids) {
-        List<Peer> peers = new ArrayList<>();
-        for (int id : ids) {
-            peers.add(Peer.application(id, "sim", 7000 + id));
-        }
-        return peers;
     }
 }

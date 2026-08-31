@@ -15,10 +15,10 @@
  */
 package org.lolaf.primos;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.awaitility.Awaitility.await;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.lolaf.primos.store.MemoryStateStore;
+import org.lolaf.primos.transport.LoopbackNetwork;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,12 +31,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.store.MemoryStateStore;
-import org.lolaf.primos.transport.LoopbackNetwork;
+import static org.assertj.core.api.Assertions.*;
+import static org.awaitility.Awaitility.await;
 
-/** The public API, running for real: its own thread, its own socket, its own clock. */
+/**
+ * The public API, running for real: its own thread, its own socket, its own clock.
+ */
 class PrimosNodeTest {
 
     private static final Timings FAST = Timings.builder()
@@ -49,6 +49,31 @@ class PrimosNodeTest {
     private final List<PrimosNode> started = new ArrayList<>();
     private ExecutorService executor;
 
+    private static ClusterConfig cluster(int id, int... peerIds) {
+        List<Peer> peers = new ArrayList<>();
+        for (int peerId : peerIds) {
+            peers.add(Peer.application(peerId, "loopback", 7000 + peerId));
+        }
+        return ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(id)
+                .peers(peers)
+                .timings(FAST)
+                .build();
+    }
+
+    // ------------------------------------------------------------- lifecycle
+
+    private static int leaderCount(PrimosNode... nodes) {
+        int leaders = 0;
+        for (PrimosNode node : nodes) {
+            if (node.role().isLeader()) {
+                leaders++;
+            }
+        }
+        return leaders;
+    }
+
     @AfterEach
     void stopEverything() {
         started.forEach(PrimosNode::stop);
@@ -57,13 +82,11 @@ class PrimosNodeTest {
         }
     }
 
-    // ------------------------------------------------------------- lifecycle
-
     @Test
     void a_single_node_leads_itself() {
         PrimosNode node = start(builder(1));
 
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
         assertThat(node.roleAndTerm().isLeader()).isTrue();
 
         Leader leader = node.leader().orElseThrow(AssertionError::new);
@@ -132,7 +155,7 @@ class PrimosNodeTest {
     @Test
     void a_stopped_node_stops_claiming_leadership() {
         PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
 
         node.stop();
 
@@ -147,13 +170,15 @@ class PrimosNodeTest {
     void stopping_tells_the_listeners_that_leadership_is_over() {
         Recording events = new Recording();
         PrimosNode node = start(builder(1).listener(events));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
 
         node.stop();
 
         assertThat(events.roles).endsWith("LEADER->FOLLOWER");
         assertThat(events.leaders).endsWith("none");
     }
+
+    // ------------------------------------------------------------- a cluster
 
     @Test
     void it_can_be_closed_in_try_with_resources() {
@@ -177,8 +202,6 @@ class PrimosNodeTest {
                 .isTrue();
     }
 
-    // ------------------------------------------------------------- a cluster
-
     @Test
     void three_real_nodes_on_three_real_threads_elect_one_leader() {
         PrimosNode one = start(builder(1, 2, 3));
@@ -190,6 +213,8 @@ class PrimosNodeTest {
 
         assertThat(leaderCount(one, two, three)).isEqualTo(1);
     }
+
+    // ------------------------------------------------------------- listeners
 
     @Test
     void the_followers_learn_who_leads() {
@@ -222,7 +247,7 @@ class PrimosNodeTest {
     @Test
     void role_is_answerable_from_any_thread() throws Exception {
         PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
 
         executor = Executors.newSingleThreadExecutor();
         Role fromElsewhere = executor.submit(node::role).get(5, TimeUnit.SECONDS);
@@ -230,14 +255,12 @@ class PrimosNodeTest {
         assertThat(fromElsewhere).isEqualTo(Role.LEADER);
     }
 
-    // ------------------------------------------------------------- listeners
-
     @Test
     void a_listener_registered_before_start_sees_the_first_transition() {
         Recording events = new Recording();
         PrimosNode node = start(builder(1).listener(events));
 
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
         await().atMost(5, TimeUnit.SECONDS).until(() -> events.roles.size() >= 2);
 
         assertThat(events.roles)
@@ -249,7 +272,7 @@ class PrimosNodeTest {
     @Test
     void a_listener_added_after_start_is_told_the_state_it_missed() {
         PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
 
         Recording late = new Recording();
         node.addListener(late);
@@ -272,7 +295,7 @@ class PrimosNodeTest {
                 })
                 .listener(good));
 
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
         await().atMost(5, TimeUnit.SECONDS).until(() -> good.roles.size() >= 2);
 
         assertThat(good.roles).containsExactly("FOLLOWER->CANDIDATE", "CANDIDATE->LEADER");
@@ -289,6 +312,8 @@ class PrimosNodeTest {
         assertThat(events.threads).allSatisfy(name ->
                 assertThat(name).startsWith("primos-orders-1"));
     }
+
+    // ---------------------------------------------------------------- stats
 
     @Test
     void an_executor_moves_dispatch_off_the_node_thread() {
@@ -316,16 +341,14 @@ class PrimosNodeTest {
             }
         }));
 
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
         assertThat(node.role()).isEqualTo(Role.LEADER);
     }
-
-    // ---------------------------------------------------------------- stats
 
     @Test
     void stats_report_what_the_node_has_been_doing() {
         PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
         await().atMost(5, TimeUnit.SECONDS).until(() -> node.stats().electionsWon() > 0);
 
         assertThat(node.stats().role()).isEqualTo(Role.LEADER);
@@ -339,7 +362,7 @@ class PrimosNodeTest {
     @Test
     void stats_are_taken_when_they_are_asked_for() throws Exception {
         PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.LEADER);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
 
         PrimosStats first = node.stats();
         Thread.sleep(100);
@@ -349,6 +372,8 @@ class PrimosNodeTest {
         // asking still gets a fresh one rather than whatever the loop last happened to publish.
         assertThat(second.timeInRole()).isGreaterThan(first.timeInRole());
     }
+
+    // -------------------------------------------------------------- builder
 
     @Test
     void stats_can_be_read_from_inside_a_callback() {
@@ -380,8 +405,6 @@ class PrimosNodeTest {
 
         assertThat(one.stats().peers()).containsOnlyKeys(2, 3);
     }
-
-    // -------------------------------------------------------------- builder
 
     @Test
     void a_node_without_a_store_is_refused_with_the_reason() {
@@ -442,6 +465,8 @@ class PrimosNodeTest {
                 .hasMessageContaining("cluster configuration is required");
     }
 
+    // -------------------------------------------------------------- helpers
+
     @Test
     void the_configuration_rules_are_applied_where_the_configuration_is_built() {
         // No longer this builder's job, and worth a test saying so: the cluster's shape is
@@ -462,8 +487,6 @@ class PrimosNodeTest {
         started.add(node);
     }
 
-    // -------------------------------------------------------------- helpers
-
     private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
         PrimosNode node = builder.build();
         node.start();
@@ -478,30 +501,9 @@ class PrimosNodeTest {
                 .transport(network.transportFor(id));
     }
 
-    private static ClusterConfig cluster(int id, int... peerIds) {
-        List<Peer> peers = new ArrayList<>();
-        for (int peerId : peerIds) {
-            peers.add(Peer.application(peerId, "loopback", 7000 + peerId));
-        }
-        return ClusterConfig.builder()
-                .applicationName("orders")
-                .nodeId(id)
-                .peers(peers)
-                .timings(FAST)
-                .build();
-    }
-
-    private static int leaderCount(PrimosNode... nodes) {
-        int leaders = 0;
-        for (PrimosNode node : nodes) {
-            if (node.role() == Role.LEADER) {
-                leaders++;
-            }
-        }
-        return leaders;
-    }
-
-    /** Records what a listener was told, and on which thread. */
+    /**
+     * Records what a listener was told, and on which thread.
+     */
     private static final class Recording implements PrimosListener {
 
         private final List<String> roles = new CopyOnWriteArrayList<>();

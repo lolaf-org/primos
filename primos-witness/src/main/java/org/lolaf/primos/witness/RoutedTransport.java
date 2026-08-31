@@ -17,13 +17,11 @@ package org.lolaf.primos.witness;
 
 import lombok.AccessLevel;
 import lombok.Getter;
-
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.WireFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -31,8 +29,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.Selector;
 import java.util.*;
-import java.util.Collections;
-import java.util.Set;
 
 /**
  * One application's view of the witness server's single socket.
@@ -59,6 +55,7 @@ import java.util.Set;
  *
  * <p>Owned by the server thread, like every other transport here.
  */
+@Slf4j
 final class RoutedTransport implements Transport {
 
     /**
@@ -67,7 +64,7 @@ final class RoutedTransport implements Transport {
      * gone wrong rather than that the buffer is too small.
      */
     static final int INBOX_CAPACITY = 256;
-    private static final Logger log = LoggerFactory.getLogger(RoutedTransport.class);
+
     private final String application;
     private final DatagramChannel channel;
     private final Selector selector;
