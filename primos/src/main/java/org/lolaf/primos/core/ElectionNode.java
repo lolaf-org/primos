@@ -24,8 +24,6 @@ import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -76,39 +74,14 @@ public final class ElectionNode implements MessageHandler {
     private final MessageAuthenticator authenticator;
     @Getter
     private final DropCounters drops = new DropCounters();
-
-    /**
-     * Every peer, with everything this node tracks about it.
-     *
-     * <p><strong>One array, not a list of peers beside a map of state.</strong> Those were two
-     * structures holding the same membership, each needing the other kept in step, and every
-     * {@link TrackedPeer} carries its own {@link Peer} — so the list was a second index over data the
-     * map already had.
-     *
-     * <p>An array rather than either, and traversed with the enhanced {@code for} that compiles to
-     * an indexed loop: a list allocates an iterator per traversal and a map allocates one per
-     * {@code values()}, on paths walked every heartbeat, every probe round, every leader turn.
-     * Lookup by id is a scan, which for a handful of voters beats hashing — and, unlike a
-     * {@code Map<Integer, …>}, boxes nothing on a path that runs per datagram.
-     *
-     * <p>Not final, because a witness learns voters as they arrive and replaces this with a longer
-     * copy. That is also why an array is safer here than the map it replaced: a reader on another
-     * thread, which {@code stats()} is, sees one whole array or the other rather than a map being
-     * structurally modified underneath it.
-     */
-    private TrackedPeer[] peers;
-
-    /**
-     * The receive callback, held rather than written as {@code this::onDatagram} at the call site.
-     * A bound method reference is a fresh object each time it is evaluated, and that call site is
-     * every turn of the loop.
-     */
     private final DatagramHandler inbound = this::onDatagram;
+    private final long electionTimeoutMinNanos;
+    private final long electionTimeoutSpreadNanos;
     private final PrimosListener listener;
     private final Set<Integer> votesGranted = new HashSet<>();
     private final Set<Integer> preVotesGranted = new HashSet<>();
     private final ByteBuffer sendBuffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-
+    private TrackedPeer[] peers;
     @Getter
     private Role role = Role.FOLLOWER;
 
@@ -204,6 +177,8 @@ public final class ElectionNode implements MessageHandler {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
         this.listener = Objects.requireNonNull(listener, "listener");
+        this.electionTimeoutMinNanos = timings.electionTimeoutMin().toNanos();
+        this.electionTimeoutSpreadNanos = timings.electionTimeoutSpread().toNanos();
         List<Peer> configured = config.allPeers();
         this.peers = new TrackedPeer[configured.size()];
         for (int i = 0; i < peers.length; i++) {
@@ -218,14 +193,6 @@ public final class ElectionNode implements MessageHandler {
                 config.isLearnedMembership() ? id -> true : this::isConfiguredPeer, drops);
     }
 
-    /**
-     * The state held for a peer, or null if this id is not one.
-     *
-     * <p>A scan rather than a map lookup, and the faster of the two here as well as the simpler: a
-     * cluster has a handful of voters, so this is a few contiguous reads against a hash and a
-     * bucket walk. It also allocates nothing, where the {@code Map<Integer, …>} it replaced boxed
-     * the id on every call — and these calls are on the receive path, one per datagram.
-     */
     private TrackedPeer trackedPeer(int id) {
         for (TrackedPeer peer : peers) {
             if (peer.peer.id() == id) {
@@ -235,14 +202,6 @@ public final class ElectionNode implements MessageHandler {
         return null;
     }
 
-    /**
-     * Whether this id belongs to a peer, which is what the decoder admits a sender by.
-     *
-     * <p>{@code Integer.valueOf} caches only −128..127 and ids go to {@link Peer#MAX_ID}, so the
-     * {@code Set<Integer>} this once was allocated on every datagram received by any cluster
-     * numbered above 127 — and sparse schemes like {@code 101, 102, 201} are exactly what the
-     * documentation recommends. The allocation was invisible in tests, which number peers 2 and 3.
-     */
     private boolean isConfiguredPeer(int id) {
         return trackedPeer(id) != null;
     }
@@ -277,9 +236,6 @@ public final class ElectionNode implements MessageHandler {
         return true;
     }
 
-    /**
-     * Reads persisted state back and arms the first election timeout.
-     */
     public void start() {
         if (started) {
             throw new IllegalStateException("node " + config.nodeId() + " is already started");
@@ -353,21 +309,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * Marks the node permanently failed.
-     *
-     * <p>This exists for one reason: an uncaught exception that killed the loop while leaving a
-     * volatile {@code LEADER} behind would be a split-brain generator. The application would go on
-     * believing it is in charge, doing whatever leaders do, while the cluster elected somebody
-     * else and moved on. A dead node has to look dead.
-     *
-     * <p>The state is set <em>before</em> anything is rethrown, so by the time a caller sees the
-     * failure {@link #role()} is already safe.
-     *
-     * <p>Terminal on purpose. The realistic cause is a store that can no longer make a vote
-     * durable, and continuing after that means voting on state this node may forget — the very
-     * thing the store exists to prevent. There is no recovery in place; the process is restarted.
-     */
     private void fail(Throwable cause) {
         Role previous = role;
         setRole(Role.FAILED);
@@ -432,10 +373,6 @@ public final class ElectionNode implements MessageHandler {
         return new RoleAndTerm(role, currentTerm);
     }
 
-    /**
-     * The single place the role changes, so every transition is reported exactly once and the
-     * time-in-role clock cannot drift out of step with it.
-     */
     private void setRole(Role next) {
         if (role == next) {
             return;
@@ -446,9 +383,6 @@ public final class ElectionNode implements MessageHandler {
         listener.onRoleChanged(previous, next, currentTerm);
     }
 
-    /**
-     * The single place the believed leader changes.
-     */
     private void setLeader(int next) {
         if (leaderId == next) {
             return;
@@ -458,15 +392,6 @@ public final class ElectionNode implements MessageHandler {
         listener.onLeaderChanged(leader(), currentTerm);
     }
 
-    /**
-     * Turns a leader's id into the object listeners are handed.
-     *
-     * <p>This node itself has no {@link Peer} — a node holds no address for itself — so
-     * {@link Leader#isSelf()} carries the name from the configuration instead. A peer that is not in
-     * the probe table can only happen on the witness server, which learns its voters from traffic
-     * and so may hear a leader's heartbeat before {@link #learnPeer} has been called for it; every
-     * other node answers only configured senders, so there the lookup always succeeds.
-     */
     private Leader identify(int id) {
         if (id < 0) {
             return null;
@@ -522,24 +447,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    // ---------------------------------------------------------------- elections
-
-    /**
-     * Asks whether a campaign would succeed, without starting one.
-     *
-     * <p>This is what stops a node that has been away from disrupting a healthy cluster. Without
-     * it, a node partitioned for a while keeps timing out and incrementing its term — 5, 6, 7, …
-     * 50 — and the moment the partition heals it sends a vote request carrying that inflated term.
-     * The healthy leader sees a higher term, steps down, and the cluster holds a pointless
-     * election. For an active/passive pair that is a failover nobody asked for.
-     *
-     * <p>So nothing is incremented and nothing is written here: the node asks peers whether they
-     * <em>would</em> vote for it in the next term, and only if a majority say yes does it start a
-     * real election. A node with no route to the cluster therefore never advances its term at all,
-     * and rejoining is silent.
-     *
-     * <p>Costs no fsync, on either side of the exchange.
-     */
     private void startPreVote() {
         preVoting = true;
         preVoteTerm = currentTerm + 1;
@@ -559,12 +466,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * Whether this node would vote for a candidate proposing {@code proposedTerm}.
-     *
-     * <p>Refused while a leader is being heard from, which is the whole point: a cluster that is
-     * working says no, and the returning node's term never moves.
-     */
     private boolean wouldGrantVote(long proposedTerm, long now) {
         if (role == Role.LEADER) {
             return false;
@@ -580,12 +481,6 @@ public final class ElectionNode implements MessageHandler {
         preVotesGranted.clear();
     }
 
-    /**
-     * Becomes a candidate for the next term.
-     *
-     * <p>The term and the self-vote are persisted <em>before</em> a single request goes out. Doing
-     * it the other way round would let a node campaign in a term it might forget.
-     */
     private void startElection() {
         abandonPreVote();
         currentTerm++;
@@ -631,12 +526,6 @@ public final class ElectionNode implements MessageHandler {
         heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
-    /**
-     * Adopts a higher term and returns to being a follower.
-     *
-     * <p>The vote is cleared because it belonged to the old term, and both are persisted before
-     * this node answers anything in the new one.
-     */
     private void stepDown(long term) {
         abandonPreVote();
         currentTerm = term;
@@ -661,13 +550,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * Restates this node's intervals to every peer.
-     *
-     * <p>Broadcast rather than aimed: a mismatch is between any two members, not between a follower
-     * and its leader, and a witness is as worth telling as anyone. The witness sends it too, to the
-     * voters it has learned.
-     */
     private void advertiseTimings() {
         for (TrackedPeer peer : peers) {
             send(peer.peer.id(), encoder.timings(sendBuffer, currentTerm,
@@ -768,20 +650,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * A peer has stated its intervals. Compare, report a change, and do nothing else.
-     *
-     * <p><strong>Report, never act.</strong> A mismatch makes failover slower, never unsafe, and a
-     * node that refused a vote or dropped a peer over one would turn an ordinary rolling timing
-     * change into a partition — a far worse failure than the one being detected, and one the
-     * operator could not roll forward out of.
-     *
-     * <p>Logged on the transition rather than on every datagram, the same discipline the probe path
-     * follows so that one condition is never a stream of events: a peer that stays wrong is
-     * reported once, and reported again only if it agrees and then diverges afresh. The recovery
-     * line matters as much as the error — during a rolling change half the cluster disagrees for a
-     * few minutes by design, and an operator watching needs to see it end.
-     */
     @Override
     public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
                           int electionMaxMillis, int probeMillis, int failureThreshold) {
@@ -868,25 +736,6 @@ public final class ElectionNode implements MessageHandler {
 
     /**
      * A departing leader has asked this node to campaign now. Raft thesis §3.10.
-     *
-     * <p><strong>This deliberately skips the pre-vote round</strong>, which is the only place in
-     * primos that does, so the reason has to be stated. A pre-vote asks the other followers
-     * whether they <em>would</em> elect this node, and they answer no while they can still hear a
-     * leader — which, at the moment a leader hands over, they all can, because it was heartbeating
-     * until a moment ago. Pre-voting here would therefore be refused for a full election timeout,
-     * which is exactly the wait this message exists to remove.
-     *
-     * <p>Skipping it is safe because pre-vote defends against a <em>different</em> thing: a
-     * partitioned node inflating its term unilaterally and disrupting a healthy cluster on its
-     * return. Here the term bump is authorised by the leader of the current term, which is
-     * standing down as it sends this. Nothing about vote counting changes — the new candidate
-     * still has to win a real majority in the new term — so the at-most-one-leader-per-term
-     * argument is untouched.
-     *
-     * <p>A forged one of these could force an election, but forging requires the cluster secret,
-     * and an attacker who has it can already inject an {@code AppendEntries} carrying an enormous
-     * term, which is strictly worse. This adds no exposure that authentication was not already
-     * the answer to.
      */
     @Override
     public void onTimeoutNow(int senderId, long term) {
@@ -917,30 +766,6 @@ public final class ElectionNode implements MessageHandler {
 
     /**
      * A peer has said it is shutting down, so it is marked unreachable now rather than in silence.
-     *
-     * <p><strong>Why this message exists at all.</strong> Every other way of learning a node has
-     * gone is silence, and silence has to be given a long benefit of the doubt on the JVM: a
-     * stop-the-world pause is indistinguishable from a dead process, so the probe timeout gets
-     * tuned up — often to tens of seconds — precisely so a garbage collection is not reported as a
-     * failure. That tuning is correct, and it means a node that shut down politely would be
-     * reported as alive for that whole window. This closes exactly that gap, and only that one: a
-     * shutdown is the one departure the departing node knows about in advance and can say out
-     * loud. Crashes, kills and partitions still take the probe timeout, as they must.
-     *
-     * <p><strong>What it deliberately does not do.</strong> It touches the probe state and nothing
-     * else — not the election timer, not the leader id, not {@code lastRoundTripNanos}, and above
-     * all not the voter count. Quorum is computed from configured membership and never from who
-     * happens to be reachable; a cluster of five with two gone still needs three votes. Reading a
-     * departure as "the cluster shrank" is how a split brain gets talked into existence.
-     *
-     * <p>Leaving {@code lastRoundTripNanos} alone is the sharp one. CheckQuorum decides whether a
-     * leader may keep leading from that map, so if this cleared it, a forged or replayed departure
-     * would be a way to make a healthy leader stand down. Contact that genuinely happened stays
-     * recorded, and goes stale on its own schedule.
-     *
-     * <p>What a forged one can do is therefore bounded: mark a live peer unreachable until its
-     * next probe reply arrives, which self-corrects within one probe interval. It cannot move a
-     * term, spend a vote, or make a leader.
      */
     @Override
     public void onLeaving(int senderId, long term) {
@@ -970,16 +795,6 @@ public final class ElectionNode implements MessageHandler {
 
     /**
      * Tells every peer this node is going away, so none of them has to wait out a probe timeout.
-     *
-     * <p>Sent by <em>any</em> node stopping cleanly, whatever its role — unlike the handover
-     * above, which only a leader has anything to send. A follower's departure costs the cluster
-     * nothing, but being told about it promptly is the difference between a status page that is
-     * right and one that is thirty seconds stale.
-     *
-     * <p>Best-effort, like the handover: one datagram per peer, nothing waits for it, and if it is
-     * lost the probe timeout notices in the ordinary way.
-     *
-     * @return how many peers were told
      */
     public int announceDeparture() {
         if (peers.length == 0) {
@@ -995,17 +810,6 @@ public final class ElectionNode implements MessageHandler {
 
     /**
      * Hands leadership to a follower on the way out, instead of just going quiet.
-     *
-     * <p>A leader that simply stops costs the cluster up to a full election timeout with nobody in
-     * charge: the followers have to notice the heartbeats stopped, and the timeout is what
-     * "notice" means. Telling one of them to campaign now collapses that to about a round trip.
-     *
-     * <p>Best-effort by design. The message is one datagram and nothing waits for it — if it is
-     * lost, or no follower is reachable, the cluster falls back to the ordinary election timeout,
-     * which is exactly what would have happened anyway. There is therefore no abort path and
-     * nothing to get wrong: this can make a shutdown faster and cannot make it slower.
-     *
-     * @return whether a handover was sent
      */
     public boolean handOverLeadership() {
         if (role != Role.LEADER) {
@@ -1026,24 +830,6 @@ public final class ElectionNode implements MessageHandler {
         return true;
     }
 
-    /**
-     * The follower to hand over to: the one this leader most recently completed a round trip with.
-     *
-     * <p><strong>Never the witness</strong>, which would ignore the message anyway but must not be
-     * asked — declining to campaign is the whole of what makes a witness one, and targeting one
-     * would waste the handover and leave the cluster waiting out its timeout after all.
-     *
-     * <p>The signal is {@code lastRoundTripNanos}, the same one CheckQuorum uses, rather than the
-     * probe's reachability. Both were tried and the difference matters: probes run once a second,
-     * so a leader elected moments ago has no probe results at all and would find nobody to hand to,
-     * while an {@code AppendEntriesReply} lands every heartbeat and is direct proof that this
-     * follower received something this node sent and answered it. Handing over to a node that
-     * cannot hear us is a datagram into a void, and picking well is the entire job here.
-     *
-     * <p>Peers the probe has actually declared down are still excluded. A leader seeds every peer's
-     * contact clock when it takes office, deliberately — see {@link #becomeLeader} — so straight
-     * after an election that clock alone would vouch for a peer nothing has heard from.
-     */
     private Peer handoverTarget() {
         long now = clock.nanoTime();
         long window = timings.electionTimeoutMin().toNanos();
@@ -1051,10 +837,7 @@ public final class ElectionNode implements MessageHandler {
         long bestContactNanos = Long.MIN_VALUE;
 
         for (TrackedPeer probe : peers) {
-            if (probe.peer.isWitness()) {
-                continue;
-            }
-            if (probe.consecutiveMisses >= timings.failureThreshold()) {
+            if (probe.peer.isWitness() || probe.consecutiveMisses >= timings.failureThreshold()) {
                 continue;
             }
             long lastContact = probe.lastRoundTripNanos;
@@ -1091,21 +874,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    // ---------------------------------------------------------------- plumbing
-
-    /**
-     * Probes every peer, and calls down anything that has missed too many in a row.
-     *
-     * <p>Every node probes every peer, rather than the leader reporting who it can see. The
-     * obvious cheaper design — piggybacking a reachability bitmap on the heartbeat — was rejected
-     * because it goes blind exactly when there is no leader, which is precisely the outage during
-     * which somebody is asking who is up. It also costs nothing to say honestly: each node reports
-     * what <em>it</em> can reach, rather than relaying an opinion formed elsewhere.
-     *
-     * <p>Probing is separate from the heartbeat and much slower. Heartbeats are fast because they
-     * suppress election timers; reachability reporting is not, and a witness on another network
-     * would otherwise pay for a 50ms heartbeat it does not need.
-     */
     private void probeRound(long now) {
         for (TrackedPeer probe : peers) {
             if (probe.awaitingReply) {
@@ -1123,15 +891,13 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void notifyPeerUp(Peer peer) {
-        log.info("cluster '{}': {} {} is reachable",
-                config.applicationName(), peer.isWitness() ? "witness" : "peer", peer.id());
+        log.info("cluster '{}': {} {} is reachable", config.applicationName(), peer.isWitness() ? "witness" : "peer", peer.id());
         listener.onPeerUp(peer);
     }
 
     private void notifyPeerDown(Peer peer) {
         if (peer.isWitness()) {
-            log.warn("cluster '{}': the witness ({}) is unreachable. Nothing looks broken, but"
-                            + " this cluster can no longer survive a partition.",
+            log.warn("cluster '{}': the witness ({}) is unreachable. Nothing looks broken, but this cluster can no longer survive a partition.",
                     config.applicationName(), peer.id());
         } else {
             log.warn("cluster '{}': peer {} is unreachable", config.applicationName(), peer.id());
@@ -1166,28 +932,6 @@ public final class ElectionNode implements MessageHandler {
         return probe != null && probe.reachable;
     }
 
-    /**
-     * Whether this leader has completed a round trip with a majority recently enough.
-     *
-     * <p><strong>Without this a partitioned leader would report {@code LEADER} forever.</strong>
-     * Plain Raft lets it: an isolated leader keeps sending heartbeats into the void and never
-     * learns of the term that replaced it. That is safe in real Raft, where the log defends
-     * itself — nothing can be committed without a majority. primos has no log, so the only thing
-     * a leader produces is the answer to <em>am I the leader?</em>, and an isolated node answering
-     * yes while the other side elects a new one is precisely the split brain this library exists
-     * to prevent. So the leader stands itself down.
-     *
-     * <p>Contact means an {@code AppendEntriesReply}, and nothing else, deliberately. Counting any
-     * inbound message would let a **one-way** partition keep a leader alive: it would hear the
-     * peers fine while none of its own heartbeats arrived. A reply proves the peer received
-     * something this node sent.
-     *
-     * <p>The window is the minimum election timeout, so a leader gives up its claim no later than
-     * the earliest moment any follower could start campaigning for a replacement.
-     *
-     * <p>This bounds the stale-leader window; it cannot close it. Between losing contact and
-     * noticing, this node still answers yes. That residue is what the fencing token is for.
-     */
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
         int inContact = 1;
@@ -1200,12 +944,6 @@ public final class ElectionNode implements MessageHandler {
         return quorum.isReached(inContact);
     }
 
-    /**
-     * Gives up leadership without advancing the term.
-     *
-     * <p>Nothing durable changes: the term is the same and the vote this node cast for itself in
-     * it still stands. So there is nothing to persist and no fsync on this path.
-     */
     private void relinquishLeadership() {
         leadershipsRelinquished++;
         log.warn("cluster '{}': node {} stood down as leader of term {}: no round trip with a"
@@ -1220,38 +958,21 @@ public final class ElectionNode implements MessageHandler {
         resetElectionTimer();
     }
 
-    /**
-     * Forgets every round trip this node recorded while it was leading.
-     *
-     * <p>Called only where leadership has just ended, so the next one starts from a clean slate
-     * instead of inheriting contact the previous term established.
-     */
     private void forgetQuorumContact() {
         for (TrackedPeer probe : peers) {
             probe.lastRoundTripNanos = NO_CONTACT;
         }
     }
 
-    /**
-     * A fresh timeout drawn from the configured range on every reset.
-     *
-     * <p>Randomising this is not a refinement, it is what makes elections terminate: nodes that
-     * time out together campaign together, split the vote and repeat.
-     */
     private void resetElectionTimer() {
-        long min = timings.electionTimeoutMin().toNanos();
-        long spread = timings.electionTimeoutSpread().toNanos();
-        electionDeadlineNanos = clock.nanoTime() + min + (long) (random.nextDouble() * spread);
+        electionDeadlineNanos = clock.nanoTime() + electionTimeoutMinNanos
+                + (long) (random.nextDouble() * electionTimeoutSpreadNanos);
     }
 
     private void persist() {
         store.save(currentTerm, votedFor);
     }
 
-    /**
-     * Sends without ever letting a network failure become a node failure. UDP sends fail routinely
-     * and the algorithm's own timers are the retry mechanism.
-     */
     private void send(int peerId, ByteBuffer datagram) {
         try {
             transport.send(peerId, datagram);
@@ -1271,31 +992,6 @@ public final class ElectionNode implements MessageHandler {
         return "node " + config.nodeId() + " " + role + "/" + currentTerm;
     }
 
-    /**
-     * Peers this node exchanges messages with, the witness included.
-     */
-    List<Peer> peers() {
-        List<Peer> configured = new ArrayList<>(peers.length);
-        for (TrackedPeer peer : peers) {
-            configured.add(peer.peer);
-        }
-        return List.copyOf(configured);
-    }
-
-    /**
-     * One peer, and everything this node tracks about it.
-     *
-     * <p>Called {@code Probe} until 2026-08-31, which was accurate when reachability was all it
-     * held and had quietly stopped being so: {@link #lastRoundTripNanos} is CheckQuorum's evidence
-     * and comes from an {@code AppendEntriesReply} rather than from any probe, and
-     * {@link #timingsMatch} is about configuration agreement and not about reaching anyone at all.
-     * A name that describes one of three things a class holds sends the next reader looking for
-     * the other two somewhere else.
-     *
-     * <p>{@code TrackedPeer} rather than {@code PeerState}, which was the first choice: this file
-     * also builds {@link PeerStats}, and two names one letter apart — one of them public API —
-     * standing next to each other in {@link #peerStats()} is a reading hazard for no gain.
-     */
     private static final class TrackedPeer {
 
         private final Peer peer;
@@ -1307,24 +1003,7 @@ public final class ElectionNode implements MessageHandler {
         private boolean reachable;
         private long lastProbeRoundTripNanos = -1;
         private long lastHeardNanos = -1;
-
-        /**
-         * Whether this peer's advertised intervals matched ours the last time it said. Starts true
-         * so that a cluster which agrees never logs anything at all — silence is the correct output
-         * for a correctly configured cluster, and only a change is worth a line.
-         */
         private boolean timingsMatch = true;
-
-        /**
-         * When this node, while leading, last completed a round trip with this peer — the arrival
-         * of an {@code AppendEntriesReply}, and nothing else ever. CheckQuorum decides from it
-         * whether a leader may keep leading, so anything else writing it becomes a way to depose a
-         * healthy leader with a forged datagram. It lives here, one long per peer, rather than in a
-         * map of boxed values the leader would rewrite on every heartbeat reply.
-         *
-         * <p>Not {@link #lastProbeRoundTripNanos} above, which is how long a probe took rather than
-         * when contact last happened.
-         */
         private long lastRoundTripNanos = NO_CONTACT;
 
         private TrackedPeer(Peer peer) {

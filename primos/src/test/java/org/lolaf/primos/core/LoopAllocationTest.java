@@ -66,38 +66,59 @@ class LoopAllocationTest {
 
     private final VirtualClock clock = new VirtualClock();
 
+    /**
+     * A follower hearing its leader: a heartbeat arrives, it replies, it probes its peers and
+     * restates its intervals. This is what a healthy cluster does all day, and it must cost
+     * nothing.
+     */
     @Test
-    void a_turn_of_the_loop_allocates_almost_nothing() {
+    void a_follower_hearing_heartbeats_allocates_nothing() {
+        assertThat(bytesPerTurn(node(new ReplayingTransport(heartbeatFrom(PEER_A)))))
+                .as("the steady state of every node in a healthy cluster")
+                .isLessThan(8L);
+    }
+
+    /**
+     * The timer path with no campaign in it — a witness has no election timer, so this is the probe
+     * round and the advertisement alone.
+     */
+    @Test
+    void probing_and_advertising_allocate_nothing() {
+        assertThat(bytesPerTurn(witness(new ReplayingTransport(null))))
+                .as("probing every peer and restating the intervals, on a node that never campaigns")
+                .isLessThan(8L);
+    }
+
+    /**
+     * Campaigning is the one path that still allocates, and it is bounded by the election rate
+     * rather than by traffic: a set entry per round of pre-votes, and a boxed term in a log call
+     * that is built whether or not the level is enabled. A node that cannot reach a leader
+     * campaigns here on every turn, which is an election storm and not a steady state, so this is
+     * pinned loosely — it exists to catch something new appearing, not to be optimised against.
+     */
+    @Test
+    void campaigning_allocates_only_what_an_election_costs() {
+        assertThat(bytesPerTurn(node(new ReplayingTransport(null))))
+                .isLessThan(64L);
+    }
+
+    /**
+     * Bytes allocated per turn, after enough turns to load classes and let the call sites settle.
+     */
+    private long bytesPerTurn(ElectionNode node) {
         com.sun.management.ThreadMXBean threads = threadMxBean();
         assumeThat(threads).as("this JVM cannot measure per-thread allocation").isNotNull();
 
-        ReplayingTransport transport = new ReplayingTransport(advertisementFrom(PEER_A));
-        ElectionNode node = node(transport);
-
-        // Warm up: first turns load classes, resolve call sites and log the startup lines.
         for (int i = 0; i < 200; i++) {
             turn(node);
         }
-
         long id = Thread.currentThread().getId();
         long before = threads.getThreadAllocatedBytes(id);
         int turns = 2_000;
         for (int i = 0; i < turns; i++) {
             turn(node);
         }
-        long perTurn = (threads.getThreadAllocatedBytes(id) - before) / turns;
-
-        // Measured at each step, not guessed:
-        //   203  a List<Peer> of peers beside a LinkedHashMap<Integer, Probe> of their state
-        //   121  peers as a Peer[], the Set<Integer> sender check gone
-        //    76  the two structures merged into one PeerState[], no map left to box or iterate
-        //    60  the receive callback hoisted out of the call site it was rebuilt at every turn
-        // The bound is a ratchet: comfortably above what it costs now, comfortably below any of
-        // the shapes above it, so a reversion fails and an improvement invites tightening.
-        assertThat(perTurn)
-                .as("a turn receives a datagram, probes two peers and re-advertises; an iterator"
-                        + " per traversal, a boxed sender id or a lambda per call shows up here")
-                .isLessThan(96L);
+        return (threads.getThreadAllocatedBytes(id) - before) / turns;
     }
 
     /** One turn: enough virtual time that the probe and advertisement deadlines both fire. */
@@ -119,11 +140,31 @@ class LoopAllocationTest {
         return node;
     }
 
-    /** A datagram this node will accept, decode and dispatch, exercising the sender check. */
-    private static ByteBuffer advertisementFrom(int peerId) {
+    private ElectionNode witness(Transport transport) {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .asWitness()
+                .peers(List.of(Peer.application(PEER_A, "sim", 7001),
+                        Peer.application(PEER_B, "sim", 7002)))
+                .build();
+        ElectionNode node = new ElectionNode(config, new MemoryStateStore(), transport, clock,
+                new Random(1L), MessageAuthenticator.disabled());
+        node.start();
+        return node;
+    }
+
+    /**
+     * A heartbeat this node will accept, decode and answer — which also resets its election timer,
+     * so it behaves as a follower of a live leader rather than campaigning every turn.
+     */
+    private static ByteBuffer heartbeatFrom(int peerId) {
         MessageEncoder encoder = new MessageEncoder("t", peerId, MessageAuthenticator.disabled());
         ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        ByteBuffer encoded = encoder.timings(scratch, 0, 50, 300, 600, 1000, 3);
+        return copyOf(encoder.appendEntries(scratch, 1));
+    }
+
+    private static ByteBuffer copyOf(ByteBuffer encoded) {
         ByteBuffer copy = ByteBuffer.allocate(encoded.remaining());
         copy.put(encoded).flip();
         return copy;
@@ -160,6 +201,9 @@ class LoopAllocationTest {
 
         @Override
         public int poll(long timeoutNanos, DatagramHandler handler) {
+            if (datagram == null) {
+                return 0;
+            }
             datagram.position(0).limit(datagram.capacity());
             handler.onDatagram(datagram);
             return 1;
