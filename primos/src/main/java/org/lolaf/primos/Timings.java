@@ -53,17 +53,21 @@ public class Timings {
     Duration electionTimeoutMin;
     Duration electionTimeoutMax;
     Duration probeInterval;
+    Duration advertisementInterval;
     int failureThreshold;
 
     private Timings(Duration heartbeatInterval,
                     Duration electionTimeoutMin,
                     Duration electionTimeoutMax,
                     Duration probeInterval,
+                    Duration advertisementInterval,
                     int failureThreshold) {
         this.heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
         this.electionTimeoutMin = requirePositive(electionTimeoutMin, "electionTimeoutMin");
         this.electionTimeoutMax = requirePositive(electionTimeoutMax, "electionTimeoutMax");
         this.probeInterval = requirePositive(probeInterval, "probeInterval");
+        this.advertisementInterval =
+                requirePositive(advertisementInterval, "advertisementInterval");
         this.failureThreshold = failureThreshold;
         validate();
     }
@@ -148,6 +152,14 @@ public class Timings {
                             + "ms: too narrow a range lets nodes campaign in lockstep and split the"
                             + " vote repeatedly");
         }
+        if (advertisementInterval.compareTo(probeInterval) < 0) {
+            throw new IllegalArgumentException(
+                    "advertisementInterval (" + advertisementInterval.toMillis()
+                            + "ms) must not be shorter than probeInterval ("
+                            + probeInterval.toMillis() + "ms): the intervals a node advertises"
+                            + " cannot change while it runs, so restating them more often than it"
+                            + " checks whether its peers are even alive is pure traffic");
+        }
         if (probeInterval.compareTo(MAX_PROBE_INTERVAL) > 0) {
             throw new IllegalArgumentException(
                     "probeInterval must not exceed " + MAX_PROBE_INTERVAL.getSeconds()
@@ -200,6 +212,20 @@ public class Timings {
         private Duration probeInterval = Duration.ofSeconds(1);
 
         /**
+         * How often a node restates its own intervals to its peers, so that a mismatch is
+         * reported.
+         *
+         * <p>Much slower than everything else here, because the values cannot change while a node
+         * runs. It is repeated at all only because this is UDP and a single datagram may never
+         * arrive — and the case where it is lost is exactly the misconfigured cluster it exists to
+         * report. The first one goes out a probe interval after start, so a mismatch surfaces
+         * within a second or two whatever this is set to; this governs how quickly a
+         * <em>changed</em> configuration is noticed, which matters during a rolling deploy.
+         */
+        @Setter
+        private Duration advertisementInterval = Duration.ofSeconds(30);
+
+        /**
          * How many consecutive probes a peer may miss before it is reported down.
          */
         @Setter
@@ -223,7 +249,7 @@ public class Timings {
 
         public Timings build() {
             return new Timings(heartbeatInterval, electionTimeoutMin, electionTimeoutMax,
-                    probeInterval, failureThreshold);
+                    probeInterval, advertisementInterval, failureThreshold);
         }
     }
 }

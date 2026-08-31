@@ -70,7 +70,22 @@ public enum MessageType {
      * <p>Pure header, and purely a reachability hint: it says "stop expecting answers from me",
      * never "change the voter set". See {@code ElectionNode#onLeaving}.
      */
-    LEAVING(0x08, 0);
+    LEAVING(0x08, 0),
+
+    /**
+     * A node telling its peers which intervals it is running.
+     *
+     * <p>Five {@code u32} millisecond values: heartbeat, the two election timeout bounds, the probe
+     * interval and the failure threshold. Purely diagnostic — a receiver compares them with its own
+     * and says so when they differ, and <strong>changes no decision whatever it finds</strong>. A
+     * mismatch that refused a vote would turn a rolling timing change into a partition, which is a
+     * worse failure than the silent slowness it detects.
+     *
+     * <p>Values rather than a hash, because "peer 2 has heartbeat=200ms, we have 50ms" is the whole
+     * diagnosis in one line, and a hash could only say that something differs. The same trade the
+     * application name makes by travelling readable rather than hashed.
+     */
+    TIMINGS(0x09, 20);
 
     private static final MessageType[] BY_CODE = new MessageType[256];
 

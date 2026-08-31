@@ -259,6 +259,9 @@ public class PrimosAutoConfiguration {
         if (timings.probeInterval() != null) {
             builder.probeInterval(timings.probeInterval());
         }
+        if (timings.advertisementInterval() != null) {
+            builder.advertisementInterval(timings.advertisementInterval());
+        }
         if (timings.failureThreshold() != null) {
             builder.failureThreshold(timings.failureThreshold());
         }

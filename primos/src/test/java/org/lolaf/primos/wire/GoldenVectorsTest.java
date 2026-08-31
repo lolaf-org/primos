@@ -62,6 +62,15 @@ class GoldenVectorsTest {
             "50524d53010600006f7264657273000000000000000000000000000000000000"
                     + "0000000000000000000000000000002a000000030000000000000007";
 
+    /**
+     * Header, then heartbeat 50ms, election 300-600ms, probe 1000ms, failure threshold 3 — the LAN
+     * profile, as five big-endian {@code u32}s.
+     */
+    private static final String TIMINGS =
+            "50524d53010900006f7264657273000000000000000000000000000000000000"
+                    + "0000000000000000000000000000002a00000003"
+                    + "000000320000012c00000258000003e800000003";
+
     private final MessageEncoder encoder =
             new MessageEncoder("orders", 3, MessageAuthenticator.disabled());
     private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
@@ -129,6 +138,11 @@ class GoldenVectorsTest {
     }
 
     @Test
+    void timings_appends_five_big_endian_millisecond_values() {
+        assertThat(hex(encoder.timings(buffer, 42, 50, 300, 600, 1000, 3))).isEqualTo(TIMINGS);
+    }
+
+    @Test
     void the_application_name_is_zero_padded_to_a_fixed_width_field() {
         String encoded = hex(encoder.appendEntries(buffer, 42));
         String field = encoded.substring(WireFormat.OFFSET_APPLICATION * 2,
@@ -148,14 +162,22 @@ class GoldenVectorsTest {
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);
         assertThat(MessageType.TIMEOUT_NOW.messageBytes()).isEqualTo(52);
         assertThat(MessageType.LEAVING.messageBytes()).isEqualTo(52);
+        assertThat(MessageType.TIMINGS.messageBytes()).isEqualTo(72);
         assertThat(WireFormat.HEADER_BYTES).isEqualTo(52);
     }
 
     @Test
     void the_largest_authenticated_message_leaves_the_datagram_budget_untroubled() {
-        int largest = MessageType.PING.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
+        // TIMINGS took this title from PING when it was added: five u32s is a bigger payload than
+        // one u64. Still less than a quarter of the budget, and still fixed.
+        int largest = MessageType.TIMINGS.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
 
-        assertThat(largest).isEqualTo(92).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
+        assertThat(largest).isEqualTo(104).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
+        for (MessageType type : MessageType.values()) {
+            assertThat(type.messageBytes() + WireFormat.DEFAULT_TAG_BYTES)
+                    .as("%s must not exceed the largest", type)
+                    .isLessThanOrEqualTo(largest);
+        }
     }
 
     @Test
@@ -175,6 +197,7 @@ class GoldenVectorsTest {
         assertThat(MessageType.forCode(0x06)).isEqualTo(MessageType.PING_REPLY);
         assertThat(MessageType.forCode(0x07)).isEqualTo(MessageType.TIMEOUT_NOW);
         assertThat(MessageType.forCode(0x08)).isEqualTo(MessageType.LEAVING);
-        assertThat(MessageType.forCode(0x09)).isNull();
+        assertThat(MessageType.forCode(0x09)).isEqualTo(MessageType.TIMINGS);
+        assertThat(MessageType.forCode(0x0A)).isNull();
     }
 }

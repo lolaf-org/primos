@@ -133,6 +133,24 @@ public final class MessageEncoder {
     }
 
     /**
+     * States the intervals this node is running, so a peer can report a mismatch.
+     *
+     * <p>Milliseconds as {@code u32} rather than nanoseconds as {@code u64}: milliseconds are the
+     * unit every one of these is configured in, and 32 bits carries seven weeks of them.
+     */
+    public ByteBuffer timings(ByteBuffer out, long term, int heartbeatMillis,
+                              int electionMinMillis, int electionMaxMillis,
+                              int probeMillis, int failureThreshold) {
+        header(out, MessageType.TIMINGS, 0, term);
+        out.putInt(heartbeatMillis);
+        out.putInt(electionMinMillis);
+        out.putInt(electionMaxMillis);
+        out.putInt(probeMillis);
+        out.putInt(failureThreshold);
+        return finish(out);
+    }
+
+    /**
      * How many bytes a message of this type occupies, tag included.
      */
     public int sizeOf(MessageType type) {

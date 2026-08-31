@@ -234,6 +234,17 @@ so an open witness cannot be filled up), but strict is the default for that reas
 `slf4j-api` is the only dependency, so there is no Micrometer and no metrics registry. Instead
 `node.stats()` returns an immutable snapshot to wire into whatever you already use:
 
+### Mismatched timings are reported
+
+Every node restates its intervals to its peers every thirty seconds, and a peer whose intervals differ is logged at
+ERROR with both sets side by side, then counted in `stats().timingMismatches()`. Coming back into agreement is logged
+too, because during a rolling change half a cluster disagrees by design and you need to see it end.
+
+**It reports and never acts.** A mismatch makes failover slower, never unsafe — a node with a longer election timeout is
+proportionally more reluctant to grant the pre-vote a failover waits on — so nothing about the cluster's behaviour
+changes when one is found. A node that refused a vote over a mismatch would turn a rolling timing change into a
+partition, which is worse than the problem.
+
 ```java
 PrimosStats stats = node.stats();
 stats.role();                       // and currentTerm(), timeInRole()
@@ -346,7 +357,7 @@ flapping), a `failureThreshold` below 1, and any non-positive duration.
   only and not transitive. Plain JDK concurrency and NIO throughout.
 - **UDP transport.** Raft already assumes a network that drops, delays, duplicates and reorders,
   and recovers from all of it with its own timers, so TCP's retransmission is duplicated work.
-  Eight message types, all fixed-size, the largest 92 bytes including its authentication tag —
+  Nine message types, all fixed-size, the largest 104 bytes including its authentication tag —
   every one fits an unfragmented datagram.
 - **Optional HMAC on every datagram**, verified before anything is parsed. HMAC-SHA256 by
   default; `.macAlgorithm("HmacSHA512")` on the builder chooses another. There is deliberately no

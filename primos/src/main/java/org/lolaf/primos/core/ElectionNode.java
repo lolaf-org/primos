@@ -16,10 +16,12 @@
 package org.lolaf.primos.core;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.*;
 import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
+import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.*;
 import org.slf4j.Logger;
@@ -51,9 +53,8 @@ import java.util.*;
  *
  * <p>Not thread-safe, and not meant to be: one node, one thread.
  */
+@Slf4j
 public final class ElectionNode implements MessageHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(ElectionNode.class);
 
     /**
      * No round trip has been recorded with a peer. {@link Long#MIN_VALUE} rather than -1 because
@@ -76,14 +77,37 @@ public final class ElectionNode implements MessageHandler {
     @Getter
     private final DropCounters drops = new DropCounters();
 
-    private final List<Peer> peers = new ArrayList<>();
-    private final Map<Integer, Probe> probes = new LinkedHashMap<>();
+    /**
+     * Every peer, with everything this node tracks about it.
+     *
+     * <p><strong>One array, not a list of peers beside a map of state.</strong> Those were two
+     * structures holding the same membership, each needing the other kept in step, and every
+     * {@link TrackedPeer} carries its own {@link Peer} — so the list was a second index over data the
+     * map already had.
+     *
+     * <p>An array rather than either, and traversed with the enhanced {@code for} that compiles to
+     * an indexed loop: a list allocates an iterator per traversal and a map allocates one per
+     * {@code values()}, on paths walked every heartbeat, every probe round, every leader turn.
+     * Lookup by id is a scan, which for a handful of voters beats hashing — and, unlike a
+     * {@code Map<Integer, …>}, boxes nothing on a path that runs per datagram.
+     *
+     * <p>Not final, because a witness learns voters as they arrive and replaces this with a longer
+     * copy. That is also why an array is safer here than the map it replaced: a reader on another
+     * thread, which {@code stats()} is, sees one whole array or the other rather than a map being
+     * structurally modified underneath it.
+     */
+    private TrackedPeer[] peers;
+
+    /**
+     * The receive callback, held rather than written as {@code this::onDatagram} at the call site.
+     * A bound method reference is a fresh object each time it is evaluated, and that call site is
+     * every turn of the loop.
+     */
+    private final DatagramHandler inbound = this::onDatagram;
     private final PrimosListener listener;
-    private final Set<Integer> peerIds = new HashSet<>();
     private final Set<Integer> votesGranted = new HashSet<>();
     private final Set<Integer> preVotesGranted = new HashSet<>();
-    private final ByteBuffer sendBuffer =
-            ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+    private final ByteBuffer sendBuffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
     @Getter
     private Role role = Role.FOLLOWER;
@@ -100,6 +124,7 @@ public final class ElectionNode implements MessageHandler {
     private long lastLeaderContactNanos;
     private long probeDeadlineNanos;
     private long probeSequence;
+    private long timingsAdvertDeadlineNanos;
     private long roleChangedAtNanos;
     private boolean preVoting;
     private long preVoteTerm;
@@ -146,6 +171,8 @@ public final class ElectionNode implements MessageHandler {
      */
     @Getter
     private long departuresObserved;
+    private long timingMismatches;
+
 
     public ElectionNode(ClusterConfig config,
                         StateStore store,
@@ -177,10 +204,10 @@ public final class ElectionNode implements MessageHandler {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
         this.listener = Objects.requireNonNull(listener, "listener");
-        for (Peer peer : config.allPeers()) {
-            peers.add(peer);
-            peerIds.add(peer.id());
-            probes.put(peer.id(), new Probe(peer));
+        List<Peer> configured = config.allPeers();
+        this.peers = new TrackedPeer[configured.size()];
+        for (int i = 0; i < peers.length; i++) {
+            peers[i] = new TrackedPeer(configured.get(i));
         }
         this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
         this.encoder = new MessageEncoder(config.applicationName(), config.nodeId(), authenticator);
@@ -188,7 +215,36 @@ public final class ElectionNode implements MessageHandler {
         // are not configured, so it has nothing to compare an id against and the authentication
         // tag is the whole of its admission control. See ClusterConfig.Builder#learnedMembership.
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
-                config.isLearnedMembership() ? id -> true : peerIds::contains, drops);
+                config.isLearnedMembership() ? id -> true : this::isConfiguredPeer, drops);
+    }
+
+    /**
+     * The state held for a peer, or null if this id is not one.
+     *
+     * <p>A scan rather than a map lookup, and the faster of the two here as well as the simpler: a
+     * cluster has a handful of voters, so this is a few contiguous reads against a hash and a
+     * bucket walk. It also allocates nothing, where the {@code Map<Integer, …>} it replaced boxed
+     * the id on every call — and these calls are on the receive path, one per datagram.
+     */
+    private TrackedPeer trackedPeer(int id) {
+        for (TrackedPeer peer : peers) {
+            if (peer.peer.id() == id) {
+                return peer;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether this id belongs to a peer, which is what the decoder admits a sender by.
+     *
+     * <p>{@code Integer.valueOf} caches only −128..127 and ids go to {@link Peer#MAX_ID}, so the
+     * {@code Set<Integer>} this once was allocated on every datagram received by any cluster
+     * numbered above 127 — and sparse schemes like {@code 101, 102, 201} are exactly what the
+     * documentation recommends. The allocation was invisible in tests, which number peers 2 and 3.
+     */
+    private boolean isConfiguredPeer(int id) {
+        return trackedPeer(id) != null;
     }
 
     /**
@@ -211,11 +267,11 @@ public final class ElectionNode implements MessageHandler {
                     "node " + config.nodeId() + " has a configured peer set, so peer " + peer.id()
                             + " cannot be learned; build the config with learnedMembership()");
         }
-        if (peer.id() == config.nodeId() || !peerIds.add(peer.id())) {
+        if (peer.id() == config.nodeId() || isConfiguredPeer(peer.id())) {
             return false;
         }
-        peers.add(peer);
-        probes.put(peer.id(), new Probe(peer));
+        peers = Arrays.copyOf(peers, peers.length + 1);
+        peers[peers.length - 1] = new TrackedPeer(peer);
         log.info("cluster '{}': witness {} has learned voter {} at {}:{}",
                 config.applicationName(), config.nodeId(), peer.id(), peer.host(), peer.port());
         return true;
@@ -263,6 +319,13 @@ public final class ElectionNode implements MessageHandler {
         }
         lastLeaderContactNanos = clock.nanoTime();
         probeDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        // One probe interval, not immediately. A node starting up has peers that may not be
+        // listening yet, so an advert sent on the first turn is likely to be thrown away and the
+        // next one is half a minute off — while a second later they are up and a mismatch is
+        // reported almost as promptly. Not zero for a second reason: a deadline of "now" is shared
+        // by every node in the cluster, which would make nextDeadlineNanos() identical everywhere
+        // at startup and hide the randomised election timeout behind it.
+        timingsAdvertDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
         resetElectionTimer();
     }
 
@@ -280,7 +343,7 @@ public final class ElectionNode implements MessageHandler {
         }
         try {
             long wait = Math.min(maxWaitNanos, Math.max(0L, nextDeadlineNanos() - clock.nanoTime()));
-            transport.poll(wait, this::onDatagram);
+            transport.poll(wait, inbound);
             fireDueTimers();
         } catch (Throwable failure) {
             fail(failure);
@@ -336,7 +399,7 @@ public final class ElectionNode implements MessageHandler {
         if (role == Role.FAILED) {
             return Long.MAX_VALUE;
         }
-        long deadline = probeDeadlineNanos;
+        long deadline = Math.min(probeDeadlineNanos, timingsAdvertDeadlineNanos);
         if (role == Role.LEADER) {
             deadline = Math.min(deadline, heartbeatDeadlineNanos);
         } else if (!config.isWitness()) {
@@ -411,7 +474,7 @@ public final class ElectionNode implements MessageHandler {
         if (id == config.nodeId()) {
             return Leader.self(id);
         }
-        Probe probe = probes.get(id);
+        TrackedPeer probe = trackedPeer(id);
         return probe == null ? Leader.byId(id) : Leader.at(probe.peer);
     }
 
@@ -422,7 +485,7 @@ public final class ElectionNode implements MessageHandler {
         return new PrimosStats(role, currentTerm,
                 Duration.ofNanos(clock.nanoTime() - roleChangedAtNanos),
                 electionsStarted, electionsWon, handoversSent, handoversAccepted,
-                departuresObserved, drops.snapshot(), peerStats());
+                departuresObserved, timingMismatches, drops.snapshot(), peerStats());
     }
 
     private void onDatagram(ByteBuffer datagram) {
@@ -438,6 +501,10 @@ public final class ElectionNode implements MessageHandler {
         if (now >= probeDeadlineNanos) {
             probeRound(now);
             probeDeadlineNanos = now + timings.probeInterval().toNanos();
+        }
+        if (now >= timingsAdvertDeadlineNanos) {
+            advertiseTimings();
+            timingsAdvertDeadlineNanos = now + timings.advertisementInterval().toNanos();
         }
         if (role == Role.LEADER) {
             if (!hasQuorumContact(now)) {
@@ -487,8 +554,8 @@ public final class ElectionNode implements MessageHandler {
             startElection();
             return;
         }
-        for (Peer peer : peers) {
-            send(peer.id(), encoder.requestVote(sendBuffer, preVoteTerm, true));
+        for (TrackedPeer peer : peers) {
+            send(peer.peer.id(), encoder.requestVote(sendBuffer, preVoteTerm, true));
         }
     }
 
@@ -539,8 +606,8 @@ public final class ElectionNode implements MessageHandler {
             becomeLeader();
             return;
         }
-        for (Peer peer : peers) {
-            send(peer.id(), encoder.requestVote(sendBuffer, currentTerm, false));
+        for (TrackedPeer peer : peers) {
+            send(peer.peer.id(), encoder.requestVote(sendBuffer, currentTerm, false));
         }
     }
 
@@ -553,7 +620,7 @@ public final class ElectionNode implements MessageHandler {
         // Start the contact clock now, or a new leader would step down before its first heartbeat
         // had a chance to be answered.
         long now = clock.nanoTime();
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             probe.lastRoundTripNanos = now;
         }
 
@@ -589,8 +656,26 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void broadcastHeartbeat() {
-        for (Peer peer : peers) {
-            send(peer.id(), encoder.appendEntries(sendBuffer, currentTerm));
+        for (TrackedPeer peer : peers) {
+            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm));
+        }
+    }
+
+    /**
+     * Restates this node's intervals to every peer.
+     *
+     * <p>Broadcast rather than aimed: a mismatch is between any two members, not between a follower
+     * and its leader, and a witness is as worth telling as anyone. The witness sends it too, to the
+     * voters it has learned.
+     */
+    private void advertiseTimings() {
+        for (TrackedPeer peer : peers) {
+            send(peer.peer.id(), encoder.timings(sendBuffer, currentTerm,
+                    (int) timings.heartbeatInterval().toMillis(),
+                    (int) timings.electionTimeoutMin().toMillis(),
+                    (int) timings.electionTimeoutMax().toMillis(),
+                    (int) timings.probeInterval().toMillis(),
+                    timings.failureThreshold()));
         }
     }
 
@@ -614,8 +699,8 @@ public final class ElectionNode implements MessageHandler {
             logVote(would
                             ? "cluster '{}': node {} would vote for node {} in a term {} election"
                             : "cluster '{}': node {} would not vote for node {} in a term {}"
-                              + " election; it has heard from a leader too recently, or its own"
-                              + " term is ahead",
+                            + " election; it has heard from a leader too recently, or its own"
+                            + " term is ahead",
                     config.applicationName(), config.nodeId(), senderId, term);
             send(senderId, encoder.requestVoteReply(sendBuffer, term, would, true));
             return;
@@ -683,6 +768,60 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
+    /**
+     * A peer has stated its intervals. Compare, report a change, and do nothing else.
+     *
+     * <p><strong>Report, never act.</strong> A mismatch makes failover slower, never unsafe, and a
+     * node that refused a vote or dropped a peer over one would turn an ordinary rolling timing
+     * change into a partition — a far worse failure than the one being detected, and one the
+     * operator could not roll forward out of.
+     *
+     * <p>Logged on the transition rather than on every datagram, the same discipline the probe path
+     * follows so that one condition is never a stream of events: a peer that stays wrong is
+     * reported once, and reported again only if it agrees and then diverges afresh. The recovery
+     * line matters as much as the error — during a rolling change half the cluster disagrees for a
+     * few minutes by design, and an operator watching needs to see it end.
+     */
+    @Override
+    public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                          int electionMaxMillis, int probeMillis, int failureThreshold) {
+        if (term > currentTerm) {
+            stepDown(term);
+        }
+        TrackedPeer probe = trackedPeer(senderId);
+        if (probe == null) {
+            return;
+        }
+        boolean matches = heartbeatMillis == (int) timings.heartbeatInterval().toMillis()
+                && electionMinMillis == (int) timings.electionTimeoutMin().toMillis()
+                && electionMaxMillis == (int) timings.electionTimeoutMax().toMillis()
+                && probeMillis == (int) timings.probeInterval().toMillis()
+                && failureThreshold == timings.failureThreshold();
+        if (matches == probe.timingsMatch) {
+            return;
+        }
+        probe.timingsMatch = matches;
+        if (matches) {
+            log.info("cluster '{}': node {} now runs the same intervals as node {}",
+                    config.applicationName(), senderId, config.nodeId());
+            return;
+        }
+        timingMismatches++;
+        log.error("cluster '{}': node {} runs different intervals from node {} —"
+                        + " heartbeat {}ms vs {}ms, election {}-{}ms vs {}-{}ms,"
+                        + " probe {}ms vs {}ms, failure threshold {} vs {}."
+                        + " Nothing is unsafe and the cluster keeps working, but failover is"
+                        + " slower than it looks: a node with a longer election timeout is"
+                        + " proportionally more reluctant to grant the pre-vote a failover waits"
+                        + " on. Make the profile uniform across every member, witness included.",
+                config.applicationName(), senderId, config.nodeId(),
+                heartbeatMillis, timings.heartbeatInterval().toMillis(),
+                electionMinMillis, electionMaxMillis,
+                timings.electionTimeoutMin().toMillis(), timings.electionTimeoutMax().toMillis(),
+                probeMillis, timings.probeInterval().toMillis(),
+                failureThreshold, timings.failureThreshold());
+    }
+
     @Override
     public void onAppendEntries(int senderId, long term) {
         if (term < currentTerm) {
@@ -712,7 +851,7 @@ public final class ElectionNode implements MessageHandler {
         // This is the only thing that proves a round trip: the peer received a heartbeat this node
         // sent, and answered it. See hasQuorumContact.
         if (role == Role.LEADER && term == currentTerm) {
-            Probe probe = probes.get(senderId);
+            TrackedPeer probe = trackedPeer(senderId);
             if (probe != null) {
                 probe.lastRoundTripNanos = clock.nanoTime();
             }
@@ -809,7 +948,7 @@ public final class ElectionNode implements MessageHandler {
             // The universal rule, applied here as everywhere else. Nothing below depends on it.
             stepDown(term);
         }
-        Probe probe = probes.get(senderId);
+        TrackedPeer probe = trackedPeer(senderId);
         if (probe == null) {
             return;
         }
@@ -843,15 +982,15 @@ public final class ElectionNode implements MessageHandler {
      * @return how many peers were told
      */
     public int announceDeparture() {
-        if (peers.isEmpty()) {
+        if (peers.length == 0) {
             return 0;
         }
-        for (Peer peer : peers) {
-            send(peer.id(), encoder.leaving(sendBuffer, currentTerm));
+        for (TrackedPeer peer : peers) {
+            send(peer.peer.id(), encoder.leaving(sendBuffer, currentTerm));
         }
         log.info("cluster '{}': node {} told {} peer(s) it is shutting down",
-                config.applicationName(), config.nodeId(), peers.size());
-        return peers.size();
+                config.applicationName(), config.nodeId(), peers.length);
+        return peers.length;
     }
 
     /**
@@ -911,7 +1050,7 @@ public final class ElectionNode implements MessageHandler {
         Peer best = null;
         long bestContactNanos = Long.MIN_VALUE;
 
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             if (probe.peer.isWitness()) {
                 continue;
             }
@@ -935,7 +1074,7 @@ public final class ElectionNode implements MessageHandler {
         if (term > currentTerm) {
             stepDown(term);
         }
-        Probe probe = probes.get(senderId);
+        TrackedPeer probe = trackedPeer(senderId);
         if (probe == null || sequence != probe.outstandingSequence) {
             // A reply to a probe we have already given up on. Counting it would let one badly
             // delayed datagram keep a peer that is long gone looking alive.
@@ -968,7 +1107,7 @@ public final class ElectionNode implements MessageHandler {
      * would otherwise pay for a 50ms heartbeat it does not need.
      */
     private void probeRound(long now) {
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             if (probe.awaitingReply) {
                 probe.consecutiveMisses++;
                 if (probe.reachable && probe.consecutiveMisses >= timings.failureThreshold()) {
@@ -1006,7 +1145,7 @@ public final class ElectionNode implements MessageHandler {
     public Map<Integer, PeerStats> peerStats() {
         long now = clock.nanoTime();
         Map<Integer, PeerStats> snapshot = new LinkedHashMap<>();
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             snapshot.put(probe.peer.id(), new PeerStats(
                     probe.peer.id(),
                     probe.peer.type(),
@@ -1023,7 +1162,7 @@ public final class ElectionNode implements MessageHandler {
      * Whether a peer is currently answering probes.
      */
     public boolean isReachable(int peerId) {
-        Probe probe = probes.get(peerId);
+        TrackedPeer probe = trackedPeer(peerId);
         return probe != null && probe.reachable;
     }
 
@@ -1052,7 +1191,7 @@ public final class ElectionNode implements MessageHandler {
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
         int inContact = 1;
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             long lastHeard = probe.lastRoundTripNanos;
             if (lastHeard != NO_CONTACT && now - lastHeard <= window) {
                 inContact++;
@@ -1088,7 +1227,7 @@ public final class ElectionNode implements MessageHandler {
      * instead of inheriting contact the previous term established.
      */
     private void forgetQuorumContact() {
-        for (Probe probe : probes.values()) {
+        for (TrackedPeer probe : peers) {
             probe.lastRoundTripNanos = NO_CONTACT;
         }
     }
@@ -1136,13 +1275,28 @@ public final class ElectionNode implements MessageHandler {
      * Peers this node exchanges messages with, the witness included.
      */
     List<Peer> peers() {
-        return new ArrayList<>(peers);
+        List<Peer> configured = new ArrayList<>(peers.length);
+        for (TrackedPeer peer : peers) {
+            configured.add(peer.peer);
+        }
+        return List.copyOf(configured);
     }
 
     /**
-     * What this node knows about reaching one peer.
+     * One peer, and everything this node tracks about it.
+     *
+     * <p>Called {@code Probe} until 2026-08-31, which was accurate when reachability was all it
+     * held and had quietly stopped being so: {@link #lastRoundTripNanos} is CheckQuorum's evidence
+     * and comes from an {@code AppendEntriesReply} rather than from any probe, and
+     * {@link #timingsMatch} is about configuration agreement and not about reaching anyone at all.
+     * A name that describes one of three things a class holds sends the next reader looking for
+     * the other two somewhere else.
+     *
+     * <p>{@code TrackedPeer} rather than {@code PeerState}, which was the first choice: this file
+     * also builds {@link PeerStats}, and two names one letter apart — one of them public API —
+     * standing next to each other in {@link #peerStats()} is a reading hazard for no gain.
      */
-    private static final class Probe {
+    private static final class TrackedPeer {
 
         private final Peer peer;
 
@@ -1153,6 +1307,13 @@ public final class ElectionNode implements MessageHandler {
         private boolean reachable;
         private long lastProbeRoundTripNanos = -1;
         private long lastHeardNanos = -1;
+
+        /**
+         * Whether this peer's advertised intervals matched ours the last time it said. Starts true
+         * so that a cluster which agrees never logs anything at all — silence is the correct output
+         * for a correctly configured cluster, and only a change is worth a line.
+         */
+        private boolean timingsMatch = true;
 
         /**
          * When this node, while leading, last completed a round trip with this peer — the arrival
@@ -1166,7 +1327,7 @@ public final class ElectionNode implements MessageHandler {
          */
         private long lastRoundTripNanos = NO_CONTACT;
 
-        private Probe(Peer peer) {
+        private TrackedPeer(Peer peer) {
             this.peer = peer;
         }
     }

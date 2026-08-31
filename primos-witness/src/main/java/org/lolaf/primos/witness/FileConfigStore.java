@@ -118,6 +118,7 @@ public final class FileConfigStore implements ConfigStore {
         Integer electionMin = optionalInt(properties, "timings.election.min.millis", explicit);
         Integer electionMax = optionalInt(properties, "timings.election.max.millis", explicit);
         Integer probe = optionalInt(properties, "timings.probe.millis", explicit);
+        Integer advertisement = optionalInt(properties, "timings.advertisement.millis", explicit);
         Integer failureThreshold = optionalInt(properties, "timings.failure.threshold", explicit);
 
         if (profile != null && !profile.trim().isEmpty() && !explicit.isEmpty()) {
@@ -151,6 +152,9 @@ public final class FileConfigStore implements ConfigStore {
         }
         if (probe != null) {
             builder.probeInterval(Duration.ofMillis(probe));
+        }
+        if (advertisement != null) {
+            builder.advertisementInterval(Duration.ofMillis(advertisement));
         }
         if (failureThreshold != null) {
             builder.failureThreshold(failureThreshold);

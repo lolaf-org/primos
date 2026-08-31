@@ -17,6 +17,7 @@ package org.lolaf.primos.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,8 @@ import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.transport.SimulatedNetwork;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
+import org.lolaf.primos.wire.MessageEncoder;
+import org.lolaf.primos.wire.WireFormat;
 
 /**
  * One node in isolation, for the two properties that are easiest to prove by reaching straight
@@ -398,6 +401,98 @@ class ElectionNodeTest {
         assertThat(node.currentTerm()).isEqualTo(1);
         assertThat(node.votedFor()).isEqualTo(1);
         return node;
+    }
+
+    // ------------------------------------------------------------------ timing advertisements
+
+    /**
+     * Logged and counted on the transition, not on every advert. A peer restates its intervals
+     * every thirty seconds for as long as it runs, so counting datagrams would turn one
+     * misconfiguration into an ever-growing number and a log line every half minute.
+     */
+    @Test
+    void a_peer_running_different_intervals_is_reported_once_not_on_every_advert() {
+        ElectionNode node = startedNode();
+
+        advertise(2, node, 200, 1500, 3000, 2000, 3);
+        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+
+        advertise(2, node, 200, 1500, 3000, 2000, 3);
+        advertise(2, node, 200, 1500, 3000, 2000, 3);
+
+        assertThat(node.stats().timingMismatches())
+                .as("the same peer still being wrong is not news")
+                .isEqualTo(1);
+    }
+
+    /**
+     * The recovery matters as much as the error: during a rolling change half a cluster disagrees
+     * for a few minutes by design, and whoever is watching needs to see it end.
+     */
+    @Test
+    void a_peer_returning_to_the_same_intervals_can_diverge_again() {
+        ElectionNode node = startedNode();
+
+        advertise(2, node, 200, 1500, 3000, 2000, 3);
+        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+
+        advertise(2, node, 50, 300, 600, 1000, 3);
+        assertThat(node.stats().timingMismatches())
+                .as("agreeing again is not another mismatch")
+                .isEqualTo(1);
+
+        advertise(2, node, 200, 1500, 3000, 2000, 3);
+        assertThat(node.stats().timingMismatches())
+                .as("but diverging afresh is")
+                .isEqualTo(2);
+    }
+
+    /**
+     * The whole safety argument for this message. A mismatch makes failover slower, never unsafe,
+     * so acting on one would turn an ordinary rolling timing change into a partition — a worse
+     * failure than the one being detected, and one nobody could roll forward out of.
+     */
+    @Test
+    void a_mismatched_advertisement_changes_nothing_at_all() {
+        ElectionNode node = startedNode();
+        long termBefore = node.currentTerm();
+        Role roleBefore = node.role();
+        long deadlineBefore = node.nextDeadlineNanos();
+
+        advertise(2, node, 200, 1500, 3000, 2000, 9);
+
+        assertThat(node.currentTerm()).isEqualTo(termBefore);
+        assertThat(node.role()).isEqualTo(roleBefore);
+        assertThat(node.nextDeadlineNanos())
+                .as("not the election timer, not the probe timer, nothing")
+                .isEqualTo(deadlineBefore);
+        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+    }
+
+    @Test
+    void a_peer_running_the_same_intervals_is_never_mentioned() {
+        ElectionNode node = startedNode();
+
+        advertise(2, node, 50, 300, 600, 1000, 3);
+
+        assertThat(node.stats().timingMismatches())
+                .as("silence is the correct output for a cluster that agrees")
+                .isZero();
+    }
+
+    /**
+     * Delivers a real datagram rather than calling the handler, so the decoder, the size check and
+     * {@code runOnce}'s wrapping are all on the path — which is the only way this is the production
+     * path rather than a shape that resembles it.
+     */
+    private void advertise(int fromPeer, ElectionNode to, int heartbeat, int electionMin,
+                           int electionMax, int probe, int failureThreshold) {
+        MessageEncoder encoder = new MessageEncoder("t", fromPeer, MessageAuthenticator.disabled());
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+        network.transportFor(fromPeer).send(to.config().nodeId(), encoder.timings(
+                buffer, to.currentTerm(), heartbeat, electionMin, electionMax, probe,
+                failureThreshold));
+        to.runOnce(0);
     }
 
     private ElectionNode startedNode() {

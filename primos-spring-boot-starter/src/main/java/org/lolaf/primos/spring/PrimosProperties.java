@@ -122,6 +122,8 @@ public record PrimosProperties(
      * @param electionTimeoutMin the low end of the randomised election timeout. Set with its pair
      * @param electionTimeoutMax the high end. Set with its pair
      * @param probeInterval      how often every node probes every peer
+     * @param advertisementInterval how often a node restates its own intervals, so a mismatch with
+     *                           a peer is reported. Never shorter than {@code probeInterval}
      * @param failureThreshold   consecutive missed probes before a peer is reported down
      */
     public record TimingsProperties(
@@ -130,6 +132,7 @@ public record PrimosProperties(
             Duration electionTimeoutMin,
             Duration electionTimeoutMax,
             Duration probeInterval,
+            Duration advertisementInterval,
             Integer failureThreshold) {
 
         /**
@@ -150,6 +153,7 @@ public record PrimosProperties(
             addIfSet(keys, "election-timeout-min", electionTimeoutMin);
             addIfSet(keys, "election-timeout-max", electionTimeoutMax);
             addIfSet(keys, "probe-interval", probeInterval);
+            addIfSet(keys, "advertisement-interval", advertisementInterval);
             addIfSet(keys, "failure-threshold", failureThreshold);
             return keys;
         }

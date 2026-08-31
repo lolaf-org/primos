@@ -100,6 +100,26 @@ class TimingsTest {
     }
 
     @Test
+    void the_advertisement_interval_defaults_to_thirty_seconds() {
+        assertThat(Timings.lan().advertisementInterval()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(Timings.wan().advertisementInterval()).isEqualTo(Duration.ofSeconds(30));
+    }
+
+    /**
+     * The values a node advertises cannot change while it runs, so restating them more often than
+     * it checks whether its peers are alive at all is pure traffic.
+     */
+    @Test
+    void advertising_more_often_than_probing_is_rejected() {
+        assertThatThrownBy(() -> Timings.builder()
+                .probeInterval(Duration.ofSeconds(2))
+                .advertisementInterval(Duration.ofSeconds(1))
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be shorter than probeInterval");
+    }
+
+    @Test
     void probing_less_often_than_the_nat_ceiling_is_rejected() {
         assertThatThrownBy(() -> Timings.builder()
                 .probeInterval(Duration.ofSeconds(30))

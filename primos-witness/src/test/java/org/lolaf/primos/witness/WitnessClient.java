@@ -161,6 +161,7 @@ final class WitnessClient implements AutoCloseable {
         private boolean answered;
         private boolean handedOver;
         private boolean leaving;
+        private boolean timings;
 
         @Override
         public void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote) {
@@ -204,6 +205,12 @@ final class WitnessClient implements AutoCloseable {
         @Override
         public void onLeaving(int senderId, long term) {
             this.leaving = true;
+        }
+
+        @Override
+        public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                              int electionMaxMillis, int probeMillis, int failureThreshold) {
+            this.timings = true;
         }
     }
 }

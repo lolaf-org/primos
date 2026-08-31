@@ -192,6 +192,7 @@ class FileConfigStoreTest {
                 "timings.election.min.millis=2000",
                 "timings.election.max.millis=4000",
                 "timings.probe.millis=3000",
+                "timings.advertisement.millis=60000",
                 "timings.failure.threshold=5"));
         application("orders", "secret=x");
 
@@ -201,6 +202,7 @@ class FileConfigStoreTest {
                 .heartbeatInterval(Duration.ofMillis(250))
                 .electionTimeout(Duration.ofSeconds(2), Duration.ofSeconds(4))
                 .probeInterval(Duration.ofSeconds(3))
+                .advertisementInterval(Duration.ofSeconds(60))
                 .failureThreshold(5)
                 .build());
     }

@@ -75,4 +75,16 @@ public interface MessageHandler {
      * pause looks exactly like a dead node.
      */
     void onLeaving(int senderId, long term);
+
+    /**
+     * A peer stating the intervals it is running, so a mismatch can be reported.
+     *
+     * <p>Every value is milliseconds. <strong>Report, never act.</strong> The timings of a cluster
+     * must match for failover to be prompt — a node with a longer {@code electionTimeoutMin} is
+     * proportionally more reluctant to grant the pre-vote a failover waits on — but nothing about a
+     * mismatch is unsafe, and a node that changed its behaviour on seeing one would turn a rolling
+     * configuration change into a partition.
+     */
+    void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                   int electionMaxMillis, int probeMillis, int failureThreshold);
 }

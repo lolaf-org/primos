@@ -59,6 +59,19 @@ public class PrimosStats {
      * enough to look like one. The two have very different meanings on a dashboard.
      */
     long departuresObserved;
+
+    /**
+     * How many times a peer has been seen advertising intervals that differ from this node's.
+     *
+     * <p>Counts transitions into disagreement, not datagrams: a peer that stays misconfigured is
+     * counted once, and counted again only if it agrees and then diverges afresh. Anything above
+     * zero means somebody's failover is slower than they think, since a node with a longer
+     * {@code electionTimeoutMin} is proportionally more reluctant to grant the pre-vote a failover
+     * waits on. Nothing is unsafe; nothing is corrupted; it is simply slow in a way that is
+     * invisible from either side, which is the whole reason this is counted at all.
+     */
+    long timingMismatches;
+
     Map<DropReason, Long> drops;
     Map<Integer, PeerStats> peers;
 
@@ -70,6 +83,7 @@ public class PrimosStats {
                        long handoversSent,
                        long handoversAccepted,
                        long departuresObserved,
+                       long timingMismatches,
                        Map<DropReason, Long> drops,
                        Map<Integer, PeerStats> peers) {
         this.role = Objects.requireNonNull(role, "role");
@@ -80,6 +94,7 @@ public class PrimosStats {
         this.handoversSent = handoversSent;
         this.handoversAccepted = handoversAccepted;
         this.departuresObserved = departuresObserved;
+        this.timingMismatches = timingMismatches;
 
         EnumMap<DropReason, Long> allReasons = new EnumMap<>(DropReason.class);
         for (DropReason reason : DropReason.values()) {

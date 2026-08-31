@@ -89,7 +89,7 @@ public final class WireFormat {
      * <p>576 bytes is the smallest IPv4 datagram every host must accept, less 60 of maximum IP
      * header and 8 of UDP header. Staying under it means a primos datagram is never fragmented, so
      * there is no reassembly and no partial-message state anywhere in the transport. The largest
-     * message actually defined is 92 bytes, so this is a ceiling with room to spare rather than a
+     * message actually defined is 104 bytes, so this is a ceiling with room to spare rather than a
      * constraint anything presses against.
      */
     public static final int MAX_DATAGRAM_BYTES = 508;

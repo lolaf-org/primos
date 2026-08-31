@@ -15,7 +15,7 @@
  */
 
 /**
- * The datagram codec: the common header, the eight messages, and the authentication tag.
+ * The datagram codec: the common header, the nine messages, and the authentication tag.
  *
  * <p><strong>Internal.</strong> Nothing here is public API. These types carry no compatibility
  * guarantee and may change, move or be deleted in any release, so an application should not compile

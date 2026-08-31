@@ -110,4 +110,12 @@ final class CapturedReply implements MessageHandler {
     public void onLeaving(int senderId, long term) {
         messages.add("leaving(" + senderId + "," + term + ")");
     }
+
+    @Override
+    public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                          int electionMaxMillis, int probeMillis, int failureThreshold) {
+        messages.add("timings(" + senderId + "," + term + "," + heartbeatMillis + ","
+                + electionMinMillis + "," + electionMaxMillis + "," + probeMillis + ","
+                + failureThreshold + ")");
+    }
 }

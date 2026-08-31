@@ -68,9 +68,11 @@ class TimingsPropertiesTest {
                 "primos.timings.election-timeout-min=2s",
                 "primos.timings.election-timeout-max=4s",
                 "primos.timings.probe-interval=3s",
+                "primos.timings.advertisement-interval=60s",
                 "primos.timings.failure-threshold=5")
                 .run(context -> {
                     Timings timings = context.getBean(Timings.class);
+                    assertThat(timings.advertisementInterval()).isEqualTo(Duration.ofSeconds(60));
                     assertThat(timings.heartbeatInterval()).isEqualTo(Duration.ofMillis(250));
                     assertThat(timings.electionTimeoutMin()).isEqualTo(Duration.ofSeconds(2));
                     assertThat(timings.electionTimeoutMax()).isEqualTo(Duration.ofSeconds(4));
@@ -83,6 +85,15 @@ class TimingsPropertiesTest {
      * A profile is a set of values chosen to hold together, so half of one is not a profile any
      * more. Refused rather than merged, and the message names both sides of the conflict.
      */
+    @Test
+    void the_advertisement_interval_counts_as_an_explicit_interval() {
+        runner("primos.timings.profile=wan",
+                "primos.timings.advertisement-interval=60s")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure()
+                        .hasStackTraceContaining("advertisement-interval"));
+    }
+
     @Test
     void a_profile_and_an_explicit_interval_together_are_refused() {
         runner("primos.timings.profile=wan",

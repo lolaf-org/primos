@@ -227,6 +227,14 @@ public final class MessageDecoder {
             case LEAVING:
                 handler.onLeaving(senderId, term);
                 break;
+            case TIMINGS:
+                handler.onTimings(senderId, term,
+                        datagram.getInt(WireFormat.HEADER_BYTES),
+                        datagram.getInt(WireFormat.HEADER_BYTES + 4),
+                        datagram.getInt(WireFormat.HEADER_BYTES + 8),
+                        datagram.getInt(WireFormat.HEADER_BYTES + 12),
+                        datagram.getInt(WireFormat.HEADER_BYTES + 16));
+                break;
             default:
                 throw new IllegalStateException("unhandled message type " + type);
         }

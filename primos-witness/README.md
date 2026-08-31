@@ -201,6 +201,7 @@ which one shared file makes impossible.
 | `timings.election.min.millis` | `300` | **no** |
 | `timings.election.max.millis` | `600` | **no** |
 | `timings.probe.millis` | `1000` | **no** |
+| `timings.advertisement.millis` | `30000` | **no** |
 | `timings.failure.threshold` | `3` | **no** |
 | `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
@@ -228,6 +229,7 @@ timings.heartbeat.millis=250
 timings.election.min.millis=2000
 timings.election.max.millis=4000
 timings.probe.millis=3000
+timings.advertisement.millis=60000
 timings.failure.threshold=5
 ```
 
