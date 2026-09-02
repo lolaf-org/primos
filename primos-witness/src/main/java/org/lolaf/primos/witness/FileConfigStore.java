@@ -677,11 +677,25 @@ public final class FileConfigStore implements ConfigStore {
         return properties;
     }
 
+    /**
+     * Says what is being served, and warns only where an empty set is actually wrong.
+     *
+     * <p>Under {@link ConfigSource#CLUSTER} an empty {@code applications/} is the intended shape,
+     * not a mistake: applications are created from the config messages their nodes send, timings
+     * come from those messages, and keys live in the keyring — so a plug-and-play witness needs
+     * that directory not to exist at all. Warning there would put a line in every startup log of a
+     * correct deployment, which is how a warning stops being read.
+     */
     private void logServedApplications() {
         ConfigSnapshot snapshot = current;
         if (snapshot.applications().isEmpty()) {
-            log.warn("no applications configured in {}. With config.source=file this witness will serve"
-                    + " nobody.", applicationsDirectory);
+            if (snapshot.settings().configSource().isCluster()) {
+                log.info("no applications configured in {}; with config.source=cluster they arrive"
+                        + " from the clusters themselves", applicationsDirectory);
+            } else {
+                log.warn("no applications configured in {}. With config.source=file this witness"
+                        + " will serve nobody.", applicationsDirectory);
+            }
         } else {
             log.info("serving {} application(s): {}", snapshot.applications().size(),
                     String.join(", ", snapshot.applicationNames()));

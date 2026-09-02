@@ -484,7 +484,7 @@ Worth alerting on:
 
 | level | message | means |
 |---|---|---|
-| WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody |
+| WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody. Under `cluster` this is INFO, because empty is the intended shape |
 | WARN | `no keys are configured` | see rule 3 |
 | WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
 | WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |

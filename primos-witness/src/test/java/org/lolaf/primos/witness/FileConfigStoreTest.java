@@ -583,6 +583,34 @@ class FileConfigStoreTest {
         }
     }
 
+    @Test
+    void an_empty_applications_directory_is_the_intended_shape_under_cluster() throws IOException {
+        settings("config.source=cluster\nsecret.platform.value = k");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().applications())
+                    .as("applications arrive from their own nodes, so there is nothing to configure")
+                    .isEmpty();
+            assertThat(store.current().settings().configSource()).isEqualTo(ConfigSource.CLUSTER);
+        }
+    }
+
+    /**
+     * A witness in full cluster mode needs exactly one file. Keys are in the keyring, timings come
+     * from the clusters, applications create themselves — so the per-tenant directory that cannot
+     * fit a single Kubernetes ConfigMap need not exist at all.
+     */
+    @Test
+    void the_applications_directory_need_not_exist_at_all() throws IOException {
+        Files.delete(directory.resolve("applications"));
+        settings("config.source=cluster\nsecret.platform.value = k");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().applications()).isEmpty();
+            assertThat(store.current().settings().keyring().keys()).hasSize(1);
+        }
+    }
+
     // --------------------------------------------------------------- helpers
 
     private FileConfigStore open() {
