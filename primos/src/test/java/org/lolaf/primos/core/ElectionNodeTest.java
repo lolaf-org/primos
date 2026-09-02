@@ -497,7 +497,7 @@ class ElectionNodeTest {
                            int electionMax, int probe, int failureThreshold) {
         MessageEncoder encoder = new MessageEncoder("t", fromPeer, MessageAuthenticator.disabled());
         ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        network.transportFor(fromPeer).send(to.config().nodeId(), encoder.timings(
+        network.transportFor(fromPeer).send(to.config().nodeId(), encoder.nodeConfig(
                 buffer, to.currentTerm(), heartbeat, electionMin, electionMax, probe,
                 failureThreshold));
         to.runOnce(0);

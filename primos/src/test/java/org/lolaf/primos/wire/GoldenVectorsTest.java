@@ -66,7 +66,7 @@ class GoldenVectorsTest {
      * Header, then heartbeat 50ms, election 300-600ms, probe 1000ms, failure threshold 3 — the LAN
      * profile, as five big-endian {@code u32}s.
      */
-    private static final String TIMINGS =
+    private static final String NODE_CONFIG =
             "50524d53010900006f7264657273000000000000000000000000000000000000"
                     + "0000000000000000000000000000002a00000003"
                     + "000000320000012c00000258000003e800000003";
@@ -138,8 +138,8 @@ class GoldenVectorsTest {
     }
 
     @Test
-    void timings_appends_five_big_endian_millisecond_values() {
-        assertThat(hex(encoder.timings(buffer, 42, 50, 300, 600, 1000, 3))).isEqualTo(TIMINGS);
+    void node_config_appends_five_big_endian_millisecond_values() {
+        assertThat(hex(encoder.nodeConfig(buffer, 42, 50, 300, 600, 1000, 3))).isEqualTo(NODE_CONFIG);
     }
 
     @Test
@@ -162,15 +162,15 @@ class GoldenVectorsTest {
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);
         assertThat(MessageType.TIMEOUT_NOW.messageBytes()).isEqualTo(52);
         assertThat(MessageType.LEAVING.messageBytes()).isEqualTo(52);
-        assertThat(MessageType.TIMINGS.messageBytes()).isEqualTo(72);
+        assertThat(MessageType.NODE_CONFIG.messageBytes()).isEqualTo(72);
         assertThat(WireFormat.HEADER_BYTES).isEqualTo(52);
     }
 
     @Test
     void the_largest_authenticated_message_leaves_the_datagram_budget_untroubled() {
-        // TIMINGS took this title from PING when it was added: five u32s is a bigger payload than
+        // NODE_CONFIG took this title from PING when it was added: five u32s is a bigger payload
         // one u64. Still less than a quarter of the budget, and still fixed.
-        int largest = MessageType.TIMINGS.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
+        int largest = MessageType.NODE_CONFIG.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
 
         assertThat(largest).isEqualTo(104).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
         for (MessageType type : MessageType.values()) {
@@ -197,7 +197,7 @@ class GoldenVectorsTest {
         assertThat(MessageType.forCode(0x06)).isEqualTo(MessageType.PING_REPLY);
         assertThat(MessageType.forCode(0x07)).isEqualTo(MessageType.TIMEOUT_NOW);
         assertThat(MessageType.forCode(0x08)).isEqualTo(MessageType.LEAVING);
-        assertThat(MessageType.forCode(0x09)).isEqualTo(MessageType.TIMINGS);
+        assertThat(MessageType.forCode(0x09)).isEqualTo(MessageType.NODE_CONFIG);
         assertThat(MessageType.forCode(0x0A)).isNull();
     }
 }

@@ -112,9 +112,9 @@ final class CapturedReply implements MessageHandler {
     }
 
     @Override
-    public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
-                          int electionMaxMillis, int probeMillis, int failureThreshold) {
-        messages.add("timings(" + senderId + "," + term + "," + heartbeatMillis + ","
+    public void onNodeConfig(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                             int electionMaxMillis, int probeMillis, int failureThreshold) {
+        messages.add("nodeConfig(" + senderId + "," + term + "," + heartbeatMillis + ","
                 + electionMinMillis + "," + electionMaxMillis + "," + probeMillis + ","
                 + failureThreshold + ")");
     }

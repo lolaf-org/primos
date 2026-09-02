@@ -234,8 +234,8 @@ final class WitnessClient implements AutoCloseable {
         }
 
         @Override
-        public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
-                              int electionMaxMillis, int probeMillis, int failureThreshold) {
+        public void onNodeConfig(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                                 int electionMaxMillis, int probeMillis, int failureThreshold) {
             this.timings = true;
             this.heartbeatMillis = heartbeatMillis;
             this.electionMinMillis = electionMinMillis;

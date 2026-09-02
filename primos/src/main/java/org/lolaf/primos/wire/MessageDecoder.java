@@ -227,8 +227,8 @@ public final class MessageDecoder {
             case LEAVING:
                 handler.onLeaving(senderId, term);
                 break;
-            case TIMINGS:
-                handler.onTimings(senderId, term,
+            case NODE_CONFIG:
+                handler.onNodeConfig(senderId, term,
                         datagram.getInt(WireFormat.HEADER_BYTES),
                         datagram.getInt(WireFormat.HEADER_BYTES + 4),
                         datagram.getInt(WireFormat.HEADER_BYTES + 8),

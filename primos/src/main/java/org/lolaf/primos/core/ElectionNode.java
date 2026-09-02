@@ -98,7 +98,7 @@ public final class ElectionNode implements MessageHandler {
     private long lastLeaderContactNanos;
     private long probeDeadlineNanos;
     private long probeSequence;
-    private long timingsAdvertDeadlineNanos;
+    private long nodeConfigDeadlineNanos;
     private long roleChangedAtNanos;
     private boolean preVoting;
     private long preVoteTerm;
@@ -282,7 +282,7 @@ public final class ElectionNode implements MessageHandler {
         // reported almost as promptly. Not zero for a second reason: a deadline of "now" is shared
         // by every node in the cluster, which would make nextDeadlineNanos() identical everywhere
         // at startup and hide the randomised election timeout behind it.
-        timingsAdvertDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        nodeConfigDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
         resetElectionTimer();
     }
 
@@ -341,7 +341,7 @@ public final class ElectionNode implements MessageHandler {
         if (role == Role.FAILED) {
             return Long.MAX_VALUE;
         }
-        long deadline = Math.min(probeDeadlineNanos, timingsAdvertDeadlineNanos);
+        long deadline = Math.min(probeDeadlineNanos, nodeConfigDeadlineNanos);
         if (role == Role.LEADER) {
             deadline = Math.min(deadline, heartbeatDeadlineNanos);
         } else if (!config.isWitness()) {
@@ -411,9 +411,9 @@ public final class ElectionNode implements MessageHandler {
             probeRound(now);
             probeDeadlineNanos = now + timings.probeInterval().toNanos();
         }
-        if (now >= timingsAdvertDeadlineNanos) {
-            advertiseTimings();
-            timingsAdvertDeadlineNanos = now + timings.advertisementInterval().toNanos();
+        if (now >= nodeConfigDeadlineNanos) {
+            advertiseNodeConfig();
+            nodeConfigDeadlineNanos = now + timings.advertisementInterval().toNanos();
         }
         if (role == Role.LEADER) {
             if (!hasQuorumContact(now)) {
@@ -534,9 +534,9 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    private void advertiseTimings() {
+    private void advertiseNodeConfig() {
         for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.timings(sendBuffer, currentTerm,
+            send(peer.peer.id(), encoder.nodeConfig(sendBuffer, currentTerm,
                     (int) timings.heartbeatInterval().toMillis(),
                     (int) timings.electionTimeoutMin().toMillis(),
                     (int) timings.electionTimeoutMax().toMillis(),
@@ -635,8 +635,8 @@ public final class ElectionNode implements MessageHandler {
     }
 
     @Override
-    public void onTimings(int senderId, long term, int heartbeatMillis, int electionMinMillis,
-                          int electionMaxMillis, int probeMillis, int failureThreshold) {
+    public void onNodeConfig(int senderId, long term, int heartbeatMillis, int electionMinMillis,
+                             int electionMaxMillis, int probeMillis, int failureThreshold) {
         if (term > currentTerm) {
             stepDown(term);
         }

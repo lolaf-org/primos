@@ -73,19 +73,23 @@ public enum MessageType {
     LEAVING(0x08, 0),
 
     /**
-     * A node telling its peers which intervals it is running.
+     * A node stating its own configuration: which intervals it is running.
      *
      * <p>Five {@code u32} millisecond values: heartbeat, the two election timeout bounds, the probe
-     * interval and the failure threshold. Purely diagnostic — a receiver compares them with its own
-     * and says so when they differ, and <strong>changes no decision whatever it finds</strong>. A
-     * mismatch that refused a vote would turn a rolling timing change into a partition, which is a
-     * worse failure than the silent slowness it detects.
+     * interval and the failure threshold. The application name it belongs to is already in the
+     * header, as it is on every message, so this carries a whole cluster's timing configuration.
+     *
+     * <p><strong>Between nodes it is purely diagnostic</strong> — a receiver compares the values
+     * with its own, says so when they differ, and changes no decision whatever it finds. A mismatch
+     * that refused a vote would turn a rolling timing change into a partition, which is a worse
+     * failure than the silent slowness it detects. A witness server is the one exception, and only
+     * when its operator has asked for it: see {@code ConfigSource}.
      *
      * <p>Values rather than a hash, because "peer 2 has heartbeat=200ms, we have 50ms" is the whole
      * diagnosis in one line, and a hash could only say that something differs. The same trade the
      * application name makes by travelling readable rather than hashed.
      */
-    TIMINGS(0x09, 20);
+    NODE_CONFIG(0x09, 20);
 
     private static final MessageType[] BY_CODE = new MessageType[256];
 
