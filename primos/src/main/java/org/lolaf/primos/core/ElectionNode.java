@@ -150,15 +150,6 @@ public final class ElectionNode implements MessageHandler {
     /**
      * The intervals a peer most recently stated, assembled and validated — witness only, null
      * until one arrives.
-     *
-     * <p><strong>This node never reads it.</strong> It is published for an owner that has been
-     * told to follow the cluster it serves, and publishing is the whole of what happens here: the
-     * report-never-act rule that governs {@link #onNodeConfig} is untouched, because acting on
-     * this is a decision taken outside, by something that knows whether its operator asked for it.
-     *
-     * <p>Last valid statement wins. A cluster whose own nodes disagree is already being told so at
-     * ERROR by every one of them, and a witness arbitrating between them would be settling a
-     * dispute it has strictly less information about than they do.
      */
     @Getter
     private Timings observedTimings;
@@ -431,7 +422,7 @@ public final class ElectionNode implements MessageHandler {
         }
         if (now >= nodeConfigDeadlineNanos) {
             advertiseNodeConfig();
-            nodeConfigDeadlineNanos = now + timings.advertisementInterval().toNanos();
+            nodeConfigDeadlineNanos = now + nextNodeConfigIntervalNanos();
         }
         if (role == Role.LEADER) {
             if (!hasQuorumContact(now)) {
@@ -550,6 +541,19 @@ public final class ElectionNode implements MessageHandler {
         for (TrackedPeer peer : peers) {
             send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm));
         }
+    }
+
+    /**
+     * How long until this node restates itself: probe cadence while anybody is silent, else the
+     * advertisement interval.
+     */
+    private long nextNodeConfigIntervalNanos() {
+        for (TrackedPeer peer : peers) {
+            if (!peer.reachable) {
+                return timings.probeInterval().toNanos();
+            }
+        }
+        return timings.advertisementInterval().toNanos();
     }
 
     private void advertiseNodeConfig() {

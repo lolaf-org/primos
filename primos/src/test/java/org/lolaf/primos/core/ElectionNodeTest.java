@@ -489,6 +489,81 @@ class ElectionNodeTest {
     }
 
     /**
+     * One statement every thirty seconds is the right steady state and the wrong bootstrap: this is
+     * UDP, and the case where the first is dropped is the case that most needs it — a witness taking
+     * its configuration from the cluster cannot serve one it has never heard state itself.
+     */
+    @Test
+    void a_node_restates_itself_at_probe_cadence_while_a_peer_has_not_answered() {
+        ElectionNode node = startedNode();
+
+        int statements = countNodeConfigsOverTenSeconds(node);
+
+        assertThat(statements)
+                .as("nobody has answered, so a lost statement must not cost an advertisement"
+                        + " interval of silence")
+                .isGreaterThan(5);
+    }
+
+    /**
+     * The negative pair, and without it the test above passes on a node that simply states itself
+     * constantly — which would be the same bug wearing the fix's clothes.
+     */
+    @Test
+    void it_settles_to_the_advertisement_interval_once_every_peer_has_answered() {
+        ElectionNode node = startedNode(peers(2));
+        // A real node at 2, so its probes are answered and it becomes reachable.
+        ClusterConfig peerConfig = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(2)
+                .peer(Peer.application(1, "h", 1))
+                .build();
+        ElectionNode peer = new ElectionNode(peerConfig, new MemoryStateStore(),
+                network.transportFor(2), clock, new Random(2L), MessageAuthenticator.disabled());
+        peer.start();
+
+        // Let them find each other first, then measure the settled cadence.
+        for (int i = 0; i < 40; i++) {
+            clock.advance(Duration.ofMillis(250));
+            node.runOnce(0L);
+            peer.runOnce(0L);
+        }
+        CapturedReply seen = new CapturedReply("t");
+        int before = countNodeConfigs(seen.drain(network.transportFor(2)));
+        for (int i = 0; i < 40; i++) {
+            clock.advance(Duration.ofMillis(250));
+            node.runOnce(0L);
+            peer.runOnce(0L);
+        }
+
+        int statements = countNodeConfigs(seen.drain(network.transportFor(2))) - before;
+        assertThat(statements)
+                .as("a cluster whose peers all answer says this once per advertisement interval,"
+                        + " not once per probe")
+                .isLessThanOrEqualTo(1);
+    }
+
+    private int countNodeConfigsOverTenSeconds(ElectionNode node) {
+        CapturedReply seen = new CapturedReply("t");
+        for (int i = 0; i < 40; i++) {
+            clock.advance(Duration.ofMillis(250));
+            node.runOnce(0L);
+            seen.drain(network.transportFor(2));
+        }
+        return countNodeConfigs(seen);
+    }
+
+    private static int countNodeConfigs(CapturedReply seen) {
+        int count = 0;
+        for (String message : seen.messages()) {
+            if (message.startsWith("nodeConfig(")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * The pair to the tests above: a witness told to follow reports nothing, because there is
      * nothing to report — the difference it sees is the value it is about to be rebuilt with, so
      * an ERROR on every retune would describe a state lasting one turn as a fault.

@@ -175,6 +175,37 @@ class MultiApplicationSoakTest {
         assertThat(leaderOf(pair)).isEqualTo(leader);
     }
 
+    /**
+     * The whole of {@code config.source=cluster}, end to end and over real sockets.
+     *
+     * <p>Nothing configures this cluster here: no file names it, and the witness is built without
+     * the timings override the other scenarios use, so what it runs is what the nodes state. A pair
+     * that fails over correctly is the proof, because every step had to work — the nodes' config
+     * messages had to arrive and create the application, the witness had to adopt their intervals,
+     * and it had to grant the vote that breaks the tie on them.
+     */
+    @Test
+    void a_cluster_nobody_configured_is_served_on_the_intervals_it_states() throws IOException {
+        Files.write(directory.resolve("witness.properties"),
+                ("config.source=cluster\nsecret=" + SECRET).getBytes(StandardCharsets.UTF_8));
+        server = WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                .build();
+        serverThread = new Thread(server::run, "witness-under-test");
+        serverThread.setDaemon(true);
+        serverThread.start();
+
+        List<PrimosNode> pair = startPartitionedPair("payments");
+
+        await().atMost(30, TimeUnit.SECONDS).until(() -> leaderCount(pair) == 1);
+        assertThat(server.servedApplications()).contains("payments");
+        assertThat(server.votedFor("payments"))
+                .as("the witness's own record names the node that actually leads")
+                .isEqualTo(leaderOf(pair));
+    }
+
     // ---------------------------------------------------------------- plumbing
 
     private void startWitness() {
