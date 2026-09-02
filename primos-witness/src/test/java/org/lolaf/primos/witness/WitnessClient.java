@@ -93,6 +93,16 @@ final class WitnessClient implements AutoCloseable {
         exchange(server, encoder.appendEntries(send, term));
     }
 
+    /**
+     * States this node's configuration, which is what creates an application under
+     * {@code ConfigSource.CLUSTER}. LAN values, since nothing here is testing the numbers.
+     */
+    void announceConfig(WitnessServer server) {
+        write(encoder.nodeConfig(send, 0L, 50, 300, 600, 1000, 3));
+        server.runOnce(Duration.ofMillis(20).toNanos());
+        server.runOnce(0L);
+    }
+
     /** Sends without waiting for anything, for traffic that is expected to be dropped. */
     void fireAndForget(WitnessServer server, long term) {
         write(encoder.requestVote(send, term, false));
@@ -128,12 +138,12 @@ final class WitnessClient implements AutoCloseable {
      * this. Anything else arriving meanwhile is ignored, the same discipline {@link #exchange}
      * follows: the witness probes every voter it knows, so a probe landing here is ordinary.
      */
-    Reply awaitTimings(WitnessServer server) {
+    Reply awaitNodeConfig(WitnessServer server) {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
             server.runOnce(Duration.ofMillis(5).toNanos());
             Reply reply = tryReceive();
-            if (reply != null && reply.timings) {
+            if (reply != null && reply.nodeConfig) {
                 return reply;
             }
         }
@@ -180,7 +190,7 @@ final class WitnessClient implements AutoCloseable {
         private boolean answered;
         private boolean handedOver;
         private boolean leaving;
-        private boolean timings;
+        private boolean nodeConfig;
 
         /** The advertised intervals, package-private so a test can compare them with the file. */
         int heartbeatMillis;
@@ -236,7 +246,7 @@ final class WitnessClient implements AutoCloseable {
         @Override
         public void onNodeConfig(int senderId, long term, int heartbeatMillis, int electionMinMillis,
                                  int electionMaxMillis, int probeMillis, int failureThreshold) {
-            this.timings = true;
+            this.nodeConfig = true;
             this.heartbeatMillis = heartbeatMillis;
             this.electionMinMillis = electionMinMillis;
             this.electionMaxMillis = electionMaxMillis;

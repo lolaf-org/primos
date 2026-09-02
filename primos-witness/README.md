@@ -344,22 +344,30 @@ Keys marked not hot-reloadable are read and ignored with a log line, rather than
 
 ---
 
-## Registration modes
+## Where configuration comes from — `config.source`
 
-### `strict` (default)
+### `file` (default)
 
 Serves exactly the applications configured in `applications/`, and drops everything else, counted
-and logged once per unseen name.
+and logged once per unseen name. Nothing arriving over the network changes any configuration here.
+This is the mode for a deployment whose operator has a hard constraint against automatic change.
 
-### `permissive`
+### `cluster`
 
 Serves any application name it hears, creating state for it. Less operational burden, a legitimate
 choice — and the way a typo becomes a split brain.
 
-**Its precondition, which is easy to miss:** an auto-registered application has no file, so it takes
-the witness-wide `secret`, `secret.algorithm` and timings. Permissive mode therefore only serves
-clusters that are **identical in all three**. That is not a small print detail — it is what the mode
-is for. It suits a platform team running many clusters from one template, on one network, with one
+**Only a node stating its own configuration creates an application.** A `Ping`, a `RequestVote` or a
+heartbeat naming an application this witness does not serve is dropped and counted under
+`awaitingNodeConfig`; nothing is created until one of that cluster's nodes says what intervals it is
+running. That is ordinary and brief while a cluster starts — its first probes and votes arrive
+before its first config message — and it is what stops the witness ever serving a tenant it has no
+timings for. Sustained, it means a cluster is talking to this witness and never saying who it is.
+
+**Its precondition, which is easy to miss:** a cluster-created application has no file, so it takes
+the witness-wide `secret`, `secret.algorithm` and timings. `cluster` therefore only serves clusters
+that are **identical in all three**. That is not a small print detail — it is what the mode is for.
+It suits a platform team running many clusters from one template, on one network, with one
 secret injected by the deploy system; the witness-wide values are then correct by construction. It
 does not suit clusters that differ, and the failures are not alike:
 
@@ -372,7 +380,7 @@ The timing case used to be the dangerous one, because it was silent. Since nodes
 intervals, it is not: a cluster that does not fit the template now says so. **Give any such cluster
 its own file** — a file may exist in `applications/` while the mode is permissive, and it wins.
 
-**The walkthrough that is the reason `strict` is the default:**
+**The walkthrough that is the reason `file` is the default:**
 
 > Two clusters are deployed. One is configured `orders`. The other, through a typo in a config
 > file, is configured `ordres`.

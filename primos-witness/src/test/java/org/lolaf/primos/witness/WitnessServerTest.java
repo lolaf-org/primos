@@ -96,8 +96,8 @@ class WitnessServerTest {
             orders.heartbeat(server, 1);
             billing.heartbeat(server, 1);
 
-            WitnessClient.Reply toOrders = orders.awaitTimings(server);
-            WitnessClient.Reply toBilling = billing.awaitTimings(server);
+            WitnessClient.Reply toOrders = orders.awaitNodeConfig(server);
+            WitnessClient.Reply toBilling = billing.awaitNodeConfig(server);
 
             assertThat(toOrders).as("the witness never advertised to 'orders'").isNotNull();
             assertThat(toOrders.heartbeatMillis).isEqualTo(20);
@@ -212,11 +212,12 @@ class WitnessServerTest {
     }
 
     @Test
-    void permissive_mode_serves_an_application_nobody_configured() {
+    void cluster_mode_serves_an_application_nobody_configured() {
         settings("config.source=cluster\nsecret=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
+            stranger.announceConfig(server);
             assertThat(stranger.requestVote(server, 1L)).isTrue();
         }
 
@@ -226,13 +227,13 @@ class WitnessServerTest {
     }
 
     @Test
-    void permissive_mode_stops_auto_registering_at_its_limit() {
+    void cluster_mode_stops_creating_applications_at_its_limit() {
         settings("config.source=cluster\nconfig.cluster.limit=2\nsecret=" + SECRET);
         start();
 
         for (String name : new String[] {"one", "two", "three", "four"}) {
             try (WitnessClient stranger = client(name, 1)) {
-                stranger.fireAndForget(server, 1L);
+                stranger.announceConfig(server);
             }
         }
 
@@ -240,6 +241,59 @@ class WitnessServerTest {
                 .as("an unauthenticated witness must not be fillable by whoever can reach the port")
                 .containsExactly("one", "two");
         assertThat(server.routing().autoRegistrationsRefused()).isEqualTo(2L);
+    }
+
+    @Test
+    void cluster_mode_does_not_create_an_application_from_a_vote_request() {
+        settings("config.source=cluster\nsecret=" + SECRET);
+        start();
+
+        try (WitnessClient stranger = client("payments", 1)) {
+            // A vote is the most consequential thing it could ask for, and the witness has no
+            // timings to answer it by until the cluster has said what they are.
+            assertThat(stranger.requestVote(server, 1L))
+                    .as("an unserved application gets no answer until it states its configuration")
+                    .isNull();
+        }
+
+        assertThat(server.servedApplications()).isEmpty();
+        assertThat(server.routing().autoRegistrations()).isZero();
+        assertThat(server.routing().awaitingNodeConfig()).isEqualTo(1L);
+    }
+
+    @Test
+    void cluster_mode_creates_the_application_once_its_config_arrives() {
+        settings("config.source=cluster\nsecret=" + SECRET);
+        start();
+
+        try (WitnessClient stranger = client("payments", 1)) {
+            assertThat(stranger.requestVote(server, 1L)).isNull();
+            assertThat(server.servedApplications()).isEmpty();
+
+            // The pair to the assertion above: the same node, the same witness, one config
+            // message in between. Without this the test above would pass on a broken witness
+            // that served nobody at all.
+            stranger.announceConfig(server);
+
+            assertThat(server.servedApplications()).containsExactly("payments");
+            assertThat(stranger.requestVote(server, 1L)).isTrue();
+        }
+    }
+
+    @Test
+    void file_mode_creates_nothing_whatever_the_message_is() {
+        settings("config.source=file\nsecret=" + SECRET);
+        start();
+
+        try (WitnessClient stranger = client("payments", 1)) {
+            stranger.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications())
+                .as("a config message is not a way past an operator's explicit tenant list")
+                .isEmpty();
+        assertThat(server.routing().unservedApplication()).isEqualTo(1L);
+        assertThat(server.routing().autoRegistrations()).isZero();
     }
 
     @Test

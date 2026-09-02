@@ -122,6 +122,29 @@ public final class MessageDecoder {
         return name;
     }
 
+    /**
+     * The type a datagram claims to be, before anything about it has been verified.
+     *
+     * <p>The same exception, and the same reasoning, as {@link #peekApplicationName}: a witness
+     * server has to decide what to do with a datagram for an application it does not yet serve, and
+     * under {@code ConfigSource.CLUSTER} only a {@link MessageType#NODE_CONFIG} may bring one into
+     * existence. That decision has to be taken before the key is known, so it is taken on a claim.
+     *
+     * <p>A claim is enough here because of what it is allowed to decide. It selects between
+     * dropping a datagram and creating an empty state bucket for it; it never grants a vote, moves
+     * a term or answers anybody. Everything downstream still runs through the full pipeline with
+     * the tag verified first, so a forged type buys an attacker nothing a forged name did not
+     * already buy them, and the cluster application limit is what bounds both.
+     *
+     * @return the type claimed, or null if the datagram is too short or names no known type
+     */
+    public static MessageType peekMessageType(ByteBuffer datagram) {
+        if (datagram.limit() < WireFormat.HEADER_BYTES) {
+            return null;
+        }
+        return MessageType.forCode(datagram.get(WireFormat.OFFSET_TYPE) & 0xFF);
+    }
+
     private static boolean hasMagic(ByteBuffer datagram) {
         for (int i = 0; i < WireFormat.MAGIC.length; i++) {
             if (datagram.get(WireFormat.OFFSET_MAGIC + i) != WireFormat.MAGIC[i]) {

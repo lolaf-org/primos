@@ -28,6 +28,7 @@ import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageDecoder;
+import org.lolaf.primos.wire.MessageType;
 import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
@@ -142,6 +143,7 @@ public final class WitnessServer implements AutoCloseable {
     private long unusableName;
     private long droppedForFailedApplication;
     private long autoRegistrations;
+    private long awaitingNodeConfig;
 
     private WitnessServer(Builder builder) {
         this.configStore = Objects.requireNonNull(builder.configStore, "configStore");
@@ -286,7 +288,8 @@ public final class WitnessServer implements AutoCloseable {
             undeliverable += application.transport.sendsDropped();
         }
         return new RoutingStats(unroutable, unservedApplication, autoRegistrationsRefused,
-                unusableName, droppedForFailedApplication, autoRegistrations, overflowed,
+                unusableName, droppedForFailedApplication, autoRegistrations, awaitingNodeConfig,
+                overflowed,
                 undeliverable);
     }
 
@@ -371,7 +374,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         Served target = served.get(application);
         if (target == null) {
-            target = admit(application, source);
+            target = admit(application, MessageDecoder.peekMessageType(datagram), source);
             if (target == null) {
                 return;
             }
@@ -388,7 +391,7 @@ public final class WitnessServer implements AutoCloseable {
      *
      * @return the application now serving it, or null if the datagram is to be dropped
      */
-    private Served admit(String application, InetSocketAddress source) {
+    private Served admit(String application, MessageType claimed, InetSocketAddress source) {
         boolean firstSighting = rememberName(application);
         WitnessSettings settings = configStore.current().settings();
 
@@ -405,6 +408,21 @@ public final class WitnessServer implements AutoCloseable {
             unservedApplication++;
             if (firstSighting) {
                 warnUnserved(application, source);
+            }
+            return null;
+        }
+        // Only a node's own statement of its configuration may bring an application into
+        // existence. A Ping or a RequestVote would create one with no timings to serve it by, so
+        // the witness would run that tenant on its own defaults until an advertisement happened to
+        // arrive — a window in which the vote it exists to cast is governed by the wrong numbers.
+        // Waiting for the config message makes that window unrepresentable rather than short.
+        if (claimed != MessageType.NODE_CONFIG) {
+            awaitingNodeConfig++;
+            if (firstSighting) {
+                log.info("heard {} from application '{}' at {}, which nothing configures. Holding"
+                                + " off until one of its nodes states its configuration; that is"
+                                + " what creates an application here.",
+                        claimed == null ? "an unreadable datagram" : claimed, application, source);
             }
             return null;
         }
@@ -710,9 +728,19 @@ public final class WitnessServer implements AutoCloseable {
         long droppedForFailedApplication;
 
         /**
-         * Applications that appeared by themselves. On a strict witness this is always zero.
+         * Applications that appeared by themselves. Under {@code ConfigSource.FILE} always zero.
          */
         long autoRegistrations;
+
+        /**
+         * Datagrams from an unserved application that were not its nodes stating their config.
+         *
+         * <p>Ordinary and transient while a new cluster starts: its probes and votes arrive before
+         * the config message that creates it. Sustained, it means a cluster is talking to this
+         * witness and never saying who it is — a version mismatch, or a name nobody configured
+         * under {@code ConfigSource.FILE}.
+         */
+        long awaitingNodeConfig;
 
         /**
          * Datagrams dropped because an application's inbox was full.

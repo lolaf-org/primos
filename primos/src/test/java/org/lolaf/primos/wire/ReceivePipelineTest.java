@@ -236,6 +236,32 @@ class ReceivePipelineTest {
     }
 
     @Test
+    void the_message_type_can_be_read_before_the_tag_is_verified() {
+        MessageEncoder encoder = new MessageEncoder("orders", 1,
+                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)));
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+        assertThat(MessageDecoder.peekMessageType(encoder.nodeConfig(buffer, 1L, 50, 300, 600, 1000, 3)))
+                .as("a witness decides whether a name may create an application from the type"
+                        + " claimed, before it knows the key that would prove it")
+                .isEqualTo(MessageType.NODE_CONFIG);
+        assertThat(MessageDecoder.peekMessageType(encoder.requestVote(buffer, 1L, false)))
+                .isEqualTo(MessageType.REQUEST_VOTE);
+    }
+
+    @Test
+    void a_datagram_too_short_or_naming_no_known_type_peeks_as_nothing() {
+        assertThat(MessageDecoder.peekMessageType(ByteBuffer.allocate(8))).isNull();
+
+        ByteBuffer unknown = ByteBuffer.allocate(WireFormat.HEADER_BYTES);
+        unknown.put(WireFormat.OFFSET_TYPE, (byte) 0x7F);
+        unknown.limit(WireFormat.HEADER_BYTES);
+        assertThat(MessageDecoder.peekMessageType(unknown))
+                .as("an unknown type must not become a type the caller then switches on")
+                .isNull();
+    }
+
+    @Test
     void a_name_field_full_of_bytes_no_encoder_would_send_peeks_as_nothing() {
         ByteBuffer datagram = ByteBuffer.allocate(WireFormat.HEADER_BYTES);
         datagram.put(WireFormat.OFFSET_APPLICATION, (byte) 0x01);
