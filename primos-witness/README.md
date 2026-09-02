@@ -58,7 +58,7 @@ It refuses to start on a store that reports itself non-durable, rather than warn
 
 Removing an application's configuration stops it being served but **leaves its state on disk**,
 deliberately: a cluster that comes back later still needs the vote it was given remembered. A
-permissive witness therefore accumulates state until an operator cleans it up.
+witness on `config.source=cluster` therefore accumulates state until an operator cleans it up.
 
 ### 3. Never run without a secret
 
@@ -196,7 +196,7 @@ which one shared file makes impossible.
 | `config.cluster.limit` | `64` | yes |
 | `secret` | none | yes |
 | `secret.algorithm` | `HmacSHA256` | yes |
-| `timings.*` | see below | **no** here — but yes per application |
+| `timings.*` | see below | yes — and read but ignored under `config.source=cluster` |
 | `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
 | `reload.rescan.seconds` | `30` | yes |
@@ -234,14 +234,22 @@ every relationship between them is validated at load — a witness that would th
 rather than doing it in production.
 
 **The timing keys belong in an application's own file.** Setting them in `witness.properties` sets
-the *default* for tenants that say nothing, and that default is read once at startup. Set per
-application they are hot-reloadable like everything else there, because a reconfigured application
-has its node rebuilt.
+the *default* for tenants that say nothing. Both are hot-reloadable — the witness-wide value
+resolves into every application that does not override it, and a reconfigured application has its
+node rebuilt, keeping its state store and its learned addresses.
+
+**Under `config.source=cluster` none of them apply.** Each cluster states its own intervals and this
+witness follows them, so whatever is written here is read, parsed, and then replaced by the first
+thing that cluster's nodes say. It is logged once per application rather than ignored quietly. Set
+`config.source=file` to have this file decide instead — those are the two choices, and there is no
+merge of them.
 
 **Set them per application, not witness-wide, whenever you serve more than one cluster.** A witness
 serving a LAN cluster and a WAN one has to match both, and one witness-wide value cannot. It is not
 merely suboptimal: nodes advertise their intervals and compare them, so the mismatched tenant logs
-an error about a disagreement its operator has no way to resolve.
+an error about a disagreement its operator has no way to resolve. `config.source=cluster` is the
+other answer to the same problem — it makes each tenant's own nodes the source, so there is nothing
+here to keep in step.
 
 **Anything omitted falls back to the LAN value in the table, never to a profile's** — the two cannot
 both be set, so when you are naming intervals there is no profile for the rest to come from. A
@@ -282,8 +290,9 @@ silently truncated.
 
 An empty file is valid and means "serve this cluster with the witness-wide secret".
 
-**The timings must match what that cluster's nodes run**, and this is where to say so when tenants
-differ. A node refuses a pre-vote while it has heard from a leader within its own
+**The timings must match what that cluster's nodes run**, and under `config.source=file` this is
+where to say so when tenants differ. Under `config.source=cluster` these keys are ignored and the
+cluster's own nodes decide. A node refuses a pre-vote while it has heard from a leader within its own
 `electionTimeoutMin`, so a witness with a longer one is proportionally more reluctant to grant the
 vote a failover is waiting on — and for a two-node pair the witness's vote is the one everything
 waits on. Nothing is corrupted by a mismatch; failover just gets slower. Since nodes advertise their
@@ -365,20 +374,26 @@ before its first config message — and it is what stops the witness ever servin
 timings for. Sustained, it means a cluster is talking to this witness and never saying who it is.
 
 **Its precondition, which is easy to miss:** a cluster-created application has no file, so it takes
-the witness-wide `secret`, `secret.algorithm` and timings. `cluster` therefore only serves clusters
-that are **identical in all three**. That is not a small print detail — it is what the mode is for.
-It suits a platform team running many clusters from one template, on one network, with one
-secret injected by the deploy system; the witness-wide values are then correct by construction. It
-does not suit clusters that differ, and the failures are not alike:
+the witness-wide `secret` and `secret.algorithm`. `cluster` therefore only serves clusters that are
+**identical in both**. That is not a small print detail — it is what the mode is for. It suits a
+platform team running many clusters from one template, with one secret injected by the deploy
+system; the witness-wide values are then correct by construction.
+
+**Secrets are the one thing that can never come from the cluster**, which is why they alone remain
+a file. A secret is what authenticates the datagram that would have carried it, so taking one over
+the wire is circular; and `secret.algorithm` is deliberately absent from the wire too, because a
+datagram naming its own algorithm would let an attacker pick the weakest one both ends accept. So
+`applications/` does not stop being read under `cluster` — it stops being the served list and
+becomes a **keyring**. A cluster that needs its own secret gets its own file; per-file permissions
+still work, so one team can be granted its own secret without being shown everybody else's.
+
+Timings are not on that list. They are exactly what `cluster` sources from the network, and a
+tenant on a different profile needs nothing here at all:
 
 | differs | what happens |
 |---|---|
-| `secret` or `secret.algorithm` | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious |
-| timings | failover is slower than it looks, and both sides log an `ERROR` naming the two interval sets |
-
-The timing case used to be the dangerous one, because it was silent. Since nodes advertise their
-intervals, it is not: a cluster that does not fit the template now says so. **Give any such cluster
-its own file** — a file may exist in `applications/` while the mode is permissive, and it wins.
+| `secret` or `secret.algorithm` | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious. Give that cluster its own file |
+| timings | nothing. The witness follows what that cluster's nodes state, per application, and rebuilds when they change |
 
 **The walkthrough that is the reason `file` is the default:**
 
@@ -389,7 +404,7 @@ its own file** — a file may exist in `applications/` while the mode is permiss
 > the cross-talk protection working exactly as designed. So each side sees the other as
 > unreachable, and each asks the witness for a vote.
 >
-> A permissive witness auto-creates **two** state buckets, one per name, and grants a vote from
+> A witness on `config.source=cluster` auto-creates **two** state buckets, one per name, and grants a vote from
 > each. Both sides now have a majority. **Two leaders, out of one typo** — and the very protection
 > that should have caught the mismatch is what hides the cause, because neither cluster ever sees
 > the other's traffic.
@@ -431,6 +446,8 @@ Worth alerting on:
 | WARN | `'X' is one or two characters from 'Y'` | **near miss — check both configurations** |
 | WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |
 | WARN | `refusing to auto-register` | `config.cluster.limit` reached |
+| WARN | `stated intervals that do not hold together` | a cluster advertised a profile that could not be built; the last good one stays in force |
+| INFO | `Holding off until one of its nodes states its configuration` | ordinary while a cluster starts; sustained means it never says who it is |
 | ERROR | `cannot read the configuration in ...` | a bad edit; the last good config is still serving |
 | ERROR | `application 'X' has failed` | that cluster is no longer served — see below |
 
@@ -485,11 +502,17 @@ cluster's configuration and not as something to fix by adding a file.
 
 **Two leaders in one cluster.** Check, in order: two witness instances answering for the same
 identity (rule 1); a wiped or restored state directory (rule 2); two clusters whose names differ by
-a typo on a permissive witness (the walkthrough above).
+a typo on a witness with `config.source=cluster` (the walkthrough above).
 
-**Failover is slower than expected.** The witness's `timings.profile` should match the deployment —
-`wan` if it sits on another network. Note the witness does not campaign, so it never causes an
-election; it only answers.
+**Failover is slower than expected.** The witness's intervals should match the deployment — `wan`
+if it sits on another network, or `config.source=cluster` so the tenant's own nodes settle it. Both
+sides log an ERROR naming the two interval sets when they disagree, so this is greppable rather than
+guesswork. Note the witness does not campaign, so it never causes an election; it only answers.
+
+**A cluster is talking to the witness but is never served.** Under `config.source=cluster` only a
+node stating its configuration creates an application; look for `Holding off until one of its nodes
+states its configuration` and check that cluster is running a version that sends it. Under
+`config.source=file`, it needs `applications/<name>.properties`.
 
 ---
 
