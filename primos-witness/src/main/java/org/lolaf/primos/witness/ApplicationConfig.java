@@ -28,7 +28,8 @@ import java.util.Objects;
  *
  * <p>The name is the routing key: it selects which durable term and vote a datagram belongs to.
  * That makes a name collision between two genuinely different clusters a split brain rather than
- * an inconvenience, which is why names are validated and why the strict mode exists.
+ * an inconvenience, which is why names are validated and why {@link ConfigSource#FILE} is the
+ * default.
  */
 @Getter
 @EqualsAndHashCode

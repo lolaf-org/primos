@@ -209,8 +209,8 @@ class ClusterConfigTest {
 
         assertThat(config.isLearnedMembership()).isTrue();
         assertThat(config.allPeers())
-                .as("the witness server holds no addresses at all; in permissive mode it cannot,"
-                        + " because the clusters it serves are not known ahead of time")
+                .as("the witness server holds no addresses at all; when it learns the"
+                        + " applications it serves, it cannot know their nodes ahead of time")
                 .isEmpty();
     }
 

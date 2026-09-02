@@ -16,6 +16,7 @@
 package org.lolaf.primos.witness;
 
 import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import org.lolaf.primos.Timings;
@@ -28,8 +29,14 @@ import java.util.Objects;
 
 /**
  * The witness server's own settings, as opposed to the applications it serves.
+ *
+ * <p>Value equality is not decoration: it is how a reload tells a settings-only change from no
+ * change at all. {@code FileConfigStore} compared the served applications and nothing else, so a
+ * changed registration mode or auto-registration limit was parsed and then dropped on the floor —
+ * silently, because the snapshot it belonged to was never published.
  */
 @Getter
+@EqualsAndHashCode
 public final class WitnessSettings {
 
     private final InetSocketAddress bindAddress;
@@ -39,7 +46,7 @@ public final class WitnessSettings {
      */
     private final Path stateDirectory;
 
-    private final RegistrationMode registrationMode;
+    private final ConfigSource configSource;
 
     /**
      * Read through {@link #defaultSecret()}, which copies: the array is a secret and handing the
@@ -58,9 +65,10 @@ public final class WitnessSettings {
     private final String defaultMacAlgorithm;
 
     /**
-     * How many applications may auto-register, so an open witness cannot be filled up.
+     * How many applications {@link ConfigSource#CLUSTER} may create, so an open witness cannot be
+     * filled up by whoever can reach the port.
      */
-    private final int autoRegistrationLimit;
+    private final int clusterApplicationLimit;
 
     /**
      * Quiet period after a file change before reloading, so one save is one reload.
@@ -100,12 +108,12 @@ public final class WitnessSettings {
     private WitnessSettings(Builder builder) {
         this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
         this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
-        this.registrationMode = Objects.requireNonNull(builder.registrationMode, "registrationMode");
+        this.configSource = Objects.requireNonNull(builder.configSource, "configSource");
         // Copied rather than kept, because it is a secret and the caller's array is theirs.
         this.defaultSecret = builder.defaultSecret == null ? null : builder.defaultSecret.clone();
         this.defaultMacAlgorithm = Objects.requireNonNull(
                 builder.defaultMacAlgorithm, "defaultMacAlgorithm");
-        this.autoRegistrationLimit = builder.autoRegistrationLimit;
+        this.clusterApplicationLimit = builder.clusterApplicationLimit;
         this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
         this.timings = Objects.requireNonNull(builder.timings, "timings");
@@ -119,7 +127,8 @@ public final class WitnessSettings {
     /**
      * The witness-wide secret, used for any application without one of its own.
      *
-     * <p>It is what lets permissive mode work at all: an application nobody configured has nowhere
+     * <p>It is what lets {@link ConfigSource#CLUSTER} work at all: an application nobody
+     * configured has nowhere
      * to have had a secret set. The cost is that every cluster sharing it can forge the others'
      * messages, which is fine when one team owns everything and not otherwise.
      */
@@ -145,10 +154,10 @@ public final class WitnessSettings {
         private Path stateDirectory;
 
         /**
-         * Whether unconfigured applications are served. See {@link RegistrationMode}.
+         * Where a served application's configuration comes from. See {@link ConfigSource}.
          */
         @Setter
-        private RegistrationMode registrationMode = RegistrationMode.STRICT;
+        private ConfigSource configSource = ConfigSource.FILE;
 
         /**
          * The witness-wide secret, used for any application without one of its own.
@@ -163,10 +172,10 @@ public final class WitnessSettings {
         private String defaultMacAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
 
         /**
-         * How many applications may auto-register, so an open witness cannot be filled up.
+         * How many applications {@link ConfigSource#CLUSTER} may create.
          */
         @Setter
-        private int autoRegistrationLimit = 64;
+        private int clusterApplicationLimit = 64;
 
         /**
          * Quiet period after a file change before reloading, so one save is one reload.

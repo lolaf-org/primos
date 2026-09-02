@@ -213,7 +213,7 @@ class WitnessServerTest {
 
     @Test
     void permissive_mode_serves_an_application_nobody_configured() {
-        settings("registration.mode=permissive\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
@@ -227,7 +227,7 @@ class WitnessServerTest {
 
     @Test
     void permissive_mode_stops_auto_registering_at_its_limit() {
-        settings("registration.mode=permissive\nregistration.limit=2\nsecret=" + SECRET);
+        settings("config.source=cluster\nconfig.cluster.limit=2\nsecret=" + SECRET);
         start();
 
         for (String name : new String[] {"one", "two", "three", "four"}) {
@@ -244,7 +244,7 @@ class WitnessServerTest {
 
     @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
-        settings("registration.mode=permissive\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret=" + SECRET);
         start();
 
         try (WitnessClient traversal = client("../../etc", 1)) {

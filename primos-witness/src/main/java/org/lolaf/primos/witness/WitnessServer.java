@@ -169,9 +169,9 @@ public final class WitnessServer implements AutoCloseable {
             throw new UncheckedIOException("the witness cannot open its socket", e);
         }
 
-        log.info("witness {} bound to {}, {} mode, state in {}",
-                nodeId, boundAddress(), settings.registrationMode(), settings.stateDirectory());
-        if (settings.registrationMode() == RegistrationMode.PERMISSIVE) {
+        log.info("witness {} bound to {}, configuration from {}, state in {}",
+                nodeId, boundAddress(), settings.configSource(), settings.stateDirectory());
+        if (settings.configSource().isCluster()) {
             log.warn("this witness serves any application name it hears. That is a legitimate"
                     + " choice and it is also how a typo becomes a split brain: two clusters named"
                     + " 'orders' and 'ordres' would each get their own vote from it. Names that"
@@ -401,27 +401,27 @@ public final class WitnessServer implements AutoCloseable {
             }
             return null;
         }
-        if (settings.registrationMode() != RegistrationMode.PERMISSIVE) {
+        if (!settings.configSource().isCluster()) {
             unservedApplication++;
             if (firstSighting) {
                 warnUnserved(application, source);
             }
             return null;
         }
-        if (served.size() >= settings.autoRegistrationLimit()) {
+        if (served.size() >= settings.clusterApplicationLimit()) {
             autoRegistrationsRefused++;
             if (firstSighting) {
                 log.warn("refusing to auto-register application '{}' from {}: this witness already"
-                                + " serves {}, its configured limit. Raise registration.limit if"
+                                + " serves {}, its configured limit. Raise config.cluster.limit if"
                                 + " that is genuinely the size of the estate.",
-                        application, source, settings.autoRegistrationLimit());
+                        application, source, settings.clusterApplicationLimit());
             }
             return null;
         }
 
         String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
         log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
-                + " permissive mode is serving it anyway.", application, source);
+                + " config.source=cluster is serving it anyway.", application, source);
         if (nearMiss != null) {
             log.warn("application '{}' is one or two characters from '{}', which this witness"
                             + " already serves. If that is a typo, the two clusters cannot see each"
@@ -442,7 +442,7 @@ public final class WitnessServer implements AutoCloseable {
         if (nearMiss != null) {
             log.warn("dropping traffic for unserved application '{}' from {}, which is one or two"
                     + " characters from '{}'. That is very likely a typo in one cluster's"
-                    + " configuration; strict mode is refusing it rather than granting it a"
+                    + " configuration; config.source=file is refusing it rather than granting it a"
                     + " vote of its own.", application, source, nearMiss);
         } else {
             log.warn("dropping traffic for unserved application '{}' from {}. Add"
@@ -556,7 +556,8 @@ public final class WitnessServer implements AutoCloseable {
      * The key one application's datagrams are checked with.
      *
      * <p>Per-application where one is configured, falling back to the witness-wide secret
-     * otherwise — which is what lets permissive mode work at all, since an application nobody
+     * otherwise — which is what lets {@link ConfigSource#CLUSTER} work at all, since an
+     * application nobody
      * configured has nowhere to have had a secret set. The cost of sharing one is that any cluster
      * holding it can forge another's messages, which is fine when one team owns everything and not
      * otherwise.

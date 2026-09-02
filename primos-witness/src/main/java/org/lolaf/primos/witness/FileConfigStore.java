@@ -318,12 +318,45 @@ public final class FileConfigStore implements ConfigStore {
             return false;
         }
         ConfigSnapshot previous = current;
-        if (previous.applications().equals(candidate.applications())) {
+        // Both halves, because the settings are half the file. Comparing only the applications
+        // left a settings-only edit parsed and then discarded: the snapshot was never swapped, so
+        // config.source, config.cluster.limit and the two reload intervals were read from disk
+        // every rescan and never took effect.
+        boolean settingsChanged = !previous.settings().equals(candidate.settings());
+        boolean applicationsChanged = !previous.applications().equals(candidate.applications());
+        if (!settingsChanged && !applicationsChanged) {
             return false;
         }
         current = candidate;
-        announce(previous, candidate);
+        if (settingsChanged) {
+            reportRestartRequired(previous.settings(), candidate.settings());
+        }
+        if (applicationsChanged) {
+            announce(previous, candidate);
+        }
         return true;
+    }
+
+    /**
+     * Says what was read and not applied, rather than half-applying it.
+     *
+     * <p>Everything else in {@code witness.properties} takes effect on the next reload. These three
+     * cannot: the socket is bound once, the state directory is opened once, and vote logging is
+     * taken by the server when it starts. Publishing the new snapshot without saying so would leave
+     * the file on disk disagreeing with the running process, with nothing anywhere to say which one
+     * was winning — and the witness README has promised this line since it was written.
+     */
+    private void reportRestartRequired(WitnessSettings previous, WitnessSettings candidate) {
+        warnIfChanged("bind.host/bind.port", previous.bindAddress(), candidate.bindAddress());
+        warnIfChanged("state.directory", previous.stateDirectory(), candidate.stateDirectory());
+        warnIfChanged("vote.logging", previous.voteLogging(), candidate.voteLogging());
+    }
+
+    private void warnIfChanged(String key, Object previous, Object candidate) {
+        if (!Objects.equals(previous, candidate)) {
+            log.warn("{} changed from {} to {} and was read but not applied; it takes effect when"
+                    + " the witness restarts", key, previous, candidate);
+        }
     }
 
     private void announce(ConfigSnapshot previous, ConfigSnapshot candidate) {
@@ -427,9 +460,9 @@ public final class FileConfigStore implements ConfigStore {
         if (state != null && !state.trim().isEmpty()) {
             builder.stateDirectory(directory.getFileSystem().getPath(state.trim()));
         }
-        String mode = properties.getProperty("registration.mode", "strict").trim();
-        builder.registrationMode(RegistrationMode.valueOf(mode.toUpperCase(Locale.ROOT)));
-        builder.autoRegistrationLimit(intValue(properties, "registration.limit", 64));
+        String source = properties.getProperty("config.source", "file").trim();
+        builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
+        builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.defaultSecret(secretValue(properties, "secret", directory));
         String algorithm = properties.getProperty("secret.algorithm");
         if (algorithm != null && !algorithm.trim().isEmpty()) {
@@ -450,7 +483,7 @@ public final class FileConfigStore implements ConfigStore {
         byte[] secret = secretValue(properties, "secret", directory);
         byte[] previous = secretValue(properties, "secret.previous", directory);
         if (secret == null) {
-            // The witness-wide secret is what makes permissive mode possible at all: an
+            // The witness-wide secret is what makes config.source=cluster possible at all: an
             // application nobody configured has nowhere to have had one set.
             secret = settings.defaultSecret();
         }
@@ -529,12 +562,12 @@ public final class FileConfigStore implements ConfigStore {
     private void logServedApplications() {
         ConfigSnapshot snapshot = current;
         if (snapshot.applications().isEmpty()) {
-            log.warn("no applications configured in {}. In strict mode this witness will serve"
+            log.warn("no applications configured in {}. With config.source=file this witness will serve"
                     + " nobody.", applicationsDirectory);
         } else {
             log.info("serving {} application(s): {}", snapshot.applications().size(),
                     String.join(", ", snapshot.applicationNames()));
         }
-        log.info("registration mode is {}", snapshot.settings().registrationMode());
+        log.info("configuration source is {}", snapshot.settings().configSource());
     }
 }

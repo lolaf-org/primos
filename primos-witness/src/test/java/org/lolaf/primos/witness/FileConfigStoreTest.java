@@ -49,8 +49,8 @@ class FileConfigStoreTest {
     void an_empty_directory_serves_nobody_rather_than_failing() {
         try (FileConfigStore store = open()) {
             assertThat(store.current().applications()).isEmpty();
-            assertThat(store.current().settings().registrationMode())
-                    .isEqualTo(RegistrationMode.STRICT);
+            assertThat(store.current().settings().configSource())
+                    .isEqualTo(ConfigSource.FILE);
         }
     }
 
@@ -67,13 +67,13 @@ class FileConfigStoreTest {
 
     @Test
     void settings_are_read_from_the_parent_file() throws IOException {
-        settings("bind.port=9999\nregistration.mode=permissive\nregistration.limit=7");
+        settings("bind.port=9999\nconfig.source=cluster\nconfig.cluster.limit=7");
 
         try (FileConfigStore store = open()) {
             WitnessSettings settings = store.current().settings();
             assertThat(settings.bindAddress().getPort()).isEqualTo(9999);
-            assertThat(settings.registrationMode()).isEqualTo(RegistrationMode.PERMISSIVE);
-            assertThat(settings.autoRegistrationLimit()).isEqualTo(7);
+            assertThat(settings.configSource()).isEqualTo(ConfigSource.CLUSTER);
+            assertThat(settings.clusterApplicationLimit()).isEqualTo(7);
         }
     }
 
@@ -445,6 +445,82 @@ class FileConfigStoreTest {
 
             assertThat(next).isLessThanOrEqualTo(
                     clock.nanoTime() + Duration.ofSeconds(30).toNanos());
+        }
+    }
+
+    @Test
+    void a_settings_only_change_is_published() throws IOException {
+        settings("config.source=file\nconfig.cluster.limit=7");
+        application("orders", "secret=s3cret");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().configSource())
+                    .isEqualTo(ConfigSource.FILE);
+
+            // Only witness.properties moves. The served set is byte-for-byte what it was, which is
+            // exactly the case a reload used to read from disk and then throw away.
+            settings("config.source=cluster\nconfig.cluster.limit=9");
+
+            assertThat(rescan(store))
+                    .as("a settings-only edit is a change, even with the applications untouched")
+                    .isTrue();
+            assertThat(store.current().settings().configSource())
+                    .isEqualTo(ConfigSource.CLUSTER);
+            assertThat(store.current().settings().clusterApplicationLimit()).isEqualTo(9);
+        }
+    }
+
+    @Test
+    void a_settings_only_change_does_not_disturb_the_applications() throws IOException {
+        settings("config.source=file");
+        application("orders", "secret=s3cret");
+
+        Recording changes = new Recording();
+        try (FileConfigStore store = open()) {
+            store.addListener(changes);
+            ApplicationConfig before = store.current().application("orders");
+
+            settings("config.source=cluster");
+            assertThat(rescan(store)).isTrue();
+
+            assertThat(changes.added).isEmpty();
+            assertThat(changes.changed).isEmpty();
+            assertThat(changes.removed).isEmpty();
+            assertThat(store.current().application("orders"))
+                    .as("no tenant is rebuilt for a change that was not theirs")
+                    .isEqualTo(before);
+        }
+    }
+
+    @Test
+    void a_restart_required_key_is_still_published_so_the_snapshot_stays_truthful()
+            throws IOException {
+        settings("bind.port=9999");
+
+        try (FileConfigStore store = open()) {
+            settings("bind.port=8888");
+
+            assertThat(rescan(store)).isTrue();
+            // The socket is bound once and does not move; what must not happen is the snapshot
+            // and the file disagreeing with nothing anywhere saying which one is in force. The
+            // WARN naming it is not asserted here: capturing SLF4J output needs a recording
+            // backend, and that is a test dependency for one assertion.
+            assertThat(store.current().settings().bindAddress().getPort()).isEqualTo(8888);
+        }
+    }
+
+    @Test
+    void a_reload_that_changes_nothing_is_not_a_change() throws IOException {
+        settings("config.source=cluster");
+        application("orders", "secret=s3cret");
+
+        try (FileConfigStore store = open()) {
+            settings("config.source=cluster");
+            application("orders", "secret=s3cret");
+
+            assertThat(rescan(store))
+                    .as("rewriting the same values must not rebuild a tenant's node")
+                    .isFalse();
         }
     }
 

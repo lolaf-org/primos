@@ -270,9 +270,10 @@ public class ClusterConfig {
          * Declares that this witness's voters are not configured but learned from traffic.
          *
          * <p>For the standalone witness server, and only for it. That server holds no addresses in
-         * configuration — only application names and secrets — because in permissive mode the
-         * clusters it serves are not known ahead of time, and even in strict mode listing every
-         * node of every tenant on shared infrastructure is a burden nobody would accept. So it
+         * configuration — only application names and secrets — because a witness that learns the
+         * applications it serves cannot know their nodes ahead of time, and even when it is told
+         * them, listing every node of every tenant on shared infrastructure is a burden nobody
+         * would accept. So it
          * learns each node's endpoint from the first datagram that passes authentication, and
          * probes it thereafter.
          *

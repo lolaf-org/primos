@@ -192,8 +192,8 @@ which one shared file makes impossible.
 | `bind.host` | `0.0.0.0` | **no** — read and ignored until restart |
 | `bind.port` | `7420` | **no** |
 | `state.directory` | `<config>/state` | **no** |
-| `registration.mode` | `strict` | yes |
-| `registration.limit` | `64` | yes |
+| `config.source` | `file` | yes |
+| `config.cluster.limit` | `64` | yes |
 | `secret` | none | yes |
 | `secret.algorithm` | `HmacSHA256` | yes |
 | `timings.*` | see below | **no** here — but yes per application |
@@ -390,9 +390,9 @@ Permissive mode is hardened rather than merely documented:
 
 - every auto-registration logged at WARN with the name and source address;
 - **near-miss detection** on first sight of a name — case-insensitive, small edit distance against
-  names already served — warning explicitly that it may be a typo. It also runs in strict mode,
+  names already served — warning explicitly that it may be a typo. It also runs under `file`,
   where a dropped `ordres` next to a served `orders` is the entire diagnosis in one line;
-- `registration.limit`, so an open witness cannot be filled up by whoever can reach the port;
+- `config.cluster.limit`, so an open witness cannot be filled up by whoever can reach the port;
 - state is **never** auto-expired, because deleting `votedFor` for a dormant cluster that later
   returns is precisely the double-vote bug.
 
@@ -406,8 +406,8 @@ At startup:
 
 ```
 serving 2 application(s): billing, orders
-registration mode is STRICT
-witness 1023 bound to /0.0.0.0:7420, STRICT mode, state in /var/lib/primos-witness
+configuration source is FILE
+witness 1023 bound to /0.0.0.0:7420, configuration from FILE, state in /var/lib/primos-witness
 cluster 'orders': witness 1023 is serving, with the voter set learned from traffic
 witness 1023 is serving 2 application(s)
 ```
@@ -416,13 +416,13 @@ Worth alerting on:
 
 | level | message | means |
 |---|---|---|
-| WARN | `no applications configured` | strict mode with an empty `applications/` serves nobody |
+| WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody |
 | WARN | `no secret is configured` | see rule 3 |
 | WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
 | WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |
 | WARN | `'X' is one or two characters from 'Y'` | **near miss — check both configurations** |
-| WARN | `auto-registering application 'X'` | permissive mode serving someone unconfigured |
-| WARN | `refusing to auto-register` | `registration.limit` reached |
+| WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |
+| WARN | `refusing to auto-register` | `config.cluster.limit` reached |
 | ERROR | `cannot read the configuration in ...` | a bad edit; the last good config is still serving |
 | ERROR | `application 'X' has failed` | that cluster is no longer served — see below |
 

@@ -35,8 +35,8 @@ final class ApplicationNames {
     /**
      * Whether a name can be a single directory name, which the state layout requires.
      *
-     * <p>The wire permits any printable ASCII, separators included, and in permissive mode the name
-     * arrives from the network rather than from a filename. Without this check a datagram naming
+     * <p>The wire permits any printable ASCII, separators included, and under
+     * {@link ConfigSource#CLUSTER} the name arrives from the network rather than from a filename. Without this check a datagram naming
      * itself {@code ../../etc} would choose where its state was written.
      */
     static boolean isUsableAsDirectory(String name) {
