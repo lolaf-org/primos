@@ -15,7 +15,6 @@
  */
 package org.lolaf.primos.wire;
 
-import lombok.Getter;
 
 import javax.crypto.Mac;
 import javax.crypto.ShortBufferException;
@@ -24,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -73,31 +73,84 @@ public final class MessageAuthenticator {
     private static final int MIN_TAG_BYTES = 16;
 
     /**
-     * The algorithm datagrams are tagged with, or null when authentication is disabled. Worth
-     * logging at startup: nothing on the wire carries it, so a cluster that disagrees about it
-     * looks exactly like one that disagrees about the secret.
+     * The keys this accepts, in the order they were given. Empty when authentication is disabled.
+     *
+     * <p>One key is the ordinary case, two is a rotation window, and more is a witness server
+     * holding a key per tenant. They are the same mechanism: a datagram is authentic if any key
+     * here accepts it, and everything this class writes is written with whichever one last did.
      */
-    @Getter
-    private final String algorithm;
-
-    private final Mac mac;
-    private final Mac previousMac;
+    private final Key[] keys;
 
     /**
-     * Bytes this adds to every datagram: the algorithm's tag length when enabled, 0 when not.
+     * Which key last accepted a datagram, and therefore which one signs the next.
+     *
+     * <p><strong>A cache, never a commitment.</strong> Verification always falls back to the rest
+     * of the ring, and that is what makes rotation work: an application pinned to the key it was
+     * first seen with would reject the new one on the day it changed, which is precisely the day
+     * the ring exists for.
      */
-    @Getter
-    private final int tagBytes;
-    private final byte[] computed;
-    private final byte[] received;
+    private int selected;
 
-    private MessageAuthenticator(String algorithm, Mac mac, Mac previousMac) {
-        this.algorithm = algorithm;
-        this.mac = mac;
-        this.previousMac = previousMac;
-        this.tagBytes = mac == null ? 0 : mac.getMacLength();
-        this.computed = mac == null ? null : new byte[tagBytes];
-        this.received = mac == null ? null : new byte[tagBytes];
+    private MessageAuthenticator(Key[] keys) {
+        this.keys = keys;
+        this.selected = 0;
+    }
+
+    /**
+     * One key: its algorithm, its {@code Mac} and the scratch buffers that keep verification
+     * allocation-free.
+     */
+    private static final class Key {
+
+        private final String name;
+        private final String algorithm;
+        private final Mac mac;
+        private final int tagBytes;
+        private final byte[] computed;
+        private final byte[] received;
+
+        private Key(String name, String algorithm, Mac mac) {
+            this.name = name;
+            this.algorithm = algorithm;
+            this.mac = mac;
+            this.tagBytes = mac.getMacLength();
+            this.computed = new byte[tagBytes];
+            this.received = new byte[tagBytes];
+        }
+    }
+
+    /**
+     * The algorithm in force, or null when authentication is disabled.
+     *
+     * <p>Worth logging at startup: nothing on the wire carries it, so a party that disagrees about
+     * it looks exactly like one that disagrees about the secret. With several keys this names the
+     * one that last verified, which is the one being used.
+     */
+    public String algorithm() {
+        return keys.length == 0 ? null : keys[selected].algorithm;
+    }
+
+    /**
+     * The name of the key that last verified something, or null when it has none.
+     *
+     * <p>Only a witness server names its keys, and it does so for one reason: a log line saying
+     * <em>which</em> key admitted a tenant is the difference between a diagnosable configuration
+     * and a working one nobody can explain.
+     */
+    public String keyName() {
+        return keys.length == 0 ? null : keys[selected].name;
+    }
+
+    /**
+     * Bytes this adds to every datagram: the tag length of the key in force, 0 when disabled.
+     *
+     * <p><strong>Read this only after {@link #verify}</strong>, which is what selects the key. The
+     * receive pipeline does exactly that — it verifies, then checks the length against the type —
+     * and with a ring of mixed algorithms that ordering stops being tidiness and becomes load
+     * bearing, because the expected length depends on which key accepted the datagram.
+     */
+    public int tagBytes() {
+        return keys.length == 0 ? 0 : keys[selected].tagBytes;
     }
 
     /**
@@ -106,7 +159,7 @@ public final class MessageAuthenticator {
      * nuisance.
      */
     public static MessageAuthenticator disabled() {
-        return new MessageAuthenticator(null, null, null);
+        return new MessageAuthenticator(new Key[0]);
     }
 
     /**
@@ -176,10 +229,81 @@ public final class MessageAuthenticator {
         if (previousSecret != null && previousSecret.length == 0) {
             throw new IllegalArgumentException("the previous cluster secret must not be empty");
         }
+        Key current = key(null, algorithm, secret);
+        if (previousSecret == null) {
+            return new MessageAuthenticator(new Key[] {current});
+        }
+        return new MessageAuthenticator(new Key[] {current, key(null, algorithm, previousSecret)});
+    }
+
+    /**
+     * Authentication against several keys at once, accepting any of them.
+     *
+     * <p>This is what {@link #hmac(String, byte[], byte[])} already was — a current key and its
+     * predecessor are a two-key ring — generalised to the case a witness server has: <em>keys
+     * belonging to different parties</em>, not one key and its own past. A datagram is authentic
+     * if any key accepts it, and replies are signed with whichever key last did.
+     *
+     * <p>Two consequences worth knowing before relying on it. <strong>A ring is not isolation:</strong>
+     * any key in it verifies any datagram given to this authenticator, so whoever decides which
+     * keys go in a ring is deciding who can speak for whom — a caller wanting one party's traffic
+     * checked against only that party's key must build a ring holding only that key. And
+     * <strong>the keys may use different algorithms</strong>, so the tag length varies with the key
+     * that matched; see {@link #tagBytes()}.
+     *
+     * @param keys at least one, each a name for logs (may be null), a JCE {@code Mac} algorithm
+     *             and a secret
+     * @throws IllegalArgumentException if the list is empty, or any entry names an algorithm the
+     *                                  platform lacks or whose tag will not carry
+     */
+    public static MessageAuthenticator keyring(List<KeySpec> keys) {
+        Objects.requireNonNull(keys, "keys");
+        if (keys.isEmpty()) {
+            throw new IllegalArgumentException("a keyring needs at least one key;"
+                    + " use disabled() to run without authentication, which is never advisable");
+        }
+        Key[] ring = new Key[keys.size()];
+        for (int i = 0; i < ring.length; i++) {
+            KeySpec spec = keys.get(i);
+            ring[i] = key(spec.name, spec.algorithm, spec.secret);
+        }
+        return new MessageAuthenticator(ring);
+    }
+
+    /**
+     * One entry for {@link #keyring(List)}: a name for logs, an algorithm and a secret.
+     */
+    public static final class KeySpec {
+
+        private final String name;
+        private final String algorithm;
+        private final byte[] secret;
+
+        private KeySpec(String name, String algorithm, byte[] secret) {
+            this.name = name;
+            this.algorithm = algorithm == null ? DEFAULT_ALGORITHM : algorithm;
+            this.secret = secret;
+        }
+
+        /**
+         * @param name      what to call this key in a log line, or null when it has no name
+         * @param algorithm a JCE {@code Mac} name, or null for {@link #DEFAULT_ALGORITHM}
+         * @param secret    the key itself; not copied, because the caller built it for this
+         */
+        public static KeySpec of(String name, String algorithm, byte[] secret) {
+            return new KeySpec(name, algorithm, Objects.requireNonNull(secret, "secret"));
+        }
+    }
+
+    private static Key key(String name, String algorithm, byte[] secret) {
+        Objects.requireNonNull(algorithm, "algorithm");
+        Objects.requireNonNull(secret, "secret");
+        if (secret.length == 0) {
+            throw new IllegalArgumentException("a cluster secret must not be empty");
+        }
         Mac mac = keyed(algorithm, secret);
         requireCarriableTag(algorithm, mac.getMacLength());
-        return new MessageAuthenticator(algorithm, mac,
-                previousSecret == null ? null : keyed(algorithm, previousSecret));
+        return new Key(name, algorithm, mac);
     }
 
     /**
@@ -251,17 +375,17 @@ public final class MessageAuthenticator {
     }
 
     /**
-     * Whether a secret is being rotated out and still accepted.
+     * Whether more than one key is accepted — a rotation window, or a witness's several tenants.
      */
     public boolean hasPreviousSecret() {
-        return previousMac != null;
+        return keys.length > 1;
     }
 
     /**
      * Whether datagrams carry a tag.
      */
     public boolean isEnabled() {
-        return mac != null;
+        return keys.length > 0;
     }
 
     /**
@@ -271,13 +395,14 @@ public final class MessageAuthenticator {
      * malleable.
      */
     public void appendTag(ByteBuffer datagram) {
-        if (mac == null) {
+        if (keys.length == 0) {
             return;
         }
+        Key key = keys[selected];
         int end = datagram.position();
-        computeInto(mac, datagram, end, computed);
+        computeInto(key.mac, datagram, end, key.computed);
         datagram.position(end);
-        datagram.put(computed);
+        datagram.put(key.computed);
     }
 
     /**
@@ -288,28 +413,41 @@ public final class MessageAuthenticator {
      * {@code Arrays.equals}, which would leak the tag one byte at a time.
      */
     public boolean verify(ByteBuffer datagram) {
-        if (mac == null) {
+        if (keys.length == 0) {
             return true;
         }
-        int limit = datagram.limit();
-        int bodyEnd = limit - tagBytes;
-        if (bodyEnd < 0) {
+        // The key that worked last time, first. In a healthy steady state it is the only one
+        // tried, so a ring costs one HMAC exactly as a single key does; the rest of the ring is
+        // reached during a rotation, or by a witness meeting a tenant it has not heard from yet.
+        if (accepts(keys[selected], datagram)) {
+            return true;
+        }
+        for (int i = 0; i < keys.length; i++) {
+            if (i != selected && accepts(keys[i], datagram)) {
+                selected = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether one key accepts this datagram, at that key's own tag length.
+     *
+     * <p>The length test is not only a bounds check. A ring may mix algorithms, and a tag length
+     * that would leave less than a header behind cannot be this key's — so a datagram tagged with
+     * a 32-byte key is rejected by a 64-byte key without hashing anything, which is what keeps a
+     * mixed ring from costing a hash per key on every datagram.
+     */
+    private static boolean accepts(Key key, ByteBuffer datagram) {
+        int bodyEnd = datagram.limit() - key.tagBytes;
+        if (bodyEnd < WireFormat.HEADER_BYTES) {
             return false;
         }
         datagram.position(bodyEnd);
-        datagram.get(received);
-
-        computeInto(mac, datagram, bodyEnd, computed);
-        if (MessageDigest.isEqual(computed, received)) {
-            return true;
-        }
-        if (previousMac == null) {
-            return false;
-        }
-        // Only reached during a rotation window, so the second HMAC is not on any steady-state
-        // path. Both comparisons are time-constant, so failing the first one leaks nothing about
-        // how far the second got.
-        computeInto(previousMac, datagram, bodyEnd, computed);
-        return MessageDigest.isEqual(computed, received);
+        datagram.get(key.received);
+        computeInto(key.mac, datagram, bodyEnd, key.computed);
+        // Time-constant, so a failure leaks nothing about how far the comparison got.
+        return MessageDigest.isEqual(key.computed, key.received);
     }
 }

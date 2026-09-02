@@ -18,6 +18,9 @@ package org.lolaf.primos.wire;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -276,5 +279,91 @@ class MessageAuthenticatorTest {
         @Override
         protected void engineReset() {
         }
+    }
+
+    // ------------------------------------------------------------------ keyring
+
+    @Test
+    void a_keyring_accepts_a_datagram_tagged_with_any_of_its_keys() {
+        MessageAuthenticator ring = MessageAuthenticator.keyring(Arrays.asList(
+                MessageAuthenticator.KeySpec.of("platform", null, bytes("k1")),
+                MessageAuthenticator.KeySpec.of("orders", null, bytes("k2"))));
+
+        assertThat(ring.verify(taggedWith(bytes("k1"), null))).isTrue();
+        assertThat(ring.verify(taggedWith(bytes("k2"), null))).isTrue();
+        assertThat(ring.verify(taggedWith(bytes("not-in-the-ring"), null)))
+                .as("a ring is not a way in for a key nobody put in it")
+                .isFalse();
+    }
+
+    @Test
+    void the_key_that_verified_is_the_one_that_signs_and_the_one_that_is_named() {
+        MessageAuthenticator ring = MessageAuthenticator.keyring(Arrays.asList(
+                MessageAuthenticator.KeySpec.of("platform", null, bytes("k1")),
+                MessageAuthenticator.KeySpec.of("orders", "HmacSHA512", bytes("k2"))));
+
+        assertThat(ring.verify(taggedWith(bytes("k2"), "HmacSHA512"))).isTrue();
+        assertThat(ring.keyName())
+                .as("which key admitted a tenant is the whole of the diagnosis")
+                .isEqualTo("orders");
+        assertThat(ring.algorithm()).isEqualTo("HmacSHA512");
+        assertThat(ring.tagBytes())
+                .as("the expected datagram length follows the key that matched, not the first one")
+                .isEqualTo(64);
+    }
+
+    /**
+     * The selection is a cache, not a commitment. Pinning an application to the key it was first
+     * seen with would reject the new one on the day it changed — the day a ring exists for.
+     */
+    @Test
+    void a_key_that_stops_matching_falls_back_to_the_rest_of_the_ring() {
+        MessageAuthenticator ring = MessageAuthenticator.keyring(Arrays.asList(
+                MessageAuthenticator.KeySpec.of("old", null, bytes("k1")),
+                MessageAuthenticator.KeySpec.of("new", null, bytes("k2"))));
+
+        assertThat(ring.verify(taggedWith(bytes("k1"), null))).isTrue();
+        assertThat(ring.keyName()).isEqualTo("old");
+
+        assertThat(ring.verify(taggedWith(bytes("k2"), null)))
+                .as("rotation is the ring's whole point; a pinned key would break on the day it"
+                        + " changed")
+                .isTrue();
+        assertThat(ring.keyName()).isEqualTo("new");
+        assertThat(ring.verify(taggedWith(bytes("k1"), null)))
+                .as("and the old one still works, which is what makes the window a window")
+                .isTrue();
+    }
+
+    @Test
+    void a_mixed_ring_does_not_confuse_one_algorithms_tag_for_anothers() {
+        MessageAuthenticator ring = MessageAuthenticator.keyring(Arrays.asList(
+                MessageAuthenticator.KeySpec.of("short", "HmacSHA256", bytes("k1")),
+                MessageAuthenticator.KeySpec.of("long", "HmacSHA512", bytes("k2"))));
+
+        assertThat(ring.verify(taggedWith(bytes("k1"), "HmacSHA256"))).isTrue();
+        assertThat(ring.tagBytes()).isEqualTo(32);
+        assertThat(ring.verify(taggedWith(bytes("k2"), "HmacSHA512"))).isTrue();
+        assertThat(ring.tagBytes()).isEqualTo(64);
+    }
+
+    @Test
+    void an_empty_keyring_is_refused_rather_than_silently_disabling_authentication() {
+        assertThatThrownBy(() -> MessageAuthenticator.keyring(Collections.emptyList()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one key");
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** A real RequestVote tagged with one key, which is what a ring has to sort out. */
+    private static ByteBuffer taggedWith(byte[] secret, String algorithm) {
+        MessageAuthenticator one = algorithm == null
+                ? MessageAuthenticator.hmacSha256(secret)
+                : MessageAuthenticator.hmac(algorithm, secret);
+        return new MessageEncoder("orders", 1, one)
+                .requestVote(ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
     }
 }
