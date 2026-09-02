@@ -182,7 +182,7 @@ A directory, not a single file:
 ```
 
 The split earns its keep on shared infrastructure: adding a cluster is a **file drop** rather than
-an edit to a file every tenant contends over, and each team's secret can carry its own permissions,
+an edit to a file every tenant contends over, and each key file can carry its own permissions,
 which one shared file makes impossible.
 
 ### `witness.properties`
@@ -194,8 +194,9 @@ which one shared file makes impossible.
 | `state.directory` | `<config>/state` | **no** |
 | `config.source` | `file` | yes |
 | `config.cluster.limit` | `64` | yes |
-| `secret` | none | yes |
-| `secret.algorithm` | `HmacSHA256` | yes |
+| `secret.<name>.value` | none | yes |
+| `secret.<name>.algorithm` | `HmacSHA256` | yes |
+| `secret.<name>.applications` | none — claims nothing | yes |
 | `timings.*` | see below | yes — and read but ignored under `config.source=cluster` |
 | `vote.logging` | `true` | **no** — read at startup |
 | `reload.debounce.millis` | `250` | yes |
@@ -277,9 +278,6 @@ silently truncated.
 
 | key | notes |
 |---|---|
-| `secret` | falls back to the witness-wide `secret` if absent |
-| `secret.previous` | also accepted, for rotation |
-| `secret.algorithm` | the JCE `Mac` name, e.g. `HmacSHA512`; falls back to the witness-wide one, which defaults to `HmacSHA256` |
 | `timings.profile` | `lan` or `wan`; falls back to the witness-wide value |
 | `timings.heartbeat.millis` | `50` by default |
 | `timings.election.min.millis` | `300` |
@@ -288,7 +286,8 @@ silently truncated.
 | `timings.advertisement.millis` | `30000`; never shorter than the probe interval |
 | `timings.failure.threshold` | `3` |
 
-An empty file is valid and means "serve this cluster with the witness-wide secret".
+An empty file is valid and means "serve this cluster, with whatever key the keyring says covers
+it". **Key material here is refused, not ignored** — see *Keys* below for where it goes and why.
 
 **The timings must match what that cluster's nodes run**, and under `config.source=file` this is
 where to say so when tenants differ. Under `config.source=cluster` these keys are ignored and the
@@ -302,39 +301,83 @@ Either a profile or the values spelled out, never both, exactly as in `witness.p
 Changing them does **not** need a restart: a reconfigured application has its node rebuilt, keeping
 its state store and its learned addresses.
 
-`secret.algorithm` is per application because a witness serves clusters it does not own: one of
-them moving to another algorithm must not be a flag day for every other tenant. **It has to match
-what that cluster's nodes were built with** — nothing on the wire says which algorithm produced a
-tag, so a mismatch looks exactly like a wrong secret: every datagram fails verification and is
-counted under `BAD_TAG`. Almost nobody should set this; it is here for a deployment whose policy
-names something else, and for the day SHA-256 stops being above suspicion.
+### Keys
 
-### Secrets
-
-Four forms, so configuration can go into version control while the secret does not:
+Every key this witness holds lives in `witness.properties`, never in an application's own file:
 
 ```properties
-secret = inline-value
-secret = env:ORDERS_WITNESS_SECRET
-secret = file:/etc/primos-witness/secrets/orders
-secret = base64:aGVsbG8gd29ybGQ=
+secret.platform.value       = file:/etc/primos-witness/keys/platform
+secret.platform.algorithm   = HmacSHA256
+
+secret.orders.value         = env:ORDERS_KEY
+secret.orders.applications  = orders-*, *-test
 ```
 
-The loader warns about world-readable files, the way `ssh` does. Keep them `0640` and owned by the
-service user.
+**Why witness-wide rather than per application.** A cluster that arrives over the network has no
+file to have had a secret set in, so keys kept per application could offer such a cluster one
+shared key or none. Putting them here makes keys work identically under both values of
+`config.source` — and it is why an application file carrying `secret` is *refused* rather than
+ignored: an operator believing a tenant has its own key while the keyring decides otherwise is the
+worst failure available here, so the witness will not start.
 
-### Rotating a secret
+`value` takes four forms, so configuration can go into version control while the key does not —
+inline, `env:NAME`, `file:/path`, `base64:...`. The loader warns about world-readable files the way
+`ssh` does; keep them `0640` and owned by the service user.
 
-Two edits with a window in between, no restart, no flag day:
+`algorithm` is per key, because a witness serves clusters it does not own and one of them moving to
+another algorithm must not be a flag day for the rest. **It has to match what that cluster's nodes
+were built with** — nothing on the wire says which algorithm produced a tag, so a mismatch looks
+exactly like a wrong key: every datagram fails verification and is counted under `BAD_TAG`. Almost
+nobody should set it.
 
-1. On the witness, set `secret` to the new value and `secret.previous` to the old one. It now
-   accepts either.
-2. Roll the cluster's nodes onto the new secret at your own pace. **Each node needs both during
-   the window** — the witness tags its replies with the *current* secret, so a node holding only
-   the old one could send but never hear an answer.
-3. Remove `secret.previous`. The old secret stops working.
+#### Which key may speak for which application
 
-Do not skip step 3. The window is a rotation window, not a permanent second key.
+One rule: **a name that any key claims is verified only by the keys claiming it; a name nothing
+claims is verified by the keys that claim nothing.**
+
+That a claim is a *reservation* and not merely a restriction is the whole of what makes it worth
+having. Were a scoped key only limited to its names, a general key beside it would still verify
+those names too, and a tenant with its own key would gain nothing — whoever held the general key
+could still speak for it.
+
+`applications` is a comma-separated list of patterns. `*` is the only metacharacter and matches any
+run of characters, so `orders-*` covers a family without naming its members — which is what makes
+scoping usable when the members are not known in advance. **These are not regular expressions**: as
+one, `orders-*` would mean "orders followed by zero or more hyphens", matching `orders--` and not
+`orders-prod`. A bare `*` means the same as leaving the setting out, so it cannot silently take
+every unscoped key out of use.
+
+Two keys covering one name — through overlapping patterns, or because nothing claims it — means
+either key verifies it. That is not detected. Do not overlap.
+
+The spectrum that produces, along one axis and independent of `config.source`:
+
+| keyring | what you get |
+|---|---|
+| every key unscoped | any cluster may arrive, and **every keyholder can speak for every other** — one team, many clusters, one template |
+| some scoped | a general key for the fleet, dedicated keys for the tenants that matter |
+| every key scoped | only the named families can be served at all, and no keyholder can reach another's names |
+
+The last row is a legitimate lockdown, and under `config.source=cluster` it is also how you get an
+explicit tenant list while their timings still come from their own nodes — the scope lists *are*
+the tenant list. It is indistinguishable from a witness that is quietly broken, so the startup log
+says which it is:
+
+```
+witness 1023: 3 key(s), all scoped: only names matching orders-*, billing-*, *-test can be served
+```
+
+### Rotating a key
+
+Rotation is not a mechanism here, it is list membership. No restart, no flag day:
+
+1. Add the new key beside the old one. The witness now accepts either, and signs each reply with
+   whichever key verified the request — so a node holding only one of them still hears an answer.
+2. Roll the cluster's nodes onto the new key at your own pace.
+3. Remove the old entry. It stops working.
+
+Do not skip step 3. Two keys is a rotation window, not a permanent second key. If both entries
+claim the same applications, note that during the window either verifies them, which is the point.
 
 ### Hot reload
 
@@ -373,26 +416,21 @@ running. That is ordinary and brief while a cluster starts — its first probes 
 before its first config message — and it is what stops the witness ever serving a tenant it has no
 timings for. Sustained, it means a cluster is talking to this witness and never saying who it is.
 
-**Its precondition, which is easy to miss:** a cluster-created application has no file, so it takes
-the witness-wide `secret` and `secret.algorithm`. `cluster` therefore only serves clusters that are
-**identical in both**. That is not a small print detail — it is what the mode is for. It suits a
-platform team running many clusters from one template, with one secret injected by the deploy
-system; the witness-wide values are then correct by construction.
+**Its precondition, which is easy to miss:** a cluster-created application has no file, so a key in
+the keyring has to cover it — either an unscoped one, or one whose pattern matches its name.
+Nothing else is needed: its timings come from its own nodes, so a tenant on a different profile
+needs no configuration here at all.
 
-**Secrets are the one thing that can never come from the cluster**, which is why they alone remain
-a file. A secret is what authenticates the datagram that would have carried it, so taking one over
-the wire is circular; and `secret.algorithm` is deliberately absent from the wire too, because a
-datagram naming its own algorithm would let an attacker pick the weakest one both ends accept. So
-`applications/` does not stop being read under `cluster` — it stops being the served list and
-becomes a **keyring**. A cluster that needs its own secret gets its own file; per-file permissions
-still work, so one team can be granted its own secret without being shown everybody else's.
-
-Timings are not on that list. They are exactly what `cluster` sources from the network, and a
-tenant on a different profile needs nothing here at all:
+**Keys are the one thing that can never come from the cluster.** A key authenticates the datagram
+that would have carried it, so taking one over the wire is circular; and the algorithm is
+deliberately absent from the wire too, because a datagram naming its own algorithm would let an
+attacker pick the weakest one both ends accept. That is why the keyring stays in
+`witness.properties` under either mode — and why **how much isolation you get is decided by your
+patterns, not by `config.source`**. See [Keys](#keys).
 
 | differs | what happens |
 |---|---|
-| `secret` or `secret.algorithm` | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious. Give that cluster its own file |
+| the key or its algorithm | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious. Add a key covering that cluster |
 | timings | nothing. The witness follows what that cluster's nodes state, per application, and rebuilds when they change |
 
 **The walkthrough that is the reason `file` is the default:**
@@ -440,7 +478,7 @@ Worth alerting on:
 | level | message | means |
 |---|---|---|
 | WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody |
-| WARN | `no secret is configured` | see rule 3 |
+| WARN | `no keys are configured` | see rule 3 |
 | WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
 | WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |
 | WARN | `'X' is one or two characters from 'Y'` | **near miss — check both configurations** |
@@ -493,8 +531,9 @@ node ids match — the witness's `--node-id` must equal the id each cluster conf
 
 **The witness sees the traffic but never answers.** Almost always the secret. A datagram failing
 authentication is dropped silently before anything is parsed, by design, so look at the drop
-counters rather than for an error. Check for a mismatched per-application secret, or a rotation
-where the node holds only the old one and the witness has already dropped `secret.previous`.
+counters rather than for an error. Check that some key in the keyring covers that application —
+a name claimed by a key the cluster does not hold is verified by nothing else — and check for a
+rotation where the node holds only a key already removed from the ring.
 
 **`dropping traffic for unserved application 'X'`.** Strict mode, and no `applications/X.properties`
 exists. If `X` looks like a near miss of something you do serve, treat it as a typo in that

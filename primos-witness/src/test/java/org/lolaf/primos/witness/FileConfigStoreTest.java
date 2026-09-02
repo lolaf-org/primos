@@ -56,12 +56,11 @@ class FileConfigStoreTest {
 
     @Test
     void the_application_name_comes_from_the_filename() throws IOException {
-        application("orders", "secret=s3cret");
-        application("billing", "secret=other");
+        application("orders", "");
+        application("billing", "");
 
         try (FileConfigStore store = open()) {
             assertThat(store.current().applicationNames()).containsExactly("billing", "orders");
-            assertThat(store.current().application("orders").hasSecret()).isTrue();
         }
     }
 
@@ -78,75 +77,129 @@ class FileConfigStoreTest {
     }
 
     @Test
-    void an_application_without_a_secret_falls_back_to_the_witness_wide_one() throws IOException {
-        settings("secret=shared-by-everything");
-        application("orders", "");
-        application("billing", "secret=its-own");
+    void keys_are_read_from_the_witness_file_with_their_algorithms() throws IOException {
+        settings(String.join("\n",
+                "secret.platform.value = shared-by-everything",
+                "secret.orders.value = its-own",
+                "secret.orders.algorithm = HmacSHA512",
+                "secret.orders.applications = orders-*, billing"));
 
         try (FileConfigStore store = open()) {
-            assertThat(new String(store.current().application("orders").secret(),
-                    StandardCharsets.UTF_8)).isEqualTo("shared-by-everything");
-            assertThat(new String(store.current().application("billing").secret(),
-                    StandardCharsets.UTF_8)).isEqualTo("its-own");
-        }
-    }
+            Keyring keyring = store.current().settings().keyring();
 
-    @Test
-    void a_previous_secret_is_kept_so_rotation_needs_no_flag_day() throws IOException {
-        application("orders", "secret=new-one\nsecret.previous=old-one");
-
-        try (FileConfigStore store = open()) {
-            ApplicationConfig orders = store.current().application("orders");
-            assertThat(new String(orders.secret(), StandardCharsets.UTF_8)).isEqualTo("new-one");
-            assertThat(new String(orders.previousSecret(), StandardCharsets.UTF_8))
-                    .isEqualTo("old-one");
-        }
-    }
-
-    @Test
-    void an_application_may_name_its_own_mac_algorithm() throws IOException {
-        // Per application, because a witness serves clusters it does not own: one of them moving
-        // to another algorithm must not be a flag day for every other tenant.
-        settings("secret=shared-by-everything");
-        application("orders", "secret=its-own\nsecret.algorithm=HmacSHA512");
-        application("billing", "secret=its-own");
-
-        try (FileConfigStore store = open()) {
-            assertThat(store.current().application("orders").macAlgorithm())
-                    .isEqualTo("HmacSHA512");
-            assertThat(store.current().application("billing").macAlgorithm())
+            assertThat(keyring.keys()).extracting(WitnessKey::name)
+                    .as("sorted, so a ring does not depend on Properties hashing")
+                    .containsExactly("orders", "platform");
+            WitnessKey orders = keyring.keys().get(0);
+            assertThat(new String(orders.secret(), StandardCharsets.UTF_8)).isEqualTo("its-own");
+            assertThat(orders.algorithm()).isEqualTo("HmacSHA512");
+            assertThat(keyring.keys().get(1).algorithm())
                     .as("silence means the same default the library has")
                     .isEqualTo(MessageAuthenticator.DEFAULT_ALGORITHM);
         }
     }
 
     @Test
-    void the_witness_wide_algorithm_covers_applications_that_do_not_name_one() throws IOException {
-        settings("secret=shared-by-everything\nsecret.algorithm=HmacSHA512");
-        application("orders", "");
+    void a_claimed_name_is_verified_only_by_the_keys_claiming_it() throws IOException {
+        settings(String.join("\n",
+                "secret.platform.value = general",
+                "secret.orders.value = dedicated",
+                "secret.orders.applications = orders-*"));
 
         try (FileConfigStore store = open()) {
-            assertThat(store.current().application("orders").macAlgorithm())
-                    .isEqualTo("HmacSHA512");
+            Keyring keyring = store.current().settings().keyring();
+
+            assertThat(keyring.candidatesFor("orders-prod")).extracting(WitnessKey::name)
+                    .as("a reservation, not merely a restriction: the general key must not reach a"
+                            + " name somebody claimed, or claiming it would buy nothing")
+                    .containsExactly("orders");
+            assertThat(keyring.candidatesFor("payments")).extracting(WitnessKey::name)
+                    .as("and a name nobody claims falls to the keys that claim nothing")
+                    .containsExactly("platform");
         }
     }
 
     @Test
-    void a_secret_can_be_kept_out_of_the_config_file() throws IOException {
-        Path secretFile = directory.resolve("orders.key");
-        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
-        application("orders", "secret=file:" + secretFile);
+    void a_keyring_with_nothing_unclaimed_cannot_serve_a_new_name() throws IOException {
+        settings(String.join("\n",
+                "secret.orders.value = dedicated",
+                "secret.orders.applications = orders-*"));
 
         try (FileConfigStore store = open()) {
-            assertThat(new String(store.current().application("orders").secret(),
+            Keyring keyring = store.current().settings().keyring();
+
+            assertThat(keyring.candidatesFor("payments")).isEmpty();
+            assertThat(keyring.canServeUnclaimedNames()).isFalse();
+            assertThat(keyring.summary())
+                    .as("a legitimate lockdown, but indistinguishable from a broken witness unless"
+                            + " it says which it is")
+                    .contains("all scoped");
+        }
+    }
+
+    @Test
+    void claiming_everything_is_the_same_as_claiming_nothing() throws IOException {
+        settings(String.join("\n",
+                "secret.platform.value = general",
+                "secret.wild.value = also-general",
+                "secret.wild.applications = *"));
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().keyring().candidatesFor("payments"))
+                    .as("otherwise one '*' entry silently takes every unscoped key out of use")
+                    .extracting(WitnessKey::name)
+                    .containsExactly("platform", "wild");
+        }
+    }
+
+    @Test
+    void a_key_secret_can_be_kept_out_of_the_config_file() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:" + secretFile);
+
+        try (FileConfigStore store = open()) {
+            assertThat(new String(store.current().settings().keyring().keys().get(0).secret(),
                     StandardCharsets.UTF_8)).isEqualTo("from-a-file");
         }
     }
 
     @Test
+    void a_key_without_a_secret_is_refused() throws IOException {
+        settings("secret.orders.algorithm = HmacSHA512");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("has no secret.orders.value");
+    }
+
+    @Test
+    void a_pattern_that_could_never_match_a_name_is_refused() throws IOException {
+        settings(String.join("\n",
+                "secret.orders.value = k",
+                "secret.orders.applications = " + new String(new char[33]).replace('\0', 'a')));
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("can never match anything");
+    }
+
+    @Test
+    void an_application_file_carrying_key_material_is_refused_rather_than_ignored() throws IOException {
+        settings("secret.platform.value = general");
+        application("orders", "secret=its-own");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .as("believing a tenant has its own key when the keyring decides otherwise is the"
+                        + " worst failure available here, so it must not start")
+                .hasMessageContaining("keys live in witness.properties");
+    }
+
+    @Test
     void a_name_too_long_for_the_wire_is_refused_at_load() throws IOException {
         String tooLong = new String(new char[33]).replace('\0', 'a');
-        application(tooLong, "secret=x");
+        application(tooLong, "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -155,7 +208,7 @@ class FileConfigStoreTest {
 
     @Test
     void a_name_that_could_not_travel_on_the_wire_is_refused() throws IOException {
-        application("has space", "secret=x");
+        application("has space", "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -166,7 +219,7 @@ class FileConfigStoreTest {
 
     @Test
     void nothing_configured_is_the_lan_profile() throws IOException {
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThat(open().current().settings().timings()).isEqualTo(Timings.lan());
     }
@@ -174,7 +227,7 @@ class FileConfigStoreTest {
     @Test
     void a_named_profile_is_taken_whole() throws IOException {
         settings("timings.profile=wan");
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThat(open().current().settings().timings()).isEqualTo(Timings.wan());
     }
@@ -194,7 +247,7 @@ class FileConfigStoreTest {
                 "timings.probe.millis=3000",
                 "timings.advertisement.millis=60000",
                 "timings.failure.threshold=5"));
-        application("orders", "secret=x");
+        application("orders", "");
 
         Timings timings = open().current().settings().timings();
 
@@ -211,7 +264,7 @@ class FileConfigStoreTest {
     @Test
     void a_profile_and_an_explicit_interval_together_are_refused() throws IOException {
         settings(String.join("\n", "timings.profile=wan", "timings.heartbeat.millis=250"));
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -223,7 +276,7 @@ class FileConfigStoreTest {
     @Test
     void one_election_bound_without_its_pair_is_refused() throws IOException {
         settings("timings.election.min.millis=2000");
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -233,7 +286,7 @@ class FileConfigStoreTest {
     @Test
     void an_incoherent_custom_set_fails_with_the_librarys_own_message() throws IOException {
         settings("timings.heartbeat.millis=100");
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -243,7 +296,7 @@ class FileConfigStoreTest {
     @Test
     void a_duration_that_is_not_a_number_says_which_key() throws IOException {
         settings("timings.heartbeat.millis=250ms");
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -261,8 +314,8 @@ class FileConfigStoreTest {
     @Test
     void two_applications_can_run_different_profiles() throws IOException {
         settings("timings.profile=lan");
-        application("orders", "secret=x");
-        application("billing", String.join("\n", "secret=y", "timings.profile=wan"));
+        application("orders", "");
+        application("billing", "timings.profile=wan");
 
         ConfigSnapshot snapshot = open().current();
 
@@ -273,7 +326,7 @@ class FileConfigStoreTest {
     @Test
     void an_application_that_says_nothing_takes_the_witness_wide_intervals() throws IOException {
         settings("timings.profile=wan");
-        application("orders", "secret=x");
+        application("orders", "");
 
         assertThat(open().current().application("orders").timings())
                 .as("the same fallback the secret and the algorithm already use")
@@ -283,7 +336,6 @@ class FileConfigStoreTest {
     @Test
     void an_application_can_spell_its_intervals_out() throws IOException {
         application("orders", String.join("\n",
-                "secret=x",
                 "timings.heartbeat.millis=250",
                 "timings.election.min.millis=2000",
                 "timings.election.max.millis=4000",
@@ -304,7 +356,7 @@ class FileConfigStoreTest {
     @Test
     void an_applications_profile_and_explicit_interval_together_are_refused() throws IOException {
         application("orders", String.join("\n",
-                "secret=x", "timings.profile=wan", "timings.heartbeat.millis=250"));
+                "timings.profile=wan", "timings.heartbeat.millis=250"));
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -320,7 +372,7 @@ class FileConfigStoreTest {
             store.addListener(changes);
             assertThat(store.current().applications()).isEmpty();
 
-            application("orders", "secret=s3cret");
+            application("orders", "");
             assertThat(rescan(store)).isTrue();
 
             assertThat(store.current().applicationNames()).containsExactly("orders");
@@ -330,7 +382,7 @@ class FileConfigStoreTest {
 
     @Test
     void a_removed_application_stops_being_served_but_keeps_its_state() throws IOException {
-        application("orders", "secret=s3cret");
+        application("orders", "");
         try (FileConfigStore store = open()) {
             Recording changes = new Recording();
             store.addListener(changes);
@@ -343,25 +395,33 @@ class FileConfigStoreTest {
         }
     }
 
+    /**
+     * Rotation stopped being a mechanism and became list membership: add the new key, wait, remove
+     * the old. Both are simply in the ring while the window is open.
+     */
     @Test
-    void a_rotated_secret_is_reported_as_a_change() throws IOException {
-        application("orders", "secret=old");
+    void a_rotation_is_two_keys_in_the_ring_at_once() throws IOException {
+        settings("secret.old.value = old");
         try (FileConfigStore store = open()) {
-            Recording changes = new Recording();
-            store.addListener(changes);
-
-            application("orders", "secret=new\nsecret.previous=old");
+            settings("secret.old.value = old\nsecret.new.value = new");
             assertThat(rescan(store)).isTrue();
 
-            assertThat(changes.changed).containsExactly("orders");
-            assertThat(new String(store.current().application("orders").secret(),
-                    StandardCharsets.UTF_8)).isEqualTo("new");
+            assertThat(store.current().settings().keyring().candidatesFor("orders"))
+                    .extracting(WitnessKey::name)
+                    .as("nothing has to be restarted in lockstep; both keys verify meanwhile")
+                    .containsExactly("new", "old");
+
+            settings("secret.new.value = new");
+            assertThat(rescan(store)).isTrue();
+            assertThat(store.current().settings().keyring().candidatesFor("orders"))
+                    .extracting(WitnessKey::name)
+                    .containsExactly("new");
         }
     }
 
     @Test
     void a_malformed_file_never_takes_down_the_running_configuration() throws IOException {
-        application("orders", "secret=s3cret");
+        application("orders", "");
         try (FileConfigStore store = open()) {
             assertThat(store.current().applicationNames()).containsExactly("orders");
 
@@ -377,14 +437,14 @@ class FileConfigStoreTest {
 
     @Test
     void the_configuration_recovers_once_the_bad_file_is_fixed() throws IOException {
-        application("orders", "secret=s3cret");
+        application("orders", "");
         try (FileConfigStore store = open()) {
             application("bad name", "secret=x");
             rescan(store);
             assertThat(store.current().applicationNames()).containsExactly("orders");
 
             Files.delete(applicationFile("bad name"));
-            application("billing", "secret=y");
+            application("billing", "");
             rescan(store);
 
             assertThat(store.current().applicationNames()).containsExactly("billing", "orders");
@@ -394,16 +454,15 @@ class FileConfigStoreTest {
     /**
      * Onboarding a tenant, or moving one to another network, must not need a witness restart —
      * that is the one genuinely risky operation in its lifecycle, since every two-node cluster it
-     * serves tolerates zero failures while it is down. The witness-wide keys are read at startup;
-     * per-application ones are not, and this is what says so.
+     * serves tolerates zero failures while it is down.
      */
     @Test
     void an_applications_intervals_can_be_changed_without_a_restart() throws IOException {
-        application("orders", "secret=s3cret");
+        application("orders", "");
         try (FileConfigStore store = open()) {
             assertThat(store.current().application("orders").timings()).isEqualTo(Timings.lan());
 
-            application("orders", String.join("\n", "secret=s3cret", "timings.profile=wan"));
+            application("orders", "timings.profile=wan");
             assertThat(rescan(store)).isTrue();
 
             assertThat(store.current().application("orders").timings()).isEqualTo(Timings.wan());
@@ -412,7 +471,7 @@ class FileConfigStoreTest {
 
     @Test
     void an_unchanged_directory_reports_no_change() throws IOException {
-        application("orders", "secret=s3cret");
+        application("orders", "");
         try (FileConfigStore store = open()) {
             assertThat(rescan(store)).isFalse();
             assertThat(rescan(store)).isFalse();
@@ -424,7 +483,7 @@ class FileConfigStoreTest {
             throws IOException {
         settings("reload.rescan.seconds=30");
         try (FileConfigStore store = open()) {
-            application("orders", "secret=s3cret");
+            application("orders", "");
 
             assertThat(store.poll(clock.nanoTime()))
                     .as("nothing is due yet")
@@ -451,7 +510,7 @@ class FileConfigStoreTest {
     @Test
     void a_settings_only_change_is_published() throws IOException {
         settings("config.source=file\nconfig.cluster.limit=7");
-        application("orders", "secret=s3cret");
+        application("orders", "");
 
         try (FileConfigStore store = open()) {
             assertThat(store.current().settings().configSource())
@@ -473,7 +532,7 @@ class FileConfigStoreTest {
     @Test
     void a_settings_only_change_does_not_disturb_the_applications() throws IOException {
         settings("config.source=file");
-        application("orders", "secret=s3cret");
+        application("orders", "");
 
         Recording changes = new Recording();
         try (FileConfigStore store = open()) {
@@ -512,11 +571,11 @@ class FileConfigStoreTest {
     @Test
     void a_reload_that_changes_nothing_is_not_a_change() throws IOException {
         settings("config.source=cluster");
-        application("orders", "secret=s3cret");
+        application("orders", "");
 
         try (FileConfigStore store = open()) {
             settings("config.source=cluster");
-            application("orders", "secret=s3cret");
+            application("orders", "");
 
             assertThat(rescan(store))
                     .as("rewriting the same values must not rebuild a tenant's node")

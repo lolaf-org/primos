@@ -179,8 +179,9 @@ public final class WitnessServer implements AutoCloseable {
                     + " 'orders' and 'ordres' would each get their own vote from it. Names that"
                     + " look like near misses are warned about individually.");
         }
-        if (settings.defaultSecret() == null && snapshot.applications().isEmpty()) {
-            log.warn("no secret is configured. An unauthenticated witness answers anybody who asks,"
+        log.info("witness {}: {}", nodeId, settings.keyring().summary());
+        if (settings.keyring().isEmpty()) {
+            log.warn("no keys are configured. An unauthenticated witness answers anybody who asks,"
                     + " and one forged vote grant plus a candidate's own vote is a majority in a"
                     + " three-voter cluster — so this is a route to a false leader, not merely a"
                     + " denial of service.");
@@ -452,8 +453,7 @@ public final class WitnessServer implements AutoCloseable {
         autoRegistrations++;
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
-        return open(new ApplicationConfig(application, settings.defaultSecret(), null,
-                settings.defaultMacAlgorithm(), settings.timings(), true));
+        return open(new ApplicationConfig(application, settings.timings(), true));
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
@@ -539,9 +539,7 @@ public final class WitnessServer implements AutoCloseable {
      */
     private void rebuild(Served application, ApplicationConfig updated) {
         if (log.isInfoEnabled()) {
-            log.info("application '{}' was reconfigured{}", updated.name(),
-                    updated.hasSecret() ? " (secret in force" + (updated.previousSecret() != null
-                            ? ", previous still accepted)" : ")") : " (no secret)");
+            log.info("application '{}' was reconfigured", updated.name());
         }
         application.config = updated;
         application.failed = false;
@@ -632,23 +630,28 @@ public final class WitnessServer implements AutoCloseable {
     /**
      * The key one application's datagrams are checked with.
      *
-     * <p>Per-application where one is configured, falling back to the witness-wide secret
-     * otherwise — which is what lets {@link ConfigSource#CLUSTER} work at all, since an
-     * application nobody
-     * configured has nowhere to have had a secret set. The cost of sharing one is that any cluster
-     * holding it can forge another's messages, which is fine when one team owns everything and not
-     * otherwise.
+     * <p>The keys that may speak for this application:
+     * otherwise — the keys that claim this name, or the ones claiming nothing when none does.
+     *
+     * <p>A ring rather than a single key, so a rotation is a key added to the file and removed
+     * later rather than a flag day, and so a witness may hold a key per tenant without an
+     * application file existing for any of them.
      */
     private MessageAuthenticator authenticatorFor(ApplicationConfig application) {
-        byte[] secret = application.secret();
-        if (secret == null) {
-            log.warn("application '{}' is served without authentication. Anyone who can reach this"
-                    + " port can forge a vote grant for it, and one forged grant plus a candidate's"
-                    + " own vote is a majority in a three-voter cluster.", application.name());
+        List<WitnessKey> candidates =
+                configStore.current().settings().keyring().candidatesFor(application.name());
+        if (candidates.isEmpty()) {
+            log.warn("application '{}' is served without authentication: no configured key claims"
+                    + " it. Anyone who can reach this port can forge a vote grant for it, and one"
+                    + " forged grant plus a candidate's own vote is a majority in a three-voter"
+                    + " cluster.", application.name());
             return MessageAuthenticator.disabled();
         }
-        return MessageAuthenticator.hmac(application.macAlgorithm(), secret,
-                application.previousSecret());
+        List<MessageAuthenticator.KeySpec> ring = new ArrayList<>(candidates.size());
+        for (WitnessKey key : candidates) {
+            ring.add(MessageAuthenticator.KeySpec.of(key.name(), key.algorithm(), key.secret()));
+        }
+        return MessageAuthenticator.keyring(ring);
     }
 
     /**

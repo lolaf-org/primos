@@ -47,6 +47,57 @@ final class ApplicationNames {
     }
 
     /**
+     * Whether a glob pattern covers a name: {@code *} matches any run of characters, anchored.
+     *
+     * <p>Hand-rolled rather than translated to a regular expression, and the reason is not
+     * performance. An operator writing {@code orders-*} means a family of clusters; as a regex it
+     * means "orders followed by zero or more hyphens", which matches {@code orders--} and not
+     * {@code orders-prod}. Accepting regex syntax here would make the file say one thing and mean
+     * another, and fail silently in both directions.
+     *
+     * <p>Linear with backtracking only at stars, so nothing here can be driven hard — and the
+     * input is a 32-byte field in any case.
+     */
+    static boolean matchesPattern(String pattern, String name) {
+        int p = 0;
+        int n = 0;
+        int star = -1;
+        int afterStar = 0;
+        while (n < name.length()) {
+            if (p < pattern.length() && pattern.charAt(p) == name.charAt(n)) {
+                p++;
+                n++;
+            } else if (p < pattern.length() && pattern.charAt(p) == '*') {
+                star = p++;
+                afterStar = n;
+            } else if (star >= 0) {
+                // The last star was too greedy or too shy; give it one more character and retry.
+                p = star + 1;
+                n = ++afterStar;
+            } else {
+                return false;
+            }
+        }
+        while (p < pattern.length() && pattern.charAt(p) == '*') {
+            p++;
+        }
+        return p == pattern.length();
+    }
+
+    /**
+     * The characters a pattern must match literally, which bounds whether it can ever match at all.
+     */
+    static int literalLength(String pattern) {
+        int length = 0;
+        for (int i = 0; i < pattern.length(); i++) {
+            if (pattern.charAt(i) != '*') {
+                length++;
+            }
+        }
+        return length;
+    }
+
+    /**
      * The served name a new one is suspiciously close to, or null.
      *
      * <p>This is aimed at one specific disaster. Nodes configured {@code orders} and {@code ordres}

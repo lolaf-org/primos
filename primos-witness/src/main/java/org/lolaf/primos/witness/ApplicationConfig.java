@@ -19,7 +19,6 @@ import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.lolaf.primos.Timings;
-import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.util.Objects;
 
@@ -38,30 +37,9 @@ public final class ApplicationConfig {
     private final String name;
 
     /**
-     * Read through {@link #secret()} and {@link #previousSecret()}, which copy: an array handed
-     * out twice is an array a caller can change under this witness.
-     */
-    @Getter(AccessLevel.NONE)
-    private final byte[] secret;
-
-    @Getter(AccessLevel.NONE)
-    private final byte[] previousSecret;
-
-    /**
-     * The {@link javax.crypto.Mac} algorithm this application's datagrams are tagged with.
-     *
-     * <p>Per application rather than per witness, because a witness serves clusters it does not
-     * own: one of them moving to a different algorithm must not be a flag day for every other
-     * tenant. Never null — an application that says nothing gets
-     * {@link MessageAuthenticator#DEFAULT_ALGORITHM}, which is what the library defaults to, so
-     * the two agree without anybody configuring anything.
-     */
-    private final String macAlgorithm;
-
-    /**
      * The intervals the nodes of this cluster run, which its witness has to match.
      *
-     * <p>Per application, and for the same reason the secret and the MAC algorithm are: a witness
+     * <p>Per application, because a witness
      * serves clusters it does not own, and one of them moving to a WAN profile must not be a flag
      * day for every other tenant. It used to be witness-wide, which meant a witness serving a LAN
      * cluster and a WAN one was configured wrongly for whichever it was not — and, since nodes
@@ -81,38 +59,10 @@ public final class ApplicationConfig {
     @Getter(AccessLevel.NONE)
     private final boolean autoRegistered;
 
-    public ApplicationConfig(String name, byte[] secret, byte[] previousSecret,
-                             String macAlgorithm, Timings timings, boolean autoRegistered) {
+    public ApplicationConfig(String name, Timings timings, boolean autoRegistered) {
         this.name = Objects.requireNonNull(name, "name");
-        this.secret = secret == null ? null : secret.clone();
-        this.previousSecret = previousSecret == null ? null : previousSecret.clone();
-        this.macAlgorithm = macAlgorithm == null
-                ? MessageAuthenticator.DEFAULT_ALGORITHM
-                : macAlgorithm;
         this.timings = Objects.requireNonNull(timings, "timings");
         this.autoRegistered = autoRegistered;
-    }
-
-    /**
-     * The secret in force, or null when this application is served without authentication.
-     */
-    public byte[] secret() {
-        return secret == null ? null : secret.clone();
-    }
-
-    /**
-     * The secret being rotated out, still accepted.
-     *
-     * <p>Rotation is two file edits with a window in between rather than a flag day: set the new
-     * secret as current and the old one as previous, wait for every node to be updated, then
-     * remove the previous one.
-     */
-    public byte[] previousSecret() {
-        return previousSecret == null ? null : previousSecret.clone();
-    }
-
-    public boolean hasSecret() {
-        return secret != null;
     }
 
     /**
@@ -123,13 +73,12 @@ public final class ApplicationConfig {
     }
 
     /**
-     * Never includes the secret.
+     * Carries no key material, because there is none here to carry: keys live in the witness's
+     * {@link Keyring}, which is what lets them work identically under both {@link ConfigSource}
+     * values.
      */
     @Override
     public String toString() {
-        return "ApplicationConfig(" + name + ", secret=" + (secret != null ? "set" : "none")
-                + ", previousSecret=" + (previousSecret != null ? "set" : "none")
-                + ", " + macAlgorithm
-                + (autoRegistered ? ", auto-registered" : "") + ")";
+        return "ApplicationConfig(" + name + (autoRegistered ? ", auto-registered" : "") + ")";
     }
 }

@@ -85,9 +85,11 @@ class MultiApplicationSoakTest {
     @BeforeEach
     void createLayout() throws IOException {
         Files.createDirectories(directory.resolve("applications"));
+        Files.write(directory.resolve("witness.properties"),
+                ("secret.shared.value=" + SECRET).getBytes(StandardCharsets.UTF_8));
         for (String application : APPLICATIONS) {
             Files.write(directory.resolve("applications/" + application + ".properties"),
-                    ("secret=" + SECRET).getBytes(StandardCharsets.UTF_8));
+                    new byte[0]);
         }
     }
 
@@ -187,7 +189,8 @@ class MultiApplicationSoakTest {
     @Test
     void a_cluster_nobody_configured_is_served_on_the_intervals_it_states() throws IOException {
         Files.write(directory.resolve("witness.properties"),
-                ("config.source=cluster\nsecret=" + SECRET).getBytes(StandardCharsets.UTF_8));
+                ("config.source=cluster\nsecret.shared.value=" + SECRET)
+                        .getBytes(StandardCharsets.UTF_8));
         server = WitnessServer.builder()
                 .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
                 .nodeId(WITNESS_ID)

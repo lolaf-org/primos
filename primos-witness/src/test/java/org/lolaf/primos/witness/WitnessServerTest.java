@@ -49,6 +49,9 @@ class WitnessServerTest {
     @BeforeEach
     void createLayout() throws IOException {
         Files.createDirectories(directory.resolve("applications"));
+        // Keys live in witness.properties now, not in an application's own file, so the shared one
+        // is written for every test; those that care about which key covers what overwrite it.
+        settings("");
     }
 
     @AfterEach
@@ -73,7 +76,6 @@ class WitnessServerTest {
     @Test
     void each_application_is_served_with_its_own_intervals() {
         applicationWith("orders", String.join("\n",
-                "secret=" + SECRET,
                 "timings.heartbeat.millis=20",
                 "timings.election.min.millis=100",
                 "timings.election.max.millis=200",
@@ -81,7 +83,6 @@ class WitnessServerTest {
                 "timings.advertisement.millis=100",
                 "timings.failure.threshold=3"));
         applicationWith("billing", String.join("\n",
-                "secret=" + SECRET,
                 "timings.heartbeat.millis=40",
                 "timings.election.min.millis=400",
                 "timings.election.max.millis=800",
@@ -213,7 +214,7 @@ class WitnessServerTest {
 
     @Test
     void cluster_mode_serves_an_application_nobody_configured() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
@@ -228,7 +229,7 @@ class WitnessServerTest {
 
     @Test
     void cluster_mode_stops_creating_applications_at_its_limit() {
-        settings("config.source=cluster\nconfig.cluster.limit=2\nsecret=" + SECRET);
+        settings("config.source=cluster\nconfig.cluster.limit=2\nsecret.shared.value=" + SECRET);
         start();
 
         for (String name : new String[] {"one", "two", "three", "four"}) {
@@ -245,7 +246,7 @@ class WitnessServerTest {
 
     @Test
     void cluster_mode_does_not_create_an_application_from_a_vote_request() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
@@ -263,7 +264,7 @@ class WitnessServerTest {
 
     @Test
     void cluster_mode_creates_the_application_once_its_config_arrives() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
@@ -282,7 +283,7 @@ class WitnessServerTest {
 
     @Test
     void file_mode_creates_nothing_whatever_the_message_is() {
-        settings("config.source=file\nsecret=" + SECRET);
+        settings("config.source=file\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient stranger = client("payments", 1)) {
@@ -298,7 +299,7 @@ class WitnessServerTest {
 
     @Test
     void cluster_mode_follows_the_intervals_a_cluster_states() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient orders = client("orders", 1)) {
@@ -319,7 +320,7 @@ class WitnessServerTest {
 
     @Test
     void file_mode_ignores_the_intervals_a_cluster_states() {
-        settings(String.join("\n", "config.source=file", "secret=" + SECRET,
+        settings(String.join("\n", "config.source=file", "secret.shared.value=" + SECRET,
                 "timings.heartbeat.millis=20",
                 "timings.election.min.millis=100",
                 "timings.election.max.millis=200",
@@ -345,7 +346,7 @@ class WitnessServerTest {
 
     @Test
     void two_clusters_stating_different_intervals_each_get_their_own() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient orders = client("orders", 1);
@@ -371,7 +372,7 @@ class WitnessServerTest {
         // The advertisement interval is not on the wire, so a witness keeps its own — and this
         // test needs two of them. Both profiles here are deliberately fast so it does not spend
         // thirty seconds waiting for the second.
-        settings(String.join("\n", "config.source=cluster", "secret=" + SECRET,
+        settings(String.join("\n", "config.source=cluster", "secret.shared.value=" + SECRET,
                 "timings.heartbeat.millis=20",
                 "timings.election.min.millis=100",
                 "timings.election.max.millis=200",
@@ -400,7 +401,7 @@ class WitnessServerTest {
 
     @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
-        settings("config.source=cluster\nsecret=" + SECRET);
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
 
         try (WitnessClient traversal = client("../../etc", 1)) {
@@ -461,35 +462,59 @@ class WitnessServerTest {
     }
 
     @Test
-    void one_applications_secret_does_not_authenticate_another() {
-        applicationWith("orders", "secret=orders-secret");
-        applicationWith("billing", "secret=billing-secret");
+    void a_key_scoped_to_one_application_does_not_authenticate_another() {
+        settings(String.join("\n",
+                "secret.orders.value = orders-secret",
+                "secret.orders.applications = orders",
+                "secret.billing.value = billing-secret",
+                "secret.billing.applications = billing"));
+        applicationWith("orders", "");
+        applicationWith("billing", "");
         start();
 
         try (WitnessClient crossTalk = new WitnessClient("billing", 1, "orders-secret",
                 WITNESS_ID, server.boundAddress())) {
             assertThat(crossTalk.requestVote(server, 1L))
-                    .as("per-application secrets are what make multi-tenancy isolation real rather"
-                            + " than nominal")
+                    .as("claiming a name is what makes isolation real rather than nominal: the"
+                            + " other tenant's key must not reach it")
                     .isNull();
         }
         assertThat(server.currentTerm("billing")).isZero();
     }
 
     @Test
-    void a_rotated_secret_accepts_both_until_the_previous_one_is_removed() {
-        applicationWith("orders", "secret=new-secret\nsecret.previous=" + SECRET);
+    void an_unscoped_key_cannot_reach_a_name_another_key_claims() {
+        settings(String.join("\n",
+                "secret.general.value = " + SECRET,
+                "secret.orders.value = orders-secret",
+                "secret.orders.applications = orders-*"));
+        applicationWith("orders-prod", "");
         start();
 
-        // Mid-rotation, every party holds both: the witness tags its replies with the current
-        // secret, so a node that only had the old one could send but never hear an answer.
+        try (WitnessClient withTheGeneralKey = new WitnessClient("orders-prod", 1, SECRET,
+                WITNESS_ID, server.boundAddress())) {
+            assertThat(withTheGeneralKey.requestVote(server, 1L))
+                    .as("a claim is a reservation, not merely a restriction; otherwise a dedicated"
+                            + " key would buy its tenant nothing")
+                    .isNull();
+        }
+    }
+
+    @Test
+    void a_rotated_secret_accepts_both_until_the_previous_one_is_removed() {
+        settings("secret.new.value = new-secret\nsecret.old.value = " + SECRET);
+        applicationWith("orders", "");
+        start();
+
+        // Mid-rotation, every party holds both: the witness signs each reply with whichever key
+        // verified the request, so a node holding only one of them still hears an answer.
         try (WitnessClient onTheOldSecret = new WitnessClient("orders", 1, SECRET, "new-secret",
                 WITNESS_ID, server.boundAddress());
              WitnessClient onTheNewSecret = new WitnessClient("orders", 2, "new-secret", SECRET,
                      WITNESS_ID, server.boundAddress())) {
 
             assertThat(onTheOldSecret.requestVote(server, 1L))
-                    .as("rotation is two file edits with a window, not a flag day across every node")
+                    .as("rotation is a key added and later removed, not a flag day across nodes")
                     .isTrue();
             assertThat(onTheNewSecret.requestVote(server, 2L)).isTrue();
         }
@@ -591,15 +616,19 @@ class WitnessServerTest {
     }
 
     private void application(String name) {
-        applicationWith(name, "secret=" + SECRET);
+        applicationWith(name, "");
     }
 
     private void applicationWith(String name, String contents) {
         write(directory.resolve("applications/" + name + ".properties"), contents);
     }
 
+    /** Carries the shared key unless the test is saying something specific about keys. */
     private void settings(String contents) {
-        write(directory.resolve("witness.properties"), contents);
+        String withKey = contents.contains("secret.")
+                ? contents
+                : "secret.shared.value=" + SECRET + "\n" + contents;
+        write(directory.resolve("witness.properties"), withKey);
     }
 
     private void write(Path file, String contents) {

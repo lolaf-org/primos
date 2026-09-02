@@ -62,6 +62,7 @@ public final class FileConfigStore implements ConfigStore {
     private static final String APPLICATIONS_DIRECTORY = "applications";
     private static final String SETTINGS_FILE = "witness.properties";
     private static final String SUFFIX = ".properties";
+    private static final String KEY_PREFIX = "secret.";
 
     private final Path directory;
     private final Path applicationsDirectory;
@@ -234,6 +235,86 @@ public final class FileConfigStore implements ConfigStore {
      * <p>The indirections exist so configuration can go into version control without the secret
      * going with it.
      */
+    /**
+     * Every {@code secret.<name>.value} in the file, with its algorithm and the names it claims.
+     *
+     * <p>Sorted by key name, so the ring's order does not depend on {@code Properties} hashing.
+     * Order decides nothing about correctness — a datagram is authentic if any candidate accepts
+     * it — but a configuration that reads differently on two runs is not one anybody can reason
+     * about.
+     */
+    private Keyring readKeyring(Properties properties) {
+        Set<String> names = new TreeSet<>();
+        for (String property : properties.stringPropertyNames()) {
+            if (!property.startsWith(KEY_PREFIX)) {
+                continue;
+            }
+            String rest = property.substring(KEY_PREFIX.length());
+            int dot = rest.indexOf('.');
+            if (dot <= 0) {
+                throw new IllegalArgumentException("'" + property + "' names no key: a secret is"
+                        + " configured as secret.<name>.value, optionally with"
+                        + " secret.<name>.algorithm and secret.<name>.applications");
+            }
+            names.add(rest.substring(0, dot));
+        }
+        List<WitnessKey> keys = new ArrayList<>(names.size());
+        for (String name : names) {
+            byte[] secret = secretValue(properties, KEY_PREFIX + name + ".value", directory);
+            if (secret == null) {
+                throw new IllegalArgumentException("key '" + name + "' has no "
+                        + KEY_PREFIX + name + ".value; a key without a secret cannot verify"
+                        + " anything and is more likely a typo than an intention");
+            }
+            keys.add(new WitnessKey(name, secret,
+                    properties.getProperty(KEY_PREFIX + name + ".algorithm"),
+                    patterns(name, properties.getProperty(KEY_PREFIX + name + ".applications"))));
+        }
+        return new Keyring(keys);
+    }
+
+    /**
+     * The application patterns a key claims, validated as far as they can be before anything runs.
+     *
+     * <p>A bare {@code *} is treated as claiming nothing, which is the same thing as omitting the
+     * setting. Otherwise it would be a trap: a claimed name is verified <em>only</em> by the keys
+     * claiming it, so one {@code *} entry would silently take every unscoped key in the file out of
+     * use.
+     */
+    private static List<String> patterns(String keyName, String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> patterns = new ArrayList<>();
+        for (String piece : raw.split(",")) {
+            String pattern = piece.trim();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            if ("*".equals(pattern)) {
+                // Claims everything, which is the same intent as claiming nothing.
+                return Collections.emptyList();
+            }
+            int literal = ApplicationNames.literalLength(pattern);
+            if (literal > ClusterConfig.APPLICATION_NAME_MAX_BYTES) {
+                throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
+                        + "', whose " + literal + " literal characters cannot fit the "
+                        + ClusterConfig.APPLICATION_NAME_MAX_BYTES
+                        + "-byte name field, so it can never match anything");
+            }
+            for (int i = 0; i < pattern.length(); i++) {
+                char c = pattern.charAt(i);
+                if (c != '*' && !ClusterConfig.isApplicationNameCharacter(c)) {
+                    throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
+                            + "', which contains a character no application name may carry;"
+                            + " patterns match names, and a name is printable ASCII without spaces");
+                }
+            }
+            patterns.add(pattern);
+        }
+        return patterns;
+    }
+
     private static byte[] secretValue(Properties properties, String key, Path base) {
         String raw = properties.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
@@ -471,11 +552,7 @@ public final class FileConfigStore implements ConfigStore {
         String source = properties.getProperty("config.source", "file").trim();
         builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
-        builder.defaultSecret(secretValue(properties, "secret", directory));
-        String algorithm = properties.getProperty("secret.algorithm");
-        if (algorithm != null && !algorithm.trim().isEmpty()) {
-            builder.defaultMacAlgorithm(algorithm.trim());
-        }
+        builder.keyring(readKeyring(properties));
         builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
         builder.timings(timings(properties, Timings.lan()));
@@ -488,25 +565,34 @@ public final class FileConfigStore implements ConfigStore {
         warnIfWorldReadable(file);
         Properties properties = load(file, false);
 
-        byte[] secret = secretValue(properties, "secret", directory);
-        byte[] previous = secretValue(properties, "secret.previous", directory);
-        if (secret == null) {
-            // The witness-wide secret is what makes config.source=cluster possible at all: an
-            // application nobody configured has nowhere to have had one set.
-            secret = settings.defaultSecret();
-        }
-        // Per application rather than per witness, because a witness serves clusters it does not
-        // own: one of them changing algorithm must not be a flag day for every other tenant.
-        String algorithm = properties.getProperty("secret.algorithm");
-        if (algorithm == null || algorithm.trim().isEmpty()) {
-            algorithm = settings.defaultMacAlgorithm();
-        }
-        // Per application, falling back to the witness-wide value, exactly as the secret and the
-        // algorithm above do. A tenant that says nothing gets what the witness was told; a tenant
-        // on another network says so in its own file, without touching anyone else's.
+        warnIfKeysHere(name, properties);
+        // Per application, falling back to the witness-wide value. A tenant that says nothing gets
+        // what the witness was told; a tenant on another network says so in its own file, without
+        // touching anyone else's.
         Timings timings = timings(properties, settings.timings());
         warnIfTimingsIgnored(name, properties, settings);
-        return new ApplicationConfig(name, secret, previous, algorithm.trim(), timings, false);
+        return new ApplicationConfig(name, timings, false);
+    }
+
+    /**
+     * Says so when an application file still carries key material, which no longer lives there.
+     *
+     * <p>Refused rather than ignored. Every other stale key in this estate is read and dropped with
+     * a line saying so, and this one is not, because the failure it would otherwise produce is the
+     * worst kind available here: an operator who believes a tenant has its own secret, and a
+     * witness verifying it with whatever the keyring happens to offer. A configuration that is
+     * wrong about who can speak for whom must not start.
+     */
+    private static void warnIfKeysHere(String name, Properties properties) {
+        for (String property : properties.stringPropertyNames()) {
+            if (property.equals("secret") || property.startsWith("secret.")) {
+                throw new IllegalArgumentException("application '" + name + "' sets '" + property
+                        + "', but keys live in witness.properties as secret.<name>.value, with an"
+                        + " optional secret.<name>.applications naming what each covers. Leaving"
+                        + " this here would mean believing this tenant has its own key when the"
+                        + " keyring decides otherwise.");
+            }
+        }
     }
 
     /**

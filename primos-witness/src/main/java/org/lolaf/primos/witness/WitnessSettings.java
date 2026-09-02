@@ -15,12 +15,10 @@
  */
 package org.lolaf.primos.witness;
 
-import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import org.lolaf.primos.Timings;
-import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
@@ -49,20 +47,13 @@ public final class WitnessSettings {
     private final ConfigSource configSource;
 
     /**
-     * Read through {@link #defaultSecret()}, which copies: the array is a secret and handing the
-     * same one out twice lets a caller change what this witness authenticates with.
-     */
-    @Getter(AccessLevel.NONE)
-    private final byte[] defaultSecret;
-
-    /**
-     * The algorithm used for any application that does not name one, auto-registered ones included.
+     * Every key this witness holds, and which applications each may speak for.
      *
-     * <p>Defaults to what the library defaults to, so a witness and a cluster that have both said
-     * nothing still agree. An application file may override it; nothing on the wire carries the
-     * algorithm, so whatever is set here has to match what the cluster's nodes were built with.
+     * <p>Witness-wide rather than per application, and that is what makes keys independent of
+     * {@link ConfigSource}: a cluster arriving over the network has no file to have had a secret
+     * set in, so keys kept per application could offer it only one shared key or none.
      */
-    private final String defaultMacAlgorithm;
+    private final Keyring keyring;
 
     /**
      * How many applications {@link ConfigSource#CLUSTER} may create, so an open witness cannot be
@@ -109,10 +100,7 @@ public final class WitnessSettings {
         this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
         this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
         this.configSource = Objects.requireNonNull(builder.configSource, "configSource");
-        // Copied rather than kept, because it is a secret and the caller's array is theirs.
-        this.defaultSecret = builder.defaultSecret == null ? null : builder.defaultSecret.clone();
-        this.defaultMacAlgorithm = Objects.requireNonNull(
-                builder.defaultMacAlgorithm, "defaultMacAlgorithm");
+        this.keyring = Objects.requireNonNull(builder.keyring, "keyring");
         this.clusterApplicationLimit = builder.clusterApplicationLimit;
         this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
@@ -122,18 +110,6 @@ public final class WitnessSettings {
 
     public static Builder builder() {
         return new Builder();
-    }
-
-    /**
-     * The witness-wide secret, used for any application without one of its own.
-     *
-     * <p>It is what lets {@link ConfigSource#CLUSTER} work at all: an application nobody
-     * configured has nowhere
-     * to have had a secret set. The cost is that every cluster sharing it can forge the others'
-     * messages, which is fine when one team owns everything and not otherwise.
-     */
-    public byte[] defaultSecret() {
-        return defaultSecret == null ? null : defaultSecret.clone();
     }
 
     /**
@@ -160,16 +136,10 @@ public final class WitnessSettings {
         private ConfigSource configSource = ConfigSource.FILE;
 
         /**
-         * The witness-wide secret, used for any application without one of its own.
+         * Every key this witness holds. See {@link Keyring}.
          */
         @Setter
-        private byte[] defaultSecret;
-
-        /**
-         * The algorithm for any application that does not name one. Cluster-wide policy.
-         */
-        @Setter
-        private String defaultMacAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
+        private Keyring keyring = Keyring.empty();
 
         /**
          * How many applications {@link ConfigSource#CLUSTER} may create.

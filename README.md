@@ -187,7 +187,7 @@ tell you.
 
 `primos-witness` is a standalone process serving many clusters at once, keyed by application name.
 **Operators want [its own README](primos-witness/README.md)** — installing, configuring, secret
-rotation, registration modes, what to alert on, and troubleshooting. In brief, it ships as a
+rotation, configuration sources, what to alert on, and troubleshooting. In brief, it ships as a
 `tar.gz`/`zip` with a launcher, its jars, and a commented sample configuration:
 
 ```
@@ -195,7 +195,7 @@ bin/primos-witness --config /etc/primos-witness
 ```
 
 ```
-/etc/primos-witness/witness.properties            # port, mode, state directory, default secret
+/etc/primos-witness/witness.properties            # port, config source, state directory, keys
 /etc/primos-witness/applications/orders.properties
 /etc/primos-witness/applications/billing.properties
 ```
@@ -217,17 +217,21 @@ Three rules are safety rather than advice:
   forged vote grant plus a candidate's own vote is a majority in a three-voter cluster, so an
   unauthenticated witness link is a route to a false leader, not merely a denial of service.
 
-Secrets are per-application with a witness-wide fallback, and accept a **previous** secret
-alongside the current one, so rotation is two file edits with a window rather than a flag day
-across every node.
+**Keys live in `witness.properties`, as a keyring rather than one secret**, and never in an
+application's own file — a cluster that arrives over the network has no file to have had a secret
+set in. Each key may name the applications it covers, with `*` patterns, and the rule is that a
+name any key claims is verified only by the keys claiming it. So the same setting spans one shared
+key for a fleet, a dedicated key per tenant, and everything between. Rotation is list membership:
+add the new key, roll the nodes, remove the old.
 
-**Registration mode defaults to `strict`**, and here is why. In `permissive` mode the witness
-serves any name it hears. Suppose two clusters are configured `orders` and `ordres`. They drop
-each other's datagrams for a mismatched name, so each sees the other as unreachable and asks the
-witness instead. The witness auto-creates *two* buckets and grants a vote from each — **two leaders
-out of one typo**, with the cross-talk protection hiding the cause. Permissive mode is a legitimate
-choice and is hardened for it (WARN on every auto-registration, near-miss name detection, and a cap
-so an open witness cannot be filled up), but strict is the default for that reason.
+**`config.source` defaults to `file`**, and here is why. Under `cluster` the witness serves any
+name whose nodes state a configuration it can verify. Suppose two clusters are configured `orders`
+and `ordres`. They drop each other's datagrams for a mismatched name, so each sees the other as
+unreachable and asks the witness instead. The witness auto-creates *two* buckets and grants a vote
+from each — **two leaders out of one typo**, with the cross-talk protection hiding the cause.
+`cluster` is a legitimate choice and is hardened for it (WARN on every auto-registration, near-miss
+name detection, and a cap so an open witness cannot be filled up), but `file` is the default for
+that reason.
 
 ## Observability
 
@@ -263,7 +267,7 @@ from departures merely inferred from silence — which on the JVM might have bee
 collection.
 
 The witness server exposes the same shape per served application, so a stray cluster on a
-permissive witness is visible on a dashboard.
+witness serving whatever it hears is visible on a dashboard.
 
 ## Timing
 
