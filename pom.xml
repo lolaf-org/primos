@@ -89,6 +89,7 @@
     <modules>
         <module>primos</module>
         <module>primos-witness</module>
+        <module>primos-witness-cli</module>
         <module>primos-spring-boot-starter</module>
     </modules>
 

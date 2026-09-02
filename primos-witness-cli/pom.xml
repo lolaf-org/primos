@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.lolaf.primos</groupId>
+        <artifactId>primos-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>primos-witness-cli</artifactId>
+
+    <name>Primos Witness Server CLI</name>
+    <description>
+        The witness server as a process you install: a picocli command line over primos-witness, and
+        a tar.gz an operator can unpack beside a systemd unit. One of two front doors onto the same
+        server; the other is a Spring Boot packaging, and neither holds any logic of its own.
+    </description>
+
+    <properties>
+        <automatic.module.name>org.lolaf.primos.witness.cli</automatic.module.name>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos-witness</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- The command line. A single self-contained jar with no dependencies of its own, which is
+             what makes it acceptable in a process meant to run untouched for years: every dependency
+             here is a future CVE notification and an unplanned upgrade of something whose job is
+             never to move. It lives in this module rather than in the library so that an
+             application embedding the witness inherits slf4j-api and nothing else. -->
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+        </dependency>
+        <!-- This one is an application, not a library, so it ships its own logging backend at
+             runtime. The SLF4J-only rule constrains what consumers inherit; nobody depends on this. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                The operator-facing artifact. primos-witness is a jar people depend on; this module
+                is a process people install, and nobody embedding the witness should ever receive it.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>distribution</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <configuration>
+                            <descriptors>
+                                <descriptor>src/assembly/distribution.xml</descriptor>
+                            </descriptors>
+                            <appendAssemblyId>true</appendAssemblyId>
+                            <tarLongFileMode>posix</tarLongFileMode>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

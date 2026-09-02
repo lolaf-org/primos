@@ -1,10 +1,13 @@
 # Primos Witness Server
 
-A **witness** is a voter that never becomes leader. This is the standalone process that provides
-one to many clusters at once.
+A **witness** is a voter that never becomes leader. This is the server that provides one to many
+clusters at once.
 
-Operator-facing. For the library, see the [project README](../README.md); for the reasoning behind
-every decision here, [PLAN.md](../PLAN.md).
+Operator-facing, and it documents the server itself rather than any one way of running it —
+everything below is true of every packaging. `primos-witness` is a library; the runnable front doors
+are their own modules, today [`primos-witness-cli`](../primos-witness-cli) and later a Spring Boot
+one. For the primos library, see the [project README](../README.md); for the reasoning behind every
+decision here, [PLAN.md](../PLAN.md).
 
 ---
 
@@ -78,10 +81,10 @@ cannot be provoked at all.
 
 ## Installing
 
-Unpack the distribution wherever you keep such things:
+Unpack the `primos-witness-cli` distribution wherever you keep such things:
 
 ```
-primos-witness-<version>/
+primos-witness-cli-<version>/
 ├── bin/primos-witness
 ├── lib/*.jar
 ├── conf-sample/                 # heavily commented; copy it, do not point at it
@@ -93,7 +96,7 @@ primos-witness-<version>/
 ```sh
 install -d -m 0750 /etc/primos-witness/applications
 install -d -m 0750 /var/lib/primos-witness
-cp -r primos-witness-*/conf-sample/* /etc/primos-witness/
+cp -r primos-witness-cli-*/conf-sample/* /etc/primos-witness/
 ```
 
 `conf-sample/` is deliberately a *sample* rather than the live path, so that upgrading never
@@ -181,9 +184,14 @@ A directory, not a single file:
     └── billing.properties
 ```
 
-The split earns its keep on shared infrastructure: adding a cluster is a **file drop** rather than
-an edit to a file every tenant contends over, and each key file can carry its own permissions,
-which one shared file makes impossible.
+Under `config.source=file` the split earns its keep on shared infrastructure: adding a cluster is a
+**file drop** rather than an edit to a file every tenant contends over.
+
+**Under `config.source=cluster` there is no per-tenant file to drop, and `applications/` need not
+exist at all.** Applications are created by the config messages their nodes send, timings come from
+those messages, and keys live in the keyring — so a witness in that mode needs exactly one file. A
+tenant gets a file there only to pin its own timings, which that mode overrules anyway. This is also
+the shape that fits a single Kubernetes ConfigMap, since a ConfigMap key cannot contain `/`.
 
 ### `witness.properties`
 
@@ -458,7 +466,7 @@ patterns, not by `config.source`**. See [Keys](#keys).
 > that should have caught the mismatch is what hides the cause, because neither cluster ever sees
 > the other's traffic.
 
-Permissive mode is hardened rather than merely documented:
+`cluster` is hardened rather than merely documented:
 
 - every auto-registration logged at WARN with the name and source address;
 - **near-miss detection** on first sight of a name — case-insensitive, small edit distance against
@@ -547,8 +555,8 @@ counters rather than for an error. Check that some key in the keyring covers tha
 a name claimed by a key the cluster does not hold is verified by nothing else — and check for a
 rotation where the node holds only a key already removed from the ring.
 
-**`dropping traffic for unserved application 'X'`.** Strict mode, and no `applications/X.properties`
-exists. If `X` looks like a near miss of something you do serve, treat it as a typo in that
+**`dropping traffic for unserved application 'X'`.** `config.source=file`, and no
+`applications/X.properties` exists. If `X` looks like a near miss of something you do serve, treat it as a typo in that
 cluster's configuration and not as something to fix by adding a file.
 
 **Two leaders in one cluster.** Check, in order: two witness instances answering for the same

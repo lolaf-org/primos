@@ -60,9 +60,13 @@
             </includes>
         </fileSet>
         <!-- The operator manual travels with the thing it documents, so it is to hand on a box
-             that may have no browser and no route to a wiki. -->
+             that may have no browser and no route to a wiki.
+
+             It lives in primos-witness rather than here, because almost all of it documents server
+             behaviour that every packaging shares — the safety rules, the keyring, config.source,
+             hot reload. Copying it into each front door is how two manuals drift apart. -->
         <fileSet>
-            <directory>${project.basedir}</directory>
+            <directory>${project.basedir}/../primos-witness</directory>
             <outputDirectory></outputDirectory>
             <includes>
                 <include>README.md</include>

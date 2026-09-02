@@ -13,11 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lolaf.primos.witness;
+package org.lolaf.primos.witness.cli;
 
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.time.MonotonicClock;
+import org.lolaf.primos.witness.FileConfigStore;
+import org.lolaf.primos.witness.WitnessServer;
 import picocli.CommandLine;
 import picocli.CommandLine.*;
 import picocli.CommandLine.Model.CommandSpec;

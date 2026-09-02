@@ -105,7 +105,7 @@ dependency cycle, because the node is built from the listeners. Use `@EventListe
 | `primos.timings.election-timeout-min` | no | `300ms` | low end of the randomised election timeout |
 | `primos.timings.election-timeout-max` | no | `600ms` | high end; set with its pair |
 | `primos.timings.probe-interval` | no | `1s` | how often every node probes every peer |
-| `primos.timings.advertisement-interval` | no | `30s` | how often a node restates its intervals so a mismatch is reported |
+| `primos.timings.advertisement-interval` | no | `30s` | how often a node restates its intervals once every peer has answered; until then it restates every probe interval |
 | `primos.timings.failure-threshold` | no | `3` | missed probes before a peer is reported down |
 | `primos.vote-logging` | no | `true` | log who voted for whom at INFO instead of DEBUG |
 | `primos.lifecycle` | no | `context` | `context` or `manual` — see below |

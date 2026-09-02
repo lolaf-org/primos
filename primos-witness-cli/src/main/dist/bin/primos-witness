@@ -38,4 +38,4 @@ fi
 # was deployed to prevent.
 exec "$java" $PRIMOS_WITNESS_OPTS \
     -cp "$home/lib/*" \
-    org.lolaf.primos.witness.WitnessMain "$@"
+    org.lolaf.primos.witness.cli.WitnessMain "$@"

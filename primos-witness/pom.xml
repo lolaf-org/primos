@@ -11,9 +11,11 @@
 
     <name>Primos Witness Server</name>
     <description>
-        The standalone witness server: a leader-ineligible voter, deployed in a third failure domain,
-        that lets a two-node active/passive pair survive a partition without split brain. One instance
-        serves many clusters at once, keyed by application name.
+        The witness server as a library: a leader-ineligible voter, deployed in a third failure
+        domain, that lets a two-node active/passive pair survive a partition without split brain.
+        One instance serves many clusters at once, keyed by application name. Runnable packagings
+        live in their own modules, so an application embedding this inherits slf4j-api and nothing
+        else.
     </description>
 
     <properties>
@@ -30,21 +32,6 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
-        <!-- The command line. A single self-contained jar with no dependencies of its own, which is
-             what makes it acceptable in a process meant to run untouched for years: every dependency
-             here is a future CVE notification and an unplanned upgrade of something whose job is
-             never to move. -->
-        <dependency>
-            <groupId>info.picocli</groupId>
-            <artifactId>picocli</artifactId>
-        </dependency>
-        <!-- This one is an application, not a library, so it ships its own logging backend at
-             runtime. The SLF4J-only rule constrains what consumers inherit; nobody depends on this. -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <scope>runtime</scope>
-        </dependency>
 
         <dependency>
             <groupId>org.lolaf.primos</groupId>
@@ -55,32 +42,4 @@
         </dependency>
     </dependencies>
 
-    <build>
-        <plugins>
-            <!--
-                The operator-facing artifact. The library is a jar people depend on; this module is
-                a process people install, and nobody embedding primos should ever receive it.
-            -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>distribution</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                        <configuration>
-                            <descriptors>
-                                <descriptor>src/assembly/distribution.xml</descriptor>
-                            </descriptors>
-                            <appendAssemblyId>true</appendAssemblyId>
-                            <tarLongFileMode>posix</tarLongFileMode>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
 </project>

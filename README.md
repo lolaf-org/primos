@@ -185,10 +185,15 @@ tell you.
 
 ### The witness server
 
-`primos-witness` is a standalone process serving many clusters at once, keyed by application name.
-**Operators want [its own README](primos-witness/README.md)** — installing, configuring, secret
-rotation, configuration sources, what to alert on, and troubleshooting. In brief, it ships as a
-`tar.gz`/`zip` with a launcher, its jars, and a commented sample configuration:
+`primos-witness` is the witness server, serving many clusters at once, keyed by application name.
+It is a **library** — an ordinary jar that inherits nothing but `slf4j-api` — and the runnable
+packagings are their own modules: `primos-witness-cli` today, a Spring Boot one later. Neither
+front door holds logic of its own.
+
+**Operators want [the witness README](primos-witness/README.md)** — installing, configuring, key
+rotation, configuration sources, what to alert on, and troubleshooting. In brief,
+`primos-witness-cli` ships as a `tar.gz`/`zip` with a launcher, its jars, and a commented sample
+configuration:
 
 ```
 bin/primos-witness --config /etc/primos-witness
@@ -240,14 +245,25 @@ that reason.
 
 ### Mismatched timings are reported
 
-Every node restates its intervals to its peers every thirty seconds, and a peer whose intervals differ is logged at
-ERROR with both sets side by side, then counted in `stats().timingMismatches()`. Coming back into agreement is logged
-too, because during a rolling change half a cluster disagrees by design and you need to see it end.
+Every node restates its intervals to its peers, and a peer whose intervals differ is logged at ERROR with both sets
+side by side, then counted in `stats().timingMismatches()`. Coming back into agreement is logged too, because during a
+rolling change half a cluster disagrees by design and you need to see it end.
 
-**It reports and never acts.** A mismatch makes failover slower, never unsafe — a node with a longer election timeout is
-proportionally more reluctant to grant the pre-vote a failover waits on — so nothing about the cluster's behaviour
-changes when one is found. A node that refused a vote over a mismatch would turn a rolling timing change into a
-partition, which is worse than the problem.
+The cadence follows reachability rather than a fixed clock: **while any peer has not answered, a node restates itself
+every probe interval; once they all have, every advertisement interval** (30s by default). One statement then thirty
+seconds of silence is the right steady state and the wrong bootstrap — this is UDP, and a lost first statement is
+exactly the case that most needs another.
+
+**Between nodes it reports and never acts.** A mismatch makes failover slower, never unsafe — a node with a longer
+election timeout is proportionally more reluctant to grant the pre-vote a failover waits on — so nothing about the
+cluster's behaviour changes when one is found. A node that refused a vote over a mismatch would turn a rolling timing
+change into a partition, which is worse than the problem.
+
+A witness server is the one exception, and only when its operator has asked for it: under
+`config.source=cluster` it *follows* the intervals its clusters state instead of reporting them, which is what lets a
+tenant retune without anybody editing the witness. The argument above does not carry over because it is an argument
+about nodes chasing each other during a rolling change, and a witness is not a member of that conversation — see the
+[witness README](primos-witness/README.md).
 
 ```java
 PrimosStats stats = node.stats();
