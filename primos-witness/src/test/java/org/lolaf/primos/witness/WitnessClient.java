@@ -24,7 +24,6 @@ import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-import org.lolaf.primos.wire.DropCounters;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageDecoder;
 import org.lolaf.primos.wire.MessageEncoder;
@@ -68,7 +67,7 @@ final class WitnessClient implements AutoCloseable {
                         previousSecret == null ? null : previousSecret.getBytes(StandardCharsets.UTF_8));
         this.encoder = new MessageEncoder(application, nodeId, authenticator);
         this.decoder = new MessageDecoder(application, authenticator,
-                id -> id == witnessId, new DropCounters());
+                id -> id == witnessId, new org.lolaf.primos.RecordingStats());
         try {
             this.channel = DatagramChannel.open();
             this.channel.configureBlocking(false);

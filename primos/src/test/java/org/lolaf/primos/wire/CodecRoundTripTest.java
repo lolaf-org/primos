@@ -20,13 +20,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.ByteBuffer;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.RecordingStats;
 
 class CodecRoundTripTest {
 
     private static final String APP = "orders";
     private static final int SENDER = 3;
 
-    private final DropCounters drops = new DropCounters();
+    private final RecordingStats drops = new RecordingStats();
     private final RecordingHandler handler = new RecordingHandler();
     private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
@@ -64,7 +65,7 @@ class CodecRoundTripTest {
         assertThat(decode(decoder, encoder.leaving(buffer, 7)))
                 .isEqualTo("leaving(3,7)");
 
-        assertThat(drops.total()).isZero();
+        assertThat(drops.totalDrops()).isZero();
     }
 
     @Test
@@ -81,7 +82,7 @@ class CodecRoundTripTest {
         assertThat(decode(decoder, encoder.timeoutNow(buffer, 7)))
                 .isEqualTo("timeoutNow(3,7)");
 
-        assertThat(drops.total()).isZero();
+        assertThat(drops.totalDrops()).isZero();
     }
 
     @Test

@@ -19,6 +19,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
+import org.lolaf.primos.PrimosStatsListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +58,14 @@ public final class MessageDecoder {
     private final byte[] expectedApplication;
     private final MessageAuthenticator authenticator;
     private final IntPredicate knownSender;
-    private final DropCounters drops;
+    /**
+     * Told about every drop, and the only place they are reported.
+     *
+     * <p>There used to be a {@code DropCounters} here as well, holding the same numbers so that a
+     * snapshot could read them back. Nothing reads a snapshot any more, so counting them twice was
+     * counting them once too often; the listener is the seam.
+     */
+    private final PrimosStatsListener stats;
 
     /**
      * The sender of the last datagram that passed every check, or -1.
@@ -77,11 +85,11 @@ public final class MessageDecoder {
     public MessageDecoder(String applicationName,
                           MessageAuthenticator authenticator,
                           IntPredicate knownSender,
-                          DropCounters drops) {
+                          PrimosStatsListener stats) {
         this.expectedApplication = MessageEncoder.padded(applicationName);
         this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
         this.knownSender = Objects.requireNonNull(knownSender, "knownSender");
-        this.drops = Objects.requireNonNull(drops, "drops");
+        this.stats = Objects.requireNonNull(stats, "stats");
     }
 
     /**
@@ -185,10 +193,10 @@ public final class MessageDecoder {
             return drop(DropReason.MALFORMED, "length {}", length);
         }
         if (!authenticator.verify(datagram)) {
-            return drop(DropReason.BAD_TAG, "authentication failed", null);
+            return drop(DropReason.BAD_TAG, "authentication failed");
         }
         if (!hasMagic(datagram)) {
-            return drop(DropReason.BAD_MAGIC, "not a primos datagram", null);
+            return drop(DropReason.BAD_MAGIC, "not a primos datagram");
         }
         byte version = datagram.get(WireFormat.OFFSET_VERSION);
         if (version != WireFormat.VERSION) {
@@ -272,15 +280,49 @@ public final class MessageDecoder {
         return true;
     }
 
-    private boolean drop(DropReason reason, String detail, Object argument) {
-        drops.record(reason);
-        log.warn("dropped datagram ({}): {},{}", reason, detail, argument);
+    /**
+     * Refuses a datagram: tells the listener, and says why at DEBUG.
+     *
+     * <p><strong>DEBUG and not WARN, deliberately.</strong> Logging every dropped datagram at a
+     * visible level turns a flood into a second denial of service — the attacker sends garbage and
+     * the victim writes all of it down. The listener is the signal; the line is for somebody who
+     * turned it on because they are already diagnosing something.
+     *
+     * <p>Guarded rather than left to the logger, and that was measured rather than assumed. SLF4J
+     * takes {@code Object}, so an {@code int} sender id is boxed and gathered into a varargs array
+     * <em>at the call site</em>, before the logger can decide the level is off — an allocation on
+     * the one path whose rate an attacker chooses, which is precisely the path that must not
+     * allocate. Hence primitives in the signatures and the boxing inside the guard.
+     */
+    private boolean drop(DropReason reason, String detail) {
+        stats.onDatagramDropped(reason);
+        if (log.isDebugEnabled()) {
+            log.debug("dropped datagram ({}): {}", reason, detail);
+        }
         return false;
     }
 
-    private boolean drop(DropReason reason, String detail, Object first, Object second) {
-        drops.record(reason);
-        log.warn("dropped datagram ({}): {},{},{}", reason, detail, first, second);
+    private boolean drop(DropReason reason, String detail, int argument) {
+        stats.onDatagramDropped(reason);
+        if (log.isDebugEnabled()) {
+            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+        }
+        return false;
+    }
+
+    private boolean drop(DropReason reason, String detail, String argument) {
+        stats.onDatagramDropped(reason);
+        if (log.isDebugEnabled()) {
+            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+        }
+        return false;
+    }
+
+    private boolean drop(DropReason reason, String detail, MessageType type, int length) {
+        stats.onDatagramDropped(reason);
+        if (log.isDebugEnabled()) {
+            log.debug("dropped datagram ({}): {} {} {}", reason, detail, type, length);
+        }
         return false;
     }
 }

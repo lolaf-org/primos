@@ -52,6 +52,7 @@ class UdpClusterTest {
             .build();
 
     private final List<PrimosNode> nodes = new ArrayList<>();
+    private final RecordingStats drops = new RecordingStats();
 
     private static int leaders(PrimosNode... nodes) {
         int count = 0;
@@ -95,7 +96,7 @@ class UdpClusterTest {
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
 
         assertThat(leaders(one, two, three)).isEqualTo(1);
-        assertThat(one.stats().totalDrops())
+        assertThat(drops.totalDrops())
                 .as("a healthy cluster on a quiet loopback drops nothing")
                 .isZero();
     }
@@ -142,12 +143,29 @@ class UdpClusterTest {
         start(2, ports, null, new MemoryStateStore(), ports[1]);
         start(3, ports, null, new MemoryStateStore(), ports[2]);
 
-        await().atMost(15, TimeUnit.SECONDS).until(() ->
-                one.stats().peers().values().stream().allMatch(PeerStats::reachable));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> drops.probeRoundTrips.size() >= 2);
 
-        assertThat(one.stats().peers().get(2).lastRoundTrip())
-                .as("a real round trip on loopback, measured")
-                .isNotNull();
+        assertThat(drops.probeRoundTrips)
+                .as("real round trips on loopback, measured — every sample rather than the last")
+                .isNotEmpty()
+                .allMatch(nanos -> nanos > 0, "a positive round trip");
+    }
+
+    /** Records which peers a node reported down, since that is no longer readable from a snapshot. */
+    private static final class RecordingListener implements PrimosListener {
+
+        private final java.util.Set<Integer> down =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+        @Override
+        public void onPeerDown(Peer peer) {
+            down.add(peer.id());
+        }
+
+        @Override
+        public void onPeerUp(Peer peer) {
+            down.remove(peer.id());
+        }
     }
 
     // -------------------------------------------------------------- helpers
@@ -161,8 +179,9 @@ class UdpClusterTest {
 
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
 
-        assertThat(one.stats().drops()).allSatisfy((reason, count) ->
-                assertThat(count).as("reason %s", reason).isZero());
+        assertThat(drops.totalDrops())
+                .as("an authenticated cluster on loopback drops nothing, for any reason")
+                .isZero();
     }
 
     @Test
@@ -177,7 +196,7 @@ class UdpClusterTest {
         assertThat(leaders(one, two))
                 .as("neither can authenticate the other, so neither can ever reach a quorum of two")
                 .isZero();
-        assertThat(one.stats().drops().get(org.lolaf.primos.DropReason.BAD_TAG))
+        assertThat(drops.drops(org.lolaf.primos.DropReason.BAD_TAG))
                 .as("and the reason is diagnosable from a counter, not a packet capture")
                 .isPositive();
     }
@@ -191,15 +210,17 @@ class UdpClusterTest {
         PrimosNode three = start(3, ports, SECRET, thirdStore, ports[2]);
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
 
+        // Attached before the stop: a departure is announced at once, so a listener registered
+        // afterwards would have missed the very event it is waiting for.
+        RecordingListener onOne = new RecordingListener();
+        one.addListener(onOne);
         three.stop();
-        await().atMost(15, TimeUnit.SECONDS)
-                .until(() -> !one.stats().peers().get(3).reachable());
+        await().atMost(15, TimeUnit.SECONDS).until(() -> onOne.down.contains(3));
 
         // Same identity, new endpoint: exactly what a container restart looks like.
         PrimosNode moved = start(3, ports, SECRET, thirdStore, Ports.free());
 
-        await().atMost(15, TimeUnit.SECONDS)
-                .until(() -> one.stats().peers().get(3).reachable());
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !onOne.down.contains(3));
         assertThat(moved.role()).isNotEqualTo(Role.FAILED);
     }
 
@@ -219,6 +240,7 @@ class UdpClusterTest {
                     .build();
 
             PrimosNode node = PrimosNode.builder()
+                    .statsListener(drops)
                     .clusterConfig(ClusterConfig.builder()
                             .applicationName("udp-test")
                             .nodeId(id)
@@ -254,7 +276,7 @@ class UdpClusterTest {
 
         PrimosNode successor = leaderOf(one, two, three);
         assertThat(successor).isNotSameAs(leader);
-        assertThat(successor.stats().handoversAccepted())
+        assertThat(drops.handoversAccepted.get())
                 .as("the successor campaigned because it was told to, not because it timed out"
                         + " waiting — the timeout would have replaced the leader too, just later")
                 .isEqualTo(1);
@@ -267,20 +289,19 @@ class UdpClusterTest {
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
-        await().atMost(15, TimeUnit.SECONDS).until(() ->
-                one.stats().peers().values().stream().allMatch(PeerStats::reachable));
 
         // A follower, so nothing about leadership is in play — only the reporting.
         PrimosNode follower = one.role() == Role.LEADER ? two : one;
         PrimosNode watcher = follower == one ? two : one;
         int departing = follower.config().nodeId();
+        RecordingListener onWatcher = new RecordingListener();
+        watcher.addListener(onWatcher);
         follower.stop();
 
         // Comfortably inside the probe timeout, which is what the announcement buys. On a real
         // deployment that timeout is tuned up for garbage collection, making this gap much larger.
-        await().atMost(2, TimeUnit.SECONDS)
-                .until(() -> !watcher.stats().peers().get(departing).reachable());
+        await().atMost(2, TimeUnit.SECONDS).until(() -> onWatcher.down.contains(departing));
 
-        assertThat(watcher.stats().peers().get(departing).reachable()).isFalse();
+        assertThat(onWatcher.down).contains(departing);
     }
 }

@@ -23,8 +23,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
-import org.lolaf.primos.PeerStats;
 import org.lolaf.primos.PeerType;
+import org.lolaf.primos.RecordingStats;
 
 /**
  * Who each node can actually reach, and what it tells the application about it.
@@ -137,7 +137,11 @@ class ReachabilityTest {
         simulation.run(Duration.ofSeconds(120));
 
         for (ElectionCluster.NodeUnderTest node : cluster.nodes()) {
-            assertThat(node.election().peerStats()).isNotEmpty();
+            assertThat(node.election().trackedPeerIds())
+                    .as("the peer set survives twenty-second delays; what must not happen is a"
+                            + " reply to an abandoned probe reviving a peer, which the invariants"
+                            + " check on every step")
+                    .isNotEmpty();
         }
     }
 
@@ -162,15 +166,18 @@ class ReachabilityTest {
         simulation.network().delayRange(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(20),
                 java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(20));
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingStats recorded = new RecordingStats();
+        cluster.node(1).attach(recorded);
 
         simulation.run(Duration.ofSeconds(10));
 
-        PeerStats stats = cluster.node(1).election().peerStats().get(2);
-        assertThat(stats.reachable()).isTrue();
-        assertThat(stats.type()).isEqualTo(PeerType.APPLICATION);
-        assertThat(stats.lastRoundTrip())
-                .as("twenty milliseconds each way")
-                .isEqualTo(Duration.ofMillis(40));
+        assertThat(cluster.node(1).election().isReachable(2)).isTrue();
+        assertThat(recorded.probeRoundTrips)
+                .as("every sample, which is what a percentile needs and what a last-value gauge"
+                        + " could never have given")
+                .isNotEmpty()
+                .allMatch(nanos -> nanos == Duration.ofMillis(40).toNanos(),
+                        "twenty milliseconds each way");
     }
 
     @Test

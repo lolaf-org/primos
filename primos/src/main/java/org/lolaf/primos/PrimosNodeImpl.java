@@ -51,6 +51,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private final MessageAuthenticator authenticator;
     private final ListenerDispatcher dispatcher;
     private final long stopTimeoutNanos;
+
+    /**
+     * Where the counters go, already guarded against throwing. Held here rather than per
+     * generation, so a listener registered once keeps counting across a restart.
+     */
+    private final PrimosStatsListener stats;
     private StateStore store;
     private Transport transport;
     private ElectionNode election;
@@ -69,7 +75,8 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
                    MessageAuthenticator authenticator,
                    Executor listenerExecutor,
                    long slowCallbackNanos,
-                   long stopTimeoutNanos) {
+                   long stopTimeoutNanos,
+                   PrimosStatsListener stats) {
         this.config = config;
         this.stores = stores;
         this.transports = transports;
@@ -77,6 +84,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         this.random = random;
         this.authenticator = authenticator;
         this.stopTimeoutNanos = stopTimeoutNanos;
+        this.stats = stats;
         this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock, listenerExecutor, slowCallbackNanos);
         this.roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
     }
@@ -110,7 +118,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             closeQuietly();
             throw e;
         }
-        election = new ElectionNode(config, store, transport, clock, random, authenticator, this);
+        election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
         running = true;
         thread = new Thread(this::loop, "primos-" + config.applicationName() + "-" + config.nodeId());
         thread.setDaemon(true);
@@ -174,14 +182,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // change to learn anything, and may have been registered for one that already happened.
             dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(), leader());
         }
-    }
-
-    /**
-     * A snapshot of the counters, built on the calling thread when it asks for one or null if node is not started
-     */
-    @Override
-    public PrimosStats stats() {
-        return election != null ? election.stats() : null;
     }
 
     @Override

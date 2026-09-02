@@ -19,7 +19,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.lolaf.primos.transport.Transport;
-import org.lolaf.primos.wire.DropCounters;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageDecoder;
 import org.lolaf.primos.wire.MessageHandler;
@@ -36,7 +35,7 @@ final class CapturedReply implements MessageHandler {
 
     CapturedReply(String applicationName) {
         this.decoder = new MessageDecoder(applicationName, MessageAuthenticator.disabled(),
-                id -> true, new DropCounters());
+                id -> true, new org.lolaf.primos.RecordingStats());
     }
 
     /** Drains a peer's mailbox, remembering the last vote reply seen. */

@@ -80,6 +80,13 @@ public final class PrimosNodeBuilder {
     private Supplier<Transport> transports;
 
     /**
+     * Where the counters go. One sink, fixed here, because some of these fire per datagram — see
+     * {@link PrimosStatsListener} for why there is no list and no executor.
+     */
+    @Setter
+    private PrimosStatsListener statsListener = PrimosStatsListener.NONE;
+
+    /**
      * Where listener callbacks run. By default they run on the node thread, which means a slow
      * listener stalls consensus; supplying an executor moves them off it without primos creating a
      * thread of its own.
@@ -201,7 +208,11 @@ public final class PrimosNodeBuilder {
 
         PrimosNodeImpl node = new PrimosNodeImpl(clusterConfig, stores, transports, clock,
                 random, authenticator, listenerExecutor, slowCallback.toNanos(),
-                stopTimeout.toNanos());
+                stopTimeout.toNanos(),
+                // Guarded here rather than inside the algorithm: a metrics binder that throws must
+                // not reach the node's catch-all and cost the cluster a voter.
+                GuardedStatsListener.guard(statsListener, clusterConfig.applicationName(),
+                        clusterConfig.nodeId()));
         for (PrimosListener listener : listeners) {
             // Added before the node starts, so none of them can miss the first transition.
             node.addListener(listener);

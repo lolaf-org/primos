@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.RecordingStats;
 
 /**
  * Throws hostile bytes at the parser.
@@ -39,7 +40,7 @@ class ParserFuzzTest {
     private static final int SENDER = 3;
     private static final int ITERATIONS = 20_000;
 
-    private final DropCounters drops = new DropCounters();
+    private final RecordingStats drops = new RecordingStats();
     private final RecordingHandler handler = new RecordingHandler();
     private final MessageDecoder decoder = new MessageDecoder(APP,
             MessageAuthenticator.disabled(), id -> id == SENDER, drops);
@@ -59,7 +60,7 @@ class ParserFuzzTest {
         assertThat(handler.received)
                 .as("random bytes cannot form a valid message from a configured peer")
                 .isEmpty();
-        assertThat(drops.total()).isEqualTo(ITERATIONS);
+        assertThat(drops.totalDrops()).isEqualTo(ITERATIONS);
     }
 
     @Test

@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.DropReason;
+import org.lolaf.primos.RecordingStats;
 
 /** One test per step of the pipeline, each asserting its own counter moved and nothing dispatched. */
 class ReceivePipelineTest {
@@ -30,7 +31,7 @@ class ReceivePipelineTest {
     private static final int SENDER = 3;
     private static final byte[] SECRET = "shared-cluster-secret".getBytes();
 
-    private final DropCounters drops = new DropCounters();
+    private final RecordingStats drops = new RecordingStats();
     private final RecordingHandler handler = new RecordingHandler();
     private final ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
@@ -63,7 +64,7 @@ class ReceivePipelineTest {
             assertThat(verifying.decode(datagram, handler)).isFalse();
         }
 
-        assertThat(drops.count(DropReason.BAD_TAG)).isEqualTo(4);
+        assertThat(drops.drops(DropReason.BAD_TAG)).isEqualTo(4);
         assertThat(handler.received).isEmpty();
     }
 
@@ -167,9 +168,9 @@ class ReceivePipelineTest {
 
         assertThat(verifying.decode(forger.appendEntries(buffer, 1), handler)).isFalse();
 
-        assertThat(drops.count(DropReason.BAD_TAG)).isEqualTo(1);
-        assertThat(drops.count(DropReason.WRONG_APPLICATION)).isZero();
-        assertThat(drops.count(DropReason.UNKNOWN_PEER)).isZero();
+        assertThat(drops.drops(DropReason.BAD_TAG)).isEqualTo(1);
+        assertThat(drops.drops(DropReason.WRONG_APPLICATION)).isZero();
+        assertThat(drops.drops(DropReason.UNKNOWN_PEER)).isZero();
     }
 
     @Test
@@ -179,18 +180,20 @@ class ReceivePipelineTest {
         badMagic.put(0, (byte) 'X');
         assertDropped(badMagic, DropReason.BAD_MAGIC);
 
-        assertThat(drops.count(DropReason.MALFORMED)).isEqualTo(1);
-        assertThat(drops.count(DropReason.BAD_MAGIC)).isEqualTo(1);
-        assertThat(drops.total()).isEqualTo(2);
-        assertThat(drops.snapshot()).containsEntry(DropReason.UNKNOWN_PEER, 0L);
+        assertThat(drops.drops(DropReason.MALFORMED)).isEqualTo(1);
+        assertThat(drops.drops(DropReason.BAD_MAGIC)).isEqualTo(1);
+        assertThat(drops.totalDrops()).isEqualTo(2);
+        assertThat(drops.drops(DropReason.UNKNOWN_PEER))
+                .as("a reason nothing tripped is zero, not absent")
+                .isZero();
     }
 
     private void assertDropped(ByteBuffer datagram, DropReason expected) {
-        long before = drops.count(expected);
+        long before = drops.drops(expected);
 
         assertThat(decoder.decode(datagram, handler)).isFalse();
 
-        assertThat(drops.count(expected)).isEqualTo(before + 1);
+        assertThat(drops.drops(expected)).isEqualTo(before + 1);
         assertThat(handler.received).isEmpty();
     }
 
@@ -219,7 +222,7 @@ class ReceivePipelineTest {
         assertThat(MessageDecoder.peekApplicationName(datagram)).isEqualTo("orders");
 
         RecordingHandler handler = new RecordingHandler();
-        DropCounters drops = new DropCounters();
+        RecordingStats drops = new RecordingStats();
         boolean accepted = new MessageDecoder("orders",
                 MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)),
                 id -> true, drops).decode(datagram, handler);
@@ -227,7 +230,7 @@ class ReceivePipelineTest {
         assertThat(accepted)
                 .as("naming an application is free; producing a tag its key accepts is not")
                 .isFalse();
-        assertThat(drops.count(DropReason.BAD_TAG)).isEqualTo(1);
+        assertThat(drops.drops(DropReason.BAD_TAG)).isEqualTo(1);
     }
 
     @Test

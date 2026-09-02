@@ -114,15 +114,18 @@ class PrimosNodeTest {
      */
     @Test
     void starting_twice_is_a_no_op() {
-        PrimosNode node = start(builder(1));
-        PrimosStats before = node.stats();
+        RecordingStats recorded = new RecordingStats();
+        PrimosNode node = start(builder(1).statsListener(recorded));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+        long wonBefore = recorded.electionsWon.get();
 
         node.start();
 
         assertThat(node.isRunning()).isTrue();
-        assertThat(node.stats().timeInRole())
-                .as("the running node was left alone, not replaced")
-                .isGreaterThanOrEqualTo(before.timeInRole());
+        assertThat(recorded.electionsWon.get())
+                .as("the running node was left alone, not torn down and rebuilt — a replacement"
+                        + " would have had to win an election of its own")
+                .isEqualTo(wonBefore);
     }
 
     @Test
@@ -329,31 +332,20 @@ class PrimosNodeTest {
     }
 
     @Test
-    void stats_report_what_the_node_has_been_doing() {
-        PrimosNode node = start(builder(1));
+    void the_listener_reports_what_the_node_has_been_doing() {
+        RecordingStats recorded = new RecordingStats();
+        PrimosNode node = start(builder(1).statsListener(recorded));
+
         await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.stats().electionsWon() > 0);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> recorded.electionsWon.get() > 0);
 
-        assertThat(node.stats().role()).isEqualTo(Role.LEADER);
-        assertThat(node.stats().currentTerm()).isPositive();
-        assertThat(node.stats().electionsStarted()).isPositive();
-        assertThat(node.stats().timeInRole()).isGreaterThanOrEqualTo(Duration.ZERO);
-        assertThat(node.stats().drops()).containsKey(DropReason.BAD_TAG);
-        assertThat(node.stats().totalDrops()).isZero();
-    }
-
-    @Test
-    void stats_are_taken_when_they_are_asked_for() throws Exception {
-        PrimosNode node = start(builder(1));
-        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
-
-        PrimosStats first = node.stats();
-        Thread.sleep(100);
-        PrimosStats second = node.stats();
-
-        // Snapshots are no longer taken after every turn of the loop, so this is the assertion that
-        // asking still gets a fresh one rather than whatever the loop last happened to publish.
-        assertThat(second.timeInRole()).isGreaterThan(first.timeInRole());
+        assertThat(node.roleAndTerm().role()).isEqualTo(Role.LEADER);
+        assertThat(node.roleAndTerm().term()).isPositive();
+        assertThat(recorded.campaignsWon)
+                .as("how long the campaign took, which no snapshot could have carried: it begins"
+                        + " and ends between any two samples")
+                .isNotEmpty();
+        assertThat(recorded.totalDrops()).isZero();
     }
 
     // -------------------------------------------------------------- builder
@@ -366,9 +358,9 @@ class PrimosNodeTest {
             @Override
             public void onRoleChanged(Role previous, Role current, long term) {
                 if (current == Role.LEADER) {
-                    // A callback runs on the node thread, mid-turn. Reading stats there is allowed
-                    // and reports what the node is doing now, not what it was doing last turn.
-                    seen.set(node[0].stats().role());
+                    // A callback runs on the node thread, mid-turn, and reads the node's own
+                    // published role — which is what it is doing now, not last turn.
+                    seen.set(node[0].role());
                 }
             }
         }));
@@ -378,15 +370,17 @@ class PrimosNodeTest {
     }
 
     @Test
-    void stats_include_every_peer_once_a_cluster_is_running() {
-        PrimosNode one = start(builder(1, 2, 3));
+    void every_peer_is_probed_once_a_cluster_is_running() {
+        RecordingStats recorded = new RecordingStats();
+        PrimosNode one = start(builder(1, 2, 3).statsListener(recorded));
         start(builder(2, 1, 3));
         start(builder(3, 1, 2));
 
-        await().atMost(10, TimeUnit.SECONDS)
-                .until(() -> one.stats().peers().values().stream().allMatch(p -> p.reachable()));
+        await().atMost(10, TimeUnit.SECONDS).until(() -> recorded.probeRoundTrips.size() >= 2);
 
-        assertThat(one.stats().peers()).containsOnlyKeys(2, 3);
+        assertThat(recorded.probeRoundTrips)
+                .as("a round trip per probe, every one of them, rather than the last per peer")
+                .isNotEmpty();
     }
 
     @Test
@@ -417,13 +411,14 @@ class PrimosNodeTest {
     @Test
     void a_cluster_can_authenticate_with_another_algorithm() {
         byte[] secret = "a-shared-cluster-secret".getBytes();
+        RecordingStats recorded = new RecordingStats();
         PrimosNode one = start(builder(1, 2)
-                .clusterSecret(secret).macAlgorithm("HmacSHA512"));
+                .statsListener(recorded).clusterSecret(secret).macAlgorithm("HmacSHA512"));
         start(builder(2, 1).clusterSecret(secret).macAlgorithm("HmacSHA512"));
 
         await().atMost(10, TimeUnit.SECONDS).until(() -> one.roleAndTerm().term() > 0);
 
-        assertThat(one.stats().totalDrops())
+        assertThat(recorded.totalDrops())
                 .as("a 64-byte tag is longer, and otherwise no different")
                 .isZero();
     }

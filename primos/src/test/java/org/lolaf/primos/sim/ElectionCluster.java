@@ -23,6 +23,7 @@ import java.util.Random;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosListener;
+import org.lolaf.primos.PrimosStatsListener;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.core.ElectionNode;
@@ -155,6 +156,7 @@ public final class ElectionCluster {
         private boolean running;
         private PrimosListener listener = new PrimosListener() {
         };
+        private PrimosStatsListener stats = PrimosStatsListener.NONE;
 
         private NodeUnderTest(Simulation simulation, ClusterConfig config) {
             this.simulation = simulation;
@@ -165,6 +167,12 @@ public final class ElectionCluster {
         /** Watches this node's events. Survives a crash and restart, as a real listener would. */
         public void attach(PrimosListener listener) {
             this.listener = listener;
+            restart();
+        }
+
+        /** Counts what this node reports. Survives a crash and restart, like the listener above. */
+        public void attach(PrimosStatsListener stats) {
+            this.stats = stats;
             restart();
         }
 
@@ -241,7 +249,7 @@ public final class ElectionCluster {
         public void restart() {
             node = new ElectionNode(config, store, transport, simulation.clock(),
                     new Random(simulation.seed() * 31 + config.nodeId()),
-                    MessageAuthenticator.disabled(), listener);
+                    MessageAuthenticator.disabled(), listener, stats);
             node.start();
             running = true;
         }

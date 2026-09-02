@@ -125,11 +125,6 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
-        public PrimosStats stats() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public boolean isRunning() {
             return running;
         }

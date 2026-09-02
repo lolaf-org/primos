@@ -21,7 +21,7 @@ import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosStats;
+import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.StateStore;
@@ -278,18 +278,15 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     /**
-     * One stats snapshot per served application, the same shape a node exposes.
+     * What role one served application's node is in.
      *
-     * <p>Per-application rather than aggregate on purpose: under {@link ConfigSource#CLUSTER} a
-     * stray cluster
-     * that nobody meant to deploy is visible here and nowhere else.
+     * <p>Always {@code FOLLOWER} on a healthy witness — it never campaigns and never leads — so
+     * this exists for tests and for a diagnostic, not for a decision. Counters left with
+     * {@code PrimosStats}: a witness registers a {@link org.lolaf.primos.PrimosStatsListener} per
+     * served application instead, tagged by name like everything else it does.
      */
-    public Map<String, PrimosStats> stats() {
-        Map<String, PrimosStats> snapshot = new LinkedHashMap<>();
-        for (Served application : served.values()) {
-            snapshot.put(application.name, application.node.stats());
-        }
-        return Collections.unmodifiableMap(snapshot);
+    public Role role(String application) {
+        return require(application).node.role();
     }
 
     /**

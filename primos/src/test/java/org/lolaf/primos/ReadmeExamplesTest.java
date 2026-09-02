@@ -78,8 +78,10 @@ class ReadmeExamplesTest {
     }
 
     @Test
-    void every_stats_accessor_the_readme_names_exists() throws IOException {
+    void every_stats_event_the_readme_names_exists() throws IOException {
+        RecordingStats recorded = new RecordingStats();
         try (PrimosNode node = PrimosNode.builder()
+                     .statsListener(recorded)
                      .clusterConfig(ClusterConfig.builder()
                              .applicationName("orders")
                              .nodeId(1)
@@ -92,20 +94,15 @@ class ReadmeExamplesTest {
                      .build()) {
 
             node.start();
-            PrimosStats stats = node.stats();
 
-            assertThat(stats.role()).isNotNull();
-            assertThat(stats.currentTerm()).isNotNegative();
-            assertThat(stats.timeInRole()).isNotNull();
-            assertThat(stats.electionsStarted()).isNotNegative();
-            assertThat(stats.electionsWon()).isNotNegative();
-            assertThat(stats.handoversSent()).isZero();
-            assertThat(stats.handoversAccepted()).isZero();
-            assertThat(stats.departuresObserved()).isZero();
-            assertThat(stats.drops(DropReason.BAD_TAG)).isZero();
-            assertThat(stats.totalDrops()).isZero();
-            assertThat(stats.peers()).containsKey(2);
-            assertThat(stats.peers().get(2).reachable()).isFalse();
+            assertThat(node.roleAndTerm().role()).isNotNull();
+            assertThat(node.roleAndTerm().term()).isNotNegative();
+            assertThat(recorded.electionsWon.get()).isNotNegative();
+            assertThat(recorded.handoversSent.get()).isZero();
+            assertThat(recorded.handoversAccepted.get()).isZero();
+            assertThat(recorded.departuresObserved.get()).isZero();
+            assertThat(recorded.drops(DropReason.BAD_TAG)).isZero();
+            assertThat(recorded.totalDrops()).isZero();
         }
     }
 

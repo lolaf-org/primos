@@ -103,6 +103,87 @@ class LoopAllocationTest {
     }
 
     /**
+     * The box the whole {@link org.lolaf.primos.PrimosStatsListener} shape exists for.
+     *
+     * <p>That SPI takes primitives and enums, has one sink rather than a list, and offers no
+     * executor — every one of those is to keep a listener from allocating, because it is called on
+     * the loop path and, for drops, per datagram. Stated as a rule it is a comment; this is the
+     * thing that fails when it is broken.
+     *
+     * <p>A counting listener is what a real one does — {@code primos-micrometer} increments meters
+     * and records timers and nothing else — so if that costs bytes per turn, the contract is
+     * unmeetable and the shape was pointless.
+     */
+    @Test
+    void a_counting_stats_listener_adds_nothing() {
+        long withoutListener = bytesPerTurn(node(new ReplayingTransport(fromAStranger())));
+        long withListener =
+                bytesPerTurn(node(new ReplayingTransport(fromAStranger()), new Counting()));
+
+        // The delta, not the total, and deliberately: the claim this SPI makes is that a listener
+        // costs nothing, and measuring the whole path would fold in whatever else refusing a
+        // datagram costs. Measured 2026-09-02 at 34 bytes a turn either way — so the listener is
+        // free, and those 34 are the refusal path's own, on a path whose rate an attacker chooses.
+        // Worth its own look; it is not this SPI's, and test logging runs at ERROR so it is not the
+        // guarded debug line either.
+        assertThat(withListener - withoutListener)
+                .as("a listener that counts must cost what no listener costs, on the path that"
+                        + " calls it hardest")
+                .isLessThan(8L);
+    }
+
+    /**
+     * The negative pair, and it earned itself immediately: the first version of the measurement
+     * above replayed a <em>heartbeat</em>, which fires no stats event at all, so it was weighing a
+     * listener that was never called.
+     */
+    @Test
+    void the_counting_listener_is_actually_being_called() {
+        Counting counting = new Counting();
+        ElectionNode node = node(new ReplayingTransport(fromAStranger()), counting);
+
+        for (int i = 0; i < 50; i++) {
+            turn(node);
+        }
+
+        assertThat(counting.events)
+                .as("without this the measurement above is vacuous — it would pass on a node that"
+                        + " had stopped calling its listener at all")
+                .isPositive();
+    }
+
+    /** Increments a counter and does nothing else, which is all a metrics binder ever does. */
+    private static final class Counting implements org.lolaf.primos.PrimosStatsListener {
+
+        private long events;
+
+        @Override
+        public void onProbeRoundTrip(int peerId, long nanos) {
+            events++;
+        }
+
+        @Override
+        public void onDatagramDropped(org.lolaf.primos.DropReason reason) {
+            events++;
+        }
+
+        @Override
+        public void onElectionWon(long term, long campaignNanos) {
+            events++;
+        }
+
+        @Override
+        public void onElectionLost(long term, long campaignNanos) {
+            events++;
+        }
+
+        @Override
+        public void onLeaderKnown(long term, long leaderlessNanos) {
+            events++;
+        }
+    }
+
+    /**
      * Bytes allocated per turn, after enough turns to load classes and let the call sites settle.
      */
     private long bytesPerTurn(ElectionNode node) {
@@ -128,6 +209,10 @@ class LoopAllocationTest {
     }
 
     private ElectionNode node(Transport transport) {
+        return node(transport, org.lolaf.primos.PrimosStatsListener.NONE);
+    }
+
+    private ElectionNode node(Transport transport, org.lolaf.primos.PrimosStatsListener stats) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
@@ -135,7 +220,9 @@ class LoopAllocationTest {
                         Peer.application(PEER_B, "sim", 7002)))
                 .build();
         ElectionNode node = new ElectionNode(config, new MemoryStateStore(), transport, clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(),
+                new org.lolaf.primos.PrimosListener() {
+                }, stats);
         node.start();
         return node;
     }
@@ -158,6 +245,19 @@ class LoopAllocationTest {
      * A heartbeat this node will accept, decode and answer — which also resets its election timer,
      * so it behaves as a follower of a live leader rather than campaigning every turn.
      */
+    /**
+     * A datagram from an id this node does not know, refused at the sender check.
+     *
+     * <p>One drop per turn, which is the hardest this SPI is ever called: {@code onDatagramDropped}
+     * is the one callback a flood reaches, and it is why the interface takes an enum rather than an
+     * event object.
+     */
+    private static ByteBuffer fromAStranger() {
+        MessageEncoder encoder = new MessageEncoder("t", 999, MessageAuthenticator.disabled());
+        ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+        return copyOf(encoder.appendEntries(scratch, 1));
+    }
+
     private static ByteBuffer heartbeatFrom(int peerId) {
         MessageEncoder encoder = new MessageEncoder("t", peerId, MessageAuthenticator.disabled());
         ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);

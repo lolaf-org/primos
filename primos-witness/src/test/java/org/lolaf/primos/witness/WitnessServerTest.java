@@ -29,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.Role;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.MonotonicClock;
 
@@ -663,10 +664,10 @@ class WitnessServerTest {
                 server.runOnce(java.time.Duration.ofMillis(5).toNanos());
             }
         }
-        assertThat(server.stats().get("orders").role().name())
+        assertThat(server.role("orders"))
                 .as("a witness is an ordinary voter that declines to campaign, and that is the"
                         + " whole of the difference")
-                .isEqualTo("FOLLOWER");
+                .isEqualTo(Role.FOLLOWER);
     }
 
     // ---------------------------------------------------------------- plumbing

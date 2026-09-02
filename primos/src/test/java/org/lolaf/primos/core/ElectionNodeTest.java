@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PrimosListener;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.store.PersistentState;
@@ -47,6 +49,7 @@ class ElectionNodeTest {
 
     private final VirtualClock clock = new VirtualClock();
     private final SimulatedNetwork network = new SimulatedNetwork(1L, clock);
+    private final RecordingStats recorded = new RecordingStats();
     private final StateStore store = new MemoryStateStore();
 
     private static List<Peer> peers(int... ids) {
@@ -192,7 +195,8 @@ class ElectionNodeTest {
                 .learnedMembership()
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         witness.start();
 
         // The witness server learns voters between turns of its own loop, so a heartbeat can
@@ -238,7 +242,8 @@ class ElectionNodeTest {
                 .peers(peers(1, 2))
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         witness.start();
 
         clock.advance(Duration.ofMinutes(10));
@@ -278,7 +283,8 @@ class ElectionNodeTest {
                 .peers(peers(2, 3))
                 .build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
 
         assertThatThrownBy(() -> node.runOnce(0))
                 .as("silently running on term 0 would be a node that had forgotten its vote")
@@ -301,7 +307,8 @@ class ElectionNodeTest {
                 .peers(peers(1, 2))
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         witness.start();
 
         witness.onRequestVote(1, 3, false);
@@ -409,7 +416,8 @@ class ElectionNodeTest {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t").nodeId(1).build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         node.start();
 
         clock.advance(Duration.ofSeconds(1));
@@ -457,12 +465,12 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
 
         advertise(2, node, 200, 1500, 3000, 2000, 3);
-        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+        assertThat(recorded.timingMismatches.get()).isEqualTo(1);
 
         advertise(2, node, 200, 1500, 3000, 2000, 3);
         advertise(2, node, 200, 1500, 3000, 2000, 3);
 
-        assertThat(node.stats().timingMismatches())
+        assertThat(recorded.timingMismatches.get())
                 .as("the same peer still being wrong is not news")
                 .isEqualTo(1);
     }
@@ -476,15 +484,15 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
 
         advertise(2, node, 200, 1500, 3000, 2000, 3);
-        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+        assertThat(recorded.timingMismatches.get()).isEqualTo(1);
 
         advertise(2, node, 50, 300, 600, 1000, 3);
-        assertThat(node.stats().timingMismatches())
+        assertThat(recorded.timingMismatches.get())
                 .as("agreeing again is not another mismatch")
                 .isEqualTo(1);
 
         advertise(2, node, 200, 1500, 3000, 2000, 3);
-        assertThat(node.stats().timingMismatches())
+        assertThat(recorded.timingMismatches.get())
                 .as("but diverging afresh is")
                 .isEqualTo(2);
     }
@@ -508,7 +516,7 @@ class ElectionNodeTest {
         assertThat(node.nextDeadlineNanos())
                 .as("not the election timer, not the probe timer, nothing")
                 .isEqualTo(deadlineBefore);
-        assertThat(node.stats().timingMismatches()).isEqualTo(1);
+        assertThat(recorded.timingMismatches.get()).isEqualTo(1);
     }
 
     @Test
@@ -517,7 +525,7 @@ class ElectionNodeTest {
 
         advertise(2, node, 50, 300, 600, 1000, 3);
 
-        assertThat(node.stats().timingMismatches())
+        assertThat(recorded.timingMismatches.get())
                 .as("silence is the correct output for a cluster that agrees")
                 .isZero();
     }
@@ -608,7 +616,7 @@ class ElectionNodeTest {
 
         advertise(2, witness, 200, 1500, 3000, 2000, 3);
 
-        assertThat(witness.stats().timingMismatches())
+        assertThat(recorded.timingMismatches.get())
                 .as("following is not disagreeing")
                 .isZero();
         assertThat(witness.observedTimings())
@@ -626,7 +634,7 @@ class ElectionNodeTest {
 
         advertise(2, witness, 200, 1500, 3000, 2000, 3);
 
-        assertThat(witness.stats().timingMismatches()).isEqualTo(1);
+        assertThat(recorded.timingMismatches.get()).isEqualTo(1);
     }
 
     // ------------------------------------------------------------ learned peers
@@ -635,16 +643,16 @@ class ElectionNodeTest {
     void a_witness_forgets_a_learned_voter_that_goes_quiet() {
         ElectionNode witness = startedLearningWitness();
         witness.learnPeer(Peer.application(7, "h", 1));
-        assertThat(witness.peerStats()).containsKey(7);
+        assertThat(witness.trackedPeerIds()).contains(7);
 
         // Far past sixty probe intervals with nothing arriving from it.
         clock.advance(Duration.ofMinutes(5));
         witness.runOnce(0L);
 
-        assertThat(witness.peerStats())
+        assertThat(witness.trackedPeerIds())
                 .as("otherwise a tenant whose node ids roll leaves a tracked peer and a probe every"
                         + " interval behind for every id it has ever used")
-                .doesNotContainKey(7);
+                .doesNotContain(7);
         assertThat(witness.peersForgotten()).isEqualTo(1);
     }
 
@@ -662,8 +670,8 @@ class ElectionNodeTest {
         clock.advance(Duration.ofSeconds(10));
         witness.runOnce(0L);
 
-        assertThat(witness.peerStats()).containsKey(7);
-        assertThat(witness.peerStats().get(7).reachable())
+        assertThat(witness.trackedPeerIds()).contains(7);
+        assertThat(witness.isReachable(7))
                 .as("down, and still tracked; those are different questions")
                 .isFalse();
         assertThat(witness.peersForgotten()).isZero();
@@ -675,12 +683,12 @@ class ElectionNodeTest {
         witness.learnPeer(Peer.application(7, "h", 1));
         clock.advance(Duration.ofMinutes(5));
         witness.runOnce(0L);
-        assertThat(witness.peerStats()).doesNotContainKey(7);
+        assertThat(witness.trackedPeerIds()).doesNotContain(7);
 
         assertThat(witness.learnPeer(Peer.application(7, "h", 1)))
                 .as("forgetting is cheap precisely because this costs nothing")
                 .isTrue();
-        assertThat(witness.peerStats()).containsKey(7);
+        assertThat(witness.trackedPeerIds()).contains(7);
     }
 
     @Test
@@ -691,10 +699,10 @@ class ElectionNodeTest {
         witness.onLeaving(7, 0);
         witness.runOnce(0L);
 
-        assertThat(witness.peerStats())
+        assertThat(witness.trackedPeerIds())
                 .as("a departure is a hint that can be wrong, and eviction reachable by one"
                         + " datagram is a door worth not opening")
-                .containsKey(7);
+                .contains(7);
         assertThat(witness.peersForgotten()).isZero();
     }
 
@@ -705,10 +713,10 @@ class ElectionNodeTest {
         clock.advance(Duration.ofHours(1));
         node.runOnce(0L);
 
-        assertThat(node.peerStats())
+        assertThat(node.trackedPeerIds())
                 .as("a configured peer set is the quorum; losing one silently would be a way to"
                         + " shrink it")
-                .containsKeys(2, 3);
+                .contains(2, 3);
         assertThat(node.peersForgotten()).isZero();
     }
 
@@ -721,13 +729,13 @@ class ElectionNodeTest {
             }
         }
 
-        assertThat(witness.peerStats().size())
+        assertThat(witness.trackedPeerIds().size())
                 .as("ageing bounds the set by legitimate traffic; this bounds it against a"
                         + " keyholder cycling sender ids faster than that")
                 .isLessThanOrEqualTo(256);
-        assertThat(witness.peerStats())
+        assertThat(witness.trackedPeerIds())
                 .as("and it is the quietest that went, so the newest arrivals are still tracked")
-                .containsKey(300);
+                .contains(300);
     }
 
     private ElectionNode startedLearningWitness() {
@@ -738,7 +746,8 @@ class ElectionNodeTest {
                 .learnedMembership()
                 .build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         node.start();
         return node;
     }
@@ -753,7 +762,8 @@ class ElectionNodeTest {
             config.followsStatedTimings();
         }
         ElectionNode node = new ElectionNode(config.build(), store, network.transportFor(1), clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         node.start();
         return node;
     }
@@ -785,7 +795,8 @@ class ElectionNodeTest {
                 .build();
         Transport transport = network.transportFor(1);
         ElectionNode node = new ElectionNode(config, store, transport, clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
+                }, recorded);
         node.start();
         return node;
     }

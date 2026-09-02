@@ -104,14 +104,6 @@ public interface PrimosNode extends AutoCloseable {
      */
     void addListener(PrimosListener listener);
 
-    /**
-     * An immutable snapshot of counters and per-peer observations, built when you ask for one.
-     *
-     * <p>Best-effort numbers: they are read from the node thread's state without co-ordinating
-     * with it, so a snapshot is consistent enough for a dashboard rather than a consistent
-     * instant. Never guard anything on these — that is what {@link #roleAndTerm()} is for.
-     */
-    PrimosStats stats();
 
     /**
      * Whether this node has been started and not yet stopped.
