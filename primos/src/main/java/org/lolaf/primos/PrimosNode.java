@@ -47,16 +47,23 @@ public interface PrimosNode extends AutoCloseable {
      * Binds the socket, reads back the persisted term and vote, and starts the node thread.
      *
      * <p>Returns once the node is running, <em>not</em> once a leader exists: the node returns as a
-     * follower, and an election takes at least one election timeout. Starting an already-started
-     * or stopped node throws.
+     * follower, and an election takes at least one election timeout.
+     *
+     * <p><strong>Idempotent</strong>, for the same reason {@link #stop()} is — both end up in
+     * lifecycle callbacks and shutdown hooks, where a caller cannot always know what has already
+     * happened, and where throwing turns an ordering it could not control into a failure.
+     *
+     * <p>A node that was stopped starts again, rejoining the cluster with the term and vote it left
+     * with. A node that reached {@link Role#FAILED} does not: it stopped because something it
+     * depends on is broken, so restart the process.
      */
     void start();
 
     /**
      * Stops the node thread, closes the socket and flushes state, blocking until that is done.
      *
-     * <p>Idempotent, because this ends up in shutdown hooks and container teardown. A stopped node
-     * is terminal: build a new one rather than restarting this one.
+     * <p>Idempotent, because this ends up in shutdown hooks and container teardown. It is not
+     * terminal: {@link #start()} rejoins the cluster.
      */
     void stop();
 

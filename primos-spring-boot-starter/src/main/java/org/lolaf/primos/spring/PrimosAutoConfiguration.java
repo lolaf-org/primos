@@ -42,6 +42,7 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.util.function.Supplier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -111,16 +112,16 @@ public class PrimosAutoConfiguration {
      * state directory's exclusive lock until the JVM exited. Both closes are idempotent, so the
      * ordinary path closing twice costs nothing.
      */
-    @Bean(destroyMethod = "close")
-    @ConditionalOnMissingBean
-    public StateStore primosStateStore(PrimosProperties properties) {
+    @Bean
+    @ConditionalOnMissingBean(name = "primosStateStores")
+    public Supplier<StateStore> primosStateStores(PrimosProperties properties) {
         if (properties.stateDirectory() == null) {
             throw new IllegalStateException("primos.state-directory is required: primos must be"
                     + " able to remember its term and vote across a restart, or it can elect two"
                     + " leaders. There is deliberately no default, because one under a temp"
                     + " directory would be silently unsafe after a reboot.");
         }
-        return new FileStateStore(properties.stateDirectory());
+        return () -> new FileStateStore(properties.stateDirectory());
     }
 
     /**
@@ -129,25 +130,20 @@ public class PrimosAutoConfiguration {
      * <p>Closed by Spring for the same reason as the store: the socket is bound when the bean is
      * built, and a node that is never started never closes it.
      */
-    @Bean(destroyMethod = "close")
-    @ConditionalOnMissingBean
-    public Transport primosTransport(PrimosProperties properties, ClusterConfig cluster) {
+    @Bean
+    @ConditionalOnMissingBean(name = "primosTransports")
+    public Supplier<Transport> primosTransports(PrimosProperties properties, ClusterConfig cluster) {
         byte[] secret = secretBytes(properties);
-        try {
-            return UdpTransport.builder()
-                    .bindAddress(properties.bindAddress() == null
-                            ? new InetSocketAddress(properties.bindPort())
-                            : new InetSocketAddress(properties.bindAddress(), properties.bindPort()))
-                    .peers(cluster.allPeers())
-                    .clusterName(properties.applicationName())
-                    // Learning a peer's address from its traffic is safe only when a forged
-                    // datagram cannot claim to be that peer, so it is gated on the secret.
-                    .addressLearning(secret != null)
-                    .build();
-        } catch (IOException e) {
-            throw new UncheckedIOException("cannot bind the primos socket for cluster '"
-                    + properties.applicationName() + "'", e);
-        }
+        // The builder is itself the supplier, so each start binds a fresh socket.
+        return UdpTransport.builder()
+                .bindAddress(properties.bindAddress() == null
+                        ? new InetSocketAddress(properties.bindPort())
+                        : new InetSocketAddress(properties.bindAddress(), properties.bindPort()))
+                .peers(cluster.allPeers())
+                .clusterName(properties.applicationName())
+                // Learning a peer's address from its traffic is safe only when a forged datagram
+                // cannot claim to be that peer, so it is gated on the secret.
+                .addressLearning(secret != null);
     }
 
     /**
@@ -158,13 +154,13 @@ public class PrimosAutoConfiguration {
     @ConditionalOnMissingBean
     public PrimosNode primosNode(PrimosProperties properties,
                                  ClusterConfig cluster,
-                                 StateStore store,
-                                 Transport transport,
+                                 Supplier<StateStore> stores,
+                                 Supplier<Transport> transports,
                                  ObjectProvider<PrimosListener> listeners) {
         var builder = PrimosNode.builder()
                 .clusterConfig(cluster)
-                .store(store)
-                .transport(transport)
+                .store(stores)
+                .transport(transports)
                 // Callbacks off the node thread. Every @EventListener in the application hangs off
                 // this, and a listener that blocks on the node thread stalls consensus, misses
                 // heartbeats and triggers an election that loses the leadership it was watching.

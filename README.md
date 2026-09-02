@@ -17,12 +17,6 @@ List<Peer> peers = Arrays.asList(
         Peer.application(2, "node-b", 7420),
         Peer.application(3, "node-c", 7420));
 
-UdpTransport transport = UdpTransport.builder()   // throws IOException
-        .bindAddress(new InetSocketAddress(7420))
-        .peers(peers)
-        .addressLearning(true)                    // only ever with a secret set
-        .build();
-
 ClusterConfig cluster = ClusterConfig.builder()   // who is in the cluster
         .applicationName("orders")
         .nodeId(1)
@@ -32,8 +26,13 @@ ClusterConfig cluster = ClusterConfig.builder()   // who is in the cluster
 PrimosNode node = PrimosNode.builder()            // and how this node runs
         .clusterConfig(cluster)
         .clusterSecret(secret)
-        .store(new FileStateStore(Paths.get("/var/lib/orders/primos")))
-        .transport(transport)
+        // Suppliers, not instances: each start binds a socket and takes the state lock, so a
+        // node that stops can start again. The transport builder is itself the supplier.
+        .store(() -> new FileStateStore(Paths.get("/var/lib/orders/primos")))
+        .transport(UdpTransport.builder()
+                .bindAddress(new InetSocketAddress(7420))
+                .peers(peers)
+                .addressLearning(true))       // only ever with a secret set
         .listener(new PrimosListener() {
             @Override
             public void onRoleChanged(Role previous, Role current, long term) {
@@ -93,6 +92,13 @@ Two smaller rules for the same section:
 
 - **Callbacks arrive on the node thread.** Hand real work to your own executor, or you are holding
   up heartbeats. A callback slower than half the heartbeat interval is logged as such.
+- **A node can leave the cluster and rejoin.** `stop()` then `start()` works: the builder takes
+  *suppliers* of the store and transport, so each start makes a fresh pair. That is the reason for
+  the shape — a `FileStateStore` takes its exclusive lock in its constructor and a `UdpTransport`
+  binds its socket in its own, so a stopped node holds a released lock and a closed channel and
+  restarting needs new instances rather than a reset. It is safe because the term and the vote are
+  on disk: a node that comes back re-reads both and cannot forget a vote it granted. A `FAILED`
+  node is never restartable.
 - **`FAILED` is terminal.** A node whose store can no longer make a vote durable stops claiming
   leadership permanently, because continuing would mean voting on state it may forget. Treat the
   event as a signal to restart the process, not to wait.

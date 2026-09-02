@@ -276,8 +276,8 @@ class MultiApplicationSoakTest {
                         .witness(witness)
                         .timings(FAST)
                         .build())
-                .store(new MemoryStateStore())
-                .transport(transport)
+                .store(MemoryStateStore::new)
+                .transport(() -> transport)
                 .clusterSecret(SECRET.getBytes(StandardCharsets.UTF_8))
                 .build();
         nodes.add(node);

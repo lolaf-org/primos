@@ -72,8 +72,8 @@ properties cannot express is an `@Bean` away.
 |---|---|
 | `Timings` | from `primos.profile`; define your own for anything other than `lan`/`wan` |
 | `ClusterConfig` | application name, this node, its peers, any witness |
-| `StateStore` | a `FileStateStore` on `primos.state-directory` |
-| `Transport` | a `UdpTransport` on `primos.bind-address`/`bind-port` |
+| `Supplier<StateStore>` | builds a `FileStateStore` on `primos.state-directory`, one per start |
+| `Supplier<Transport>` | builds a `UdpTransport` on `primos.bind-address`/`bind-port`, one per start |
 | `PrimosNode` | built, **not started** — see *When the node starts* |
 | `PrimosNodeLifecycle` | starts the node (or not) and always stops it |
 | `PrimosListener` | republishes primos' callbacks as Spring events |
@@ -250,6 +250,37 @@ valuable thing primos does at shutdown for a symmetry nobody asked for.
 
 You may still call `stop()` yourself if you want the node gone earlier. `stop()` is idempotent, so
 the context close is then a no-op.
+
+### Leaving the cluster and rejoining
+
+**The node bean can be stopped and started again.** An application that wants out of the cluster for
+a maintenance window — draining, a migration, anything where leading would be wrong — calls
+`stop()`, does its work, and calls `start()` when it is ready to be eligible again:
+
+```java
+@Autowired PrimosNode node;
+
+node.stop();     // stands down, tells peers it is leaving, releases its socket and state lock
+// ... the work that must not happen while this node could be told it is in charge ...
+node.start();    // rejoins with the term and vote it left with
+```
+
+This works because a node is built from **suppliers** of its store and transport rather than from
+instances: a `FileStateStore` takes its exclusive lock in its constructor and a `UdpTransport` binds
+its socket in its own, so a stopped node holds a released lock and a closed channel. Each start
+builds a fresh pair. Nothing is reused, so nothing has to be reset — the election code is untouched
+by any of this. This module contributes those suppliers as beans, which is also why it no longer
+closes the store and the transport itself: the node makes them, so the node releases them.
+
+**Rejoining is safe because the term and the vote are on disk.** The node re-reads both, so it
+cannot forget a vote it granted before stopping, which is what would otherwise let it vote twice in
+one term. Two things follow that are worth knowing rather than discovering:
+
+- `stats()` counts the current membership, not the process, so a restart begins the counters again
+  at zero and a scraper reads that as a counter going backwards.
+- **A `FAILED` node cannot be restarted.** It stopped because something it depends on is broken, and
+  rejoining would put a node with, say, an unwritable store back where its answers count. Restart
+  the process.
 
 ### The one silent failure `manual` introduces
 

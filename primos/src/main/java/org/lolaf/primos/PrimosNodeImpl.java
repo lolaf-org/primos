@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * A node with a thread: the election algorithm, run for real.
@@ -43,23 +44,26 @@ import java.util.concurrent.TimeUnit;
 final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
     private final ClusterConfig config;
-    private final StateStore store;
-    private final Transport transport;
+    private final Supplier<StateStore> stores;
+    private final Supplier<Transport> transports;
+    private final MonotonicClock clock;
+    private final Random random;
+    private final MessageAuthenticator authenticator;
     private final ListenerDispatcher dispatcher;
-    private final ElectionNode election;
     private final long stopTimeoutNanos;
+    private StateStore store;
+    private Transport transport;
+    private ElectionNode election;
 
     private volatile RoleAndTerm roleAndTerm;
     private volatile Leader leader;
     private volatile boolean running;
 
     private Thread thread;
-    private boolean started;
-    private boolean stopped;
 
     PrimosNodeImpl(ClusterConfig config,
-                   StateStore store,
-                   Transport transport,
+                   Supplier<StateStore> stores,
+                   Supplier<Transport> transports,
                    MonotonicClock clock,
                    Random random,
                    MessageAuthenticator authenticator,
@@ -67,47 +71,65 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
                    long slowCallbackNanos,
                    long stopTimeoutNanos) {
         this.config = config;
-        this.store = store;
-        this.transport = transport;
+        this.stores = stores;
+        this.transports = transports;
+        this.clock = clock;
+        this.random = random;
+        this.authenticator = authenticator;
         this.stopTimeoutNanos = stopTimeoutNanos;
-        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock,
-                listenerExecutor, slowCallbackNanos);
-        this.election = new ElectionNode(config, store, transport, clock, random, authenticator, this);
+        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock, listenerExecutor, slowCallbackNanos);
         this.roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
+    }
+
+    private static void closeQuietly(AutoCloseable resource) {
+        if (resource == null) {
+            return;
+        }
+        try {
+            resource.close();
+        } catch (Exception e) {
+            log.info("closing a node's {} failed", resource.getClass().getSimpleName(), e);
+        }
     }
 
     @Override
     public synchronized void start() {
-        if (stopped) {
-            throw new IllegalStateException("node " + config.nodeId() + " has been stopped; a"
-                    + " stopped node is terminal, so build a new one rather than restarting it");
+        if (running) {
+            // Idempotent rather than fatal, as stop() is
+            return;
         }
-        if (started) {
-            throw new IllegalStateException("node " + config.nodeId() + " is already started");
+        if (election != null && election.isFailed()) {
+            throw new IllegalStateException("node " + config.nodeId() + " has failed and cannot be"
+                    + " restarted: it stopped because something it depends on is broken, and"
+                    + " bringing it back into the vote would not fix that. Restart the process.");
         }
-
-        // Loading state on the caller's thread means a corrupt store or a locked directory is
-        // reported to whoever called start(), rather than killing a thread nobody is watching.
-        election.start();
-        publish();
-        started = true;
+        try {
+            store = stores.get();
+            transport = transports.get();
+        } catch (RuntimeException e) {
+            closeQuietly();
+            throw e;
+        }
+        election = new ElectionNode(config, store, transport, clock, random, authenticator, this);
         running = true;
-        thread = new Thread(this::loop,
-                "primos-" + config.applicationName() + "-" + config.nodeId());
+        thread = new Thread(this::loop, "primos-" + config.applicationName() + "-" + config.nodeId());
         thread.setDaemon(true);
+        thread.setUncaughtExceptionHandler((thread, throwable) ->
+                log.error("Uncaught exception occurred in node " + PrimosNodeImpl.this + ", terminal state, restart process", throwable));
         thread.start();
 
-        log.info("cluster '{}': node {} started as {}",
-                config.applicationName(), config.nodeId(), roleAndTerm.role());
+        log.info("cluster '{}': node {} started as {}", config.applicationName(), config.nodeId(), roleAndTerm.role());
     }
 
     @Override
     public synchronized void stop() {
-        if (!started || stopped) {
-            stopped = true;
+        if (!running) {
+            // Never started, or already stopped. Either way the store and the transport are this
+            // node's to release: it made them, and a generation that never ran is still holding a
+            // bound socket and an exclusive lock. Both closes are idempotent.
+            closeQuietly();
             return;
         }
-        stopped = true;
         running = false;
         transport.wakeup();
 
@@ -147,20 +169,19 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     public void addListener(PrimosListener listener) {
         Objects.requireNonNull(listener, "listener");
         dispatcher.add(listener);
-        if (started && !stopped) {
+        if (running) {
             // A listener registered after the node started would otherwise wait for the next
             // change to learn anything, and may have been registered for one that already happened.
-            dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(),
-                    leader());
+            dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(), leader());
         }
     }
 
     /**
-     * A snapshot of the counters, built on the calling thread when it asks for one.
+     * A snapshot of the counters, built on the calling thread when it asks for one or null if node is not started
      */
     @Override
     public PrimosStats stats() {
-        return election.stats();
+        return election != null ? election.stats() : null;
     }
 
     @Override
@@ -190,9 +211,9 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         dispatcher.onPeerDown(peer);
     }
 
-    // ------------------------------------------------------------- the loop
-
     private void loop() {
+        election.start();
+        log.info("cluster '{}': node {} is rejoining the cluster", config.applicationName(), config.nodeId());
         while (running) {
             // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
             // the socket, so there is no polling interval to tune and no latency to trade away.
@@ -250,16 +271,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     private void closeQuietly() {
-        try {
-            transport.close();
-        } catch (RuntimeException e) {
-            log.debug("closing the transport failed", e);
-        }
-        try {
-            store.close();
-        } catch (RuntimeException e) {
-            log.debug("closing the store failed", e);
-        }
+        closeQuietly(transport);
+        closeQuietly(store);
+        transport = null;
+        store = null;
     }
 
     @Override

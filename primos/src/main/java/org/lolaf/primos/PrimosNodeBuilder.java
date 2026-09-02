@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
+import java.util.function.Supplier;
 import java.util.concurrent.Executor;
 
 /**
@@ -69,16 +70,14 @@ public final class PrimosNodeBuilder {
     private ClusterConfig clusterConfig;
 
     /**
-     * Where the term and vote are kept. Required.
+     * Makes the store the node keeps its term and vote in. Required. See {@link #store(Supplier)}.
      */
-    @Setter
-    private StateStore store;
+    private Supplier<StateStore> stores;
 
     /**
-     * How this node reaches its peers. Required.
+     * Makes the transport the node reaches its peers through. Required.
      */
-    @Setter
-    private Transport transport;
+    private Supplier<Transport> transports;
 
     /**
      * Where listener callbacks run. By default they run on the node thread, which means a slow
@@ -142,16 +141,28 @@ public final class PrimosNodeBuilder {
     }
 
     /**
-     * Registered before the node starts, so it cannot miss the first transition.
+     * How to make the store this node keeps its term and vote in. Required.
      */
+    public PrimosNodeBuilder store(Supplier<StateStore> stores) {
+        this.stores = Objects.requireNonNull(stores, "stores");
+        return this;
+    }
+
+    /**
+     * How to make the transport this node reaches its peers through. Required.
+     */
+    public PrimosNodeBuilder transport(Supplier<Transport> transports) {
+        this.transports = Objects.requireNonNull(transports, "transports");
+        return this;
+    }
+
     public PrimosNodeBuilder listener(PrimosListener listener) {
         listeners.add(Objects.requireNonNull(listener, "listener"));
         return this;
     }
 
     /**
-     * Validates everything and builds the node. Nothing is bound and no thread exists until
-     * {@link PrimosNode#start()}.
+     * Validates everything and builds the node.
      *
      * <p>Every required value is checked here rather than in its setter, so that a half-configured
      * builder fails in one place with one story, instead of at whichever setter happened to be
@@ -164,11 +175,11 @@ public final class PrimosNodeBuilder {
             throw new IllegalStateException("a cluster configuration is required:"
                     + " build one with ClusterConfig.builder()");
         }
-        if (store == null) {
+        if (stores == null) {
             throw new IllegalStateException("a state store is required: primos must be able to"
                     + " remember its term and vote across a restart, or it can elect two leaders");
         }
-        if (transport == null) {
+        if (transports == null) {
             throw new IllegalStateException("a transport is required");
         }
         Objects.requireNonNull(macAlgorithm, "macAlgorithm");
@@ -188,7 +199,7 @@ public final class PrimosNodeBuilder {
                 // setter is ours.
                 : MessageAuthenticator.hmac(macAlgorithm, clusterSecret.clone());
 
-        PrimosNodeImpl node = new PrimosNodeImpl(clusterConfig, store, transport, clock,
+        PrimosNodeImpl node = new PrimosNodeImpl(clusterConfig, stores, transports, clock,
                 random, authenticator, listenerExecutor, slowCallback.toNanos(),
                 stopTimeout.toNanos());
         for (PrimosListener listener : listeners) {

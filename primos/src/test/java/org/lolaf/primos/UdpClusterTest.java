@@ -225,8 +225,8 @@ class UdpClusterTest {
                             .peers(peers)
                             .timings(FAST)
                             .build())
-                    .store(store)
-                    .transport(transport)
+                    .store(() -> store)
+                    .transport(() -> transport)
                     .clusterSecret(secret)
                     .build();
             node.start();

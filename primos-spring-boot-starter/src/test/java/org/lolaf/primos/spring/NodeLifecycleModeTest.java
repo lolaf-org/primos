@@ -18,6 +18,7 @@ package org.lolaf.primos.spring;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.PrimosNode;
+import org.lolaf.primos.Role;
 import org.lolaf.primos.store.FileStateStore;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -100,10 +101,15 @@ class NodeLifecycleModeTest {
     }
 
     /**
-     * The sharp one. {@code stop()} on a node that was never started is a no-op, so if Spring did
-     * not close the store and the transport itself, a manual-mode application that never got round
-     * to starting its node would hold the state directory's exclusive lock — and its socket — until
-     * the JVM exited. Opening a second store on the same directory is what proves the lock went.
+     * The sharp one. {@code stop()} on a node that was never started closes nothing of its own, so
+     * a manual-mode application that never got round to starting its node would hold the state
+     * directory's exclusive lock — and its socket — until the JVM exited. Opening a second store on
+     * the same directory is what proves the lock went.
+     *
+     * <p>The mechanism changed under this test and the assertion did not, which is the sort of
+     * test worth having. Spring used to close the store and transport beans itself, because it
+     * made them. Now it contributes <em>suppliers</em> and the node makes each generation's pair,
+     * so releasing them is the node's job. Ownership follows creation, and that is the whole rule.
      */
     @Test
     void a_node_that_was_never_started_still_releases_its_state_lock_and_socket() {
@@ -115,5 +121,32 @@ class NodeLifecycleModeTest {
                 assertThat(reopened.load()).isNotNull();
             }
         }).doesNotThrowAnyException();
+    }
+
+    /**
+     * The reason any of this exists. A Spring singleton is exactly the shape that cannot be handed
+     * back as "build a new one", so an application wanting to leave the cluster for a maintenance
+     * window and rejoin had no way to say so — the workaround was a factory bean, which pushes the
+     * lifecycle back into the application this module exists to relieve.
+     */
+    @Test
+    void a_node_bean_can_leave_the_cluster_and_rejoin() {
+        runner("primos.lifecycle=manual").run(context -> {
+            PrimosNode node = context.getBean(PrimosNode.class);
+
+            node.start();
+            assertThat(node.isRunning()).isTrue();
+
+            node.stop();
+            assertThat(node.isRunning()).isFalse();
+            assertThat(node.role())
+                    .as("between generations it holds no thread, so it must not claim leadership")
+                    .isNotEqualTo(Role.LEADER);
+
+            node.start();
+            assertThat(node.isRunning())
+                    .as("the same bean, a fresh store and socket underneath it")
+                    .isTrue();
+        });
     }
 }

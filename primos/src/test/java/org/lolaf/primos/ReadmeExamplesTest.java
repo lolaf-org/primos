@@ -48,20 +48,18 @@ class ReadmeExamplesTest {
                 Peer.application(2, "127.0.0.1", 7421),
                 Peer.application(3, "127.0.0.1", 7422));
 
-        try (UdpTransport transport = UdpTransport.builder()
-                .bindAddress(new InetSocketAddress("127.0.0.1", 0))
-                .peers(peers)
-                .addressLearning(true)
-                .build();
-             PrimosNode node = PrimosNode.builder()
+        try (PrimosNode node = PrimosNode.builder()
                      .clusterConfig(ClusterConfig.builder()
                              .applicationName("orders")
                              .nodeId(1)
                              .peers(peers)
                              .build())
                      .clusterSecret(secret)
-                     .store(new FileStateStore(directory))
-                     .transport(transport)
+                     .store(() -> new FileStateStore(directory))
+                     .transport(UdpTransport.builder()
+                             .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                             .peers(peers)
+                             .addressLearning(true))
                      .listener(new PrimosListener() {
                          @Override
                          public void onRoleChanged(Role previous, Role current, long term) {
@@ -81,18 +79,16 @@ class ReadmeExamplesTest {
 
     @Test
     void every_stats_accessor_the_readme_names_exists() throws IOException {
-        try (UdpTransport transport = UdpTransport.builder()
-                .bindAddress(new InetSocketAddress("127.0.0.1", 0))
-                .peers(Arrays.asList(Peer.application(2, "127.0.0.1", 7421)))
-                .build();
-             PrimosNode node = PrimosNode.builder()
+        try (PrimosNode node = PrimosNode.builder()
                      .clusterConfig(ClusterConfig.builder()
                              .applicationName("orders")
                              .nodeId(1)
                              .peer(Peer.application(2, "127.0.0.1", 7421))
                              .build())
-                     .store(new FileStateStore(directory))
-                     .transport(transport)
+                     .store(() -> new FileStateStore(directory))
+                     .transport(UdpTransport.builder()
+                             .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                             .peers(Arrays.asList(Peer.application(2, "127.0.0.1", 7421))))
                      .build()) {
 
             node.start();

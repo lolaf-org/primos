@@ -18,6 +18,7 @@ package org.lolaf.primos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.store.MemoryStateStore;
+import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.transport.LoopbackNetwork;
 
 import java.time.Duration;
@@ -107,13 +108,21 @@ class PrimosNodeTest {
                 .isEqualTo(Role.FOLLOWER);
     }
 
+    /**
+     * Idempotent, like {@code stop()}. Both are reached from lifecycle callbacks and shutdown
+     * hooks, where throwing would turn an ordering the caller cannot see into a failure.
+     */
     @Test
-    void starting_twice_is_refused() {
+    void starting_twice_is_a_no_op() {
         PrimosNode node = start(builder(1));
+        PrimosStats before = node.stats();
 
-        assertThatThrownBy(node::start)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("already started");
+        node.start();
+
+        assertThat(node.isRunning()).isTrue();
+        assertThat(node.stats().timeInRole())
+                .as("the running node was left alone, not replaced")
+                .isGreaterThanOrEqualTo(before.timeInRole());
     }
 
     @Test
@@ -124,33 +133,6 @@ class PrimosNodeTest {
             node.stop();
             node.stop();
         }).doesNotThrowAnyException();
-    }
-
-    /**
-     * Nothing else distinguishes a node that has never joined from a healthy one: both report
-     * {@code FOLLOWER}. That matters wherever the start is deferred, because an application that
-     * meant to start its node and did not looks identical from every other angle.
-     */
-    @Test
-    void isRunning_separates_a_node_that_never_joined_from_one_that_did() {
-        PrimosNode node = builder(1).build();
-        assertThat(node.isRunning()).isFalse();
-
-        node.start();
-        assertThat(node.isRunning()).isTrue();
-
-        node.stop();
-        assertThat(node.isRunning()).isFalse();
-    }
-
-    @Test
-    void a_stopped_node_is_terminal() {
-        PrimosNode node = start(builder(1));
-        node.stop();
-
-        assertThatThrownBy(node::start)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("stopped node is terminal");
     }
 
     @Test
@@ -411,7 +393,7 @@ class PrimosNodeTest {
     void a_node_without_a_store_is_refused_with_the_reason() {
         assertThatThrownBy(() -> PrimosNode.builder()
                 .clusterConfig(cluster(1))
-                .transport(network.transportFor(1))
+                .transport(() -> network.transportFor(1))
                 .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("state store is required")
@@ -423,8 +405,8 @@ class PrimosNodeTest {
         // Better here than as a cluster that comes up, talks to nobody, and counts BAD_TAG.
         assertThatThrownBy(() -> PrimosNode.builder()
                 .clusterConfig(cluster(1))
-                .transport(network.transportFor(1))
-                .store(new MemoryStateStore())
+                .transport(() -> network.transportFor(1))
+                .store(MemoryStateStore::new)
                 .clusterSecret("a-secret".getBytes())
                 .macAlgorithm("HmacNoSuchThing")
                 .build())
@@ -450,7 +432,7 @@ class PrimosNodeTest {
     void a_node_without_a_transport_is_refused() {
         assertThatThrownBy(() -> PrimosNode.builder()
                 .clusterConfig(cluster(1))
-                .store(new MemoryStateStore())
+                .store(MemoryStateStore::new)
                 .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("transport is required");
@@ -459,8 +441,8 @@ class PrimosNodeTest {
     @Test
     void a_node_without_a_cluster_configuration_is_refused() {
         assertThatThrownBy(() -> PrimosNode.builder()
-                .store(new MemoryStateStore())
-                .transport(network.transportFor(1))
+                .store(MemoryStateStore::new)
+                .transport(() -> network.transportFor(1))
                 .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("cluster configuration is required");
@@ -488,6 +470,62 @@ class PrimosNodeTest {
         started.add(node);
     }
 
+    // ---------------------------------------------------------- restartability
+
+    /**
+     * A restart must not be a way to bring a broken node back into a vote. FAILED means something
+     * this node depends on is broken; rejoining would not fix it and would put a node with, say, an
+     * unwritable store back where its answers count.
+     */
+    @Test
+    void a_failed_node_is_not_restartable() {
+        PrimosNode node = PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(FailingStore::new)
+                .transport(() -> network.transportFor(1))
+                .build();
+        started.add(node);
+
+        node.start();
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.FAILED);
+        node.stop();
+
+        assertThatThrownBy(node::start)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("has failed and cannot be restarted");
+    }
+
+    /** Persists nothing and refuses, which drives the node into FAILED through its own loop. */
+    private static final class FailingStore implements StateStore {
+
+        @Override
+        public org.lolaf.primos.store.PersistentState load() {
+            return new org.lolaf.primos.store.PersistentState(0, -1);
+        }
+
+        @Override
+        public void save(long currentTerm, int votedFor) {
+            throw new org.lolaf.primos.store.StateStoreException("this disk is broken");
+        }
+
+        @Override
+        public boolean isDurable() {
+            return true;
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private PrimosNode nodeSharing(int id, StateStore store) {
+        return PrimosNode.builder()
+                .clusterConfig(cluster(id))
+                .store(() -> store)
+                .transport(() -> network.transportFor(id))
+                .build();
+    }
+
     private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
         PrimosNode node = builder.build();
         node.start();
@@ -498,8 +536,8 @@ class PrimosNodeTest {
     private org.lolaf.primos.PrimosNodeBuilder builder(int id, int... peerIds) {
         return PrimosNode.builder()
                 .clusterConfig(cluster(id, peerIds))
-                .store(new MemoryStateStore())
-                .transport(network.transportFor(id));
+                .store(MemoryStateStore::new)
+                .transport(() -> network.transportFor(id));
     }
 
     /**

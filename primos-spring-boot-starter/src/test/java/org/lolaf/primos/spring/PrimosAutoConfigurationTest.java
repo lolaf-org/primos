@@ -61,8 +61,11 @@ class PrimosAutoConfigurationTest {
         runner().withPropertyValues(singleNodeCluster()).run(context -> {
             assertThat(context).hasSingleBean(PrimosNode.class);
             assertThat(context).hasSingleBean(ClusterConfig.class);
-            assertThat(context).hasSingleBean(StateStore.class);
-            assertThat(context).hasSingleBean(Transport.class);
+            // Suppliers rather than instances, which is what lets the node rejoin the cluster:
+            // each start builds a fresh pair, since a stopped node holds a released lock and a
+            // closed socket.
+            assertThat(context).hasBean("primosStateStores");
+            assertThat(context).hasBean("primosTransports");
             assertThat(context).hasSingleBean(PrimosNodeLifecycle.class);
             assertThat(context.getBean(ClusterConfig.class).applicationName()).isEqualTo("orders");
         });

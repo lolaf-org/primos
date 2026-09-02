@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * One node in isolation, for the two properties that are easiest to prove by reaching straight
@@ -254,6 +255,39 @@ class ElectionNodeTest {
                 .as("it still probes its peers, so it has a deadline; what it lacks is an"
                         + " election timer")
                 .isLessThan(Long.MAX_VALUE);
+    }
+
+    /**
+     * Not a tidiness check, which is why it is worth a test and worth its place on the loop path.
+     *
+     * <p>{@link ElectionNode#start()} is what reads {@code currentTerm} and {@code votedFor} back
+     * from the store. A turn of the loop taken without it would run on term 0 with no vote — a node
+     * that has forgotten what it promised in a previous life — and would then time out, campaign
+     * and vote for itself in a term it may already have voted in. That is the double-vote bug,
+     * reached by calling two methods in the wrong order.
+     *
+     * <p>{@code ElectionNode} is public only because {@code primos-witness} is a separate artifact,
+     * so the caller who could get this wrong is a real one. Both callers in this repository start
+     * first; nothing but this says what happens to a third.
+     */
+    @Test
+    void a_turn_of_the_loop_before_the_store_has_been_read_is_refused() {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .peers(peers(2, 3))
+                .build();
+        ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
+                new Random(1L), MessageAuthenticator.disabled());
+
+        assertThatThrownBy(() -> node.runOnce(0))
+                .as("silently running on term 0 would be a node that had forgotten its vote")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("has not been started");
+
+        assertThat(store.load().currentTerm())
+                .as("and nothing was written on the way to refusing")
+                .isZero();
     }
 
     // ------------------------------------------------------------------ pre-vote

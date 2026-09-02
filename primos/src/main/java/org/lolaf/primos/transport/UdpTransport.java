@@ -22,9 +22,11 @@ import org.lolaf.primos.Peer;
 import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
+import java.util.function.Supplier;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.*;
@@ -325,7 +327,7 @@ public final class UdpTransport implements Transport {
     /**
      * Builds a {@link UdpTransport}.
      */
-    public static final class Builder {
+    public static final class Builder implements Supplier<Transport> {
 
         /**
          * Where to listen. Defaults to the wildcard address on an operating-system-chosen port.
@@ -374,6 +376,28 @@ public final class UdpTransport implements Transport {
          */
         public UdpTransport build() throws IOException {
             return new UdpTransport(this);
+        }
+
+        /**
+         * Builds a transport, wrapping the {@code IOException} so this can be handed to
+         * {@code PrimosNode.builder().transport(...)} directly.
+         *
+         * <p>A node takes a <em>supplier</em> of transports rather than a transport, because a
+         * stopped node holds a closed socket and starting it again needs a new one. That would
+         * otherwise force every caller to write the same try-and-wrap lambda around this builder,
+         * so the builder is the supplier and writes it once.
+         *
+         * <p>Each call binds a fresh socket, which is exactly what a restart wants. A builder is
+         * reusable for that reason: nothing here is consumed by building.
+         */
+        @Override
+        public Transport get() {
+            try {
+                return build();
+            } catch (IOException e) {
+                throw new UncheckedIOException("cannot bind the primos socket for cluster '"
+                        + clusterName + "'", e);
+            }
         }
     }
 }
