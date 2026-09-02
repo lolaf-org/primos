@@ -28,6 +28,7 @@ import org.lolaf.primos.wire.*;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The Raft role state machine: terms, votes, election timeouts and heartbeats.
@@ -59,10 +60,26 @@ public final class ElectionNode implements MessageHandler {
      * these are {@link MonotonicClock#nanoTime()} readings, which may legitimately be negative.
      */
     private static final long NO_CONTACT = Long.MIN_VALUE;
-
+    /**
+     * Probe intervals of silence after which a witness stops tracking a learned voter.
+     *
+     * <p>Derived rather than configured, so it scales with whatever tolerance a deployment already
+     * chose: a minute on the LAN defaults, ten on the garbage-collection-tolerant ten-second probe
+     * interval the departure tests use. Far above {@code failureThreshold}, because down and gone
+     * are different questions and only the second one is being asked here.
+     */
+    private static final int FORGET_AFTER_PROBES = 60;
+    /**
+     * How many voters a witness will track for one application before the quietest makes room.
+     *
+     * <p>The bound rather than the tidiness. Ageing keeps the set to who has spoken recently, which
+     * bounds it by legitimate traffic; this bounds it against a keyholder cycling sender ids faster
+     * than that. Same rule as the remembered-name set: anything keyed on something arriving from
+     * the network needs a ceiling.
+     */
+    private static final int MAX_LEARNED_PEERS = 256;
     @Getter
     private final ClusterConfig config;
-
     private final Timings timings;
     private final Quorum quorum;
     private final StateStore store;
@@ -84,10 +101,8 @@ public final class ElectionNode implements MessageHandler {
     private TrackedPeer[] peers;
     @Getter
     private Role role = Role.FOLLOWER;
-
     @Getter
     private long currentTerm;
-
     @Getter
     private int votedFor = PersistentState.NO_VOTE;
     private int leaderId = -1;
@@ -103,49 +118,47 @@ public final class ElectionNode implements MessageHandler {
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
-
     /**
      * What killed the node, if anything has.
      */
     @Getter
     private Throwable failureCause;
-
     /**
      * How many pre-vote rounds this node has run, whether or not they led to an election.
      */
     @Getter
     private long preVotesStarted;
-
     @Getter
     private long electionsStarted;
-
     @Getter
     private long electionsWon;
-
     /**
      * How many times this node has stood itself down for lack of quorum contact.
      */
     @Getter
     private long leadershipsRelinquished;
-
     /**
      * How many times this node has handed leadership over on the way out.
      */
     @Getter
     private long handoversSent;
-
     /**
      * How many times this node has campaigned because a leader handed over to it.
      */
     @Getter
     private long handoversAccepted;
-
     /**
      * How many peers this node has seen announce a clean departure.
      */
     @Getter
     private long departuresObserved;
     private long timingMismatches;
+
+    /**
+     * Learned voters dropped for silence. Always zero on a node with a configured peer set.
+     */
+    @Getter
+    private long peersForgotten;
 
     /**
      * The intervals a peer most recently stated, assembled and validated — witness only, null
@@ -203,6 +216,10 @@ public final class ElectionNode implements MessageHandler {
                 config.isLearnedMembership() ? id -> true : this::isConfiguredPeer, drops);
     }
 
+    private static boolean isSilentTooLong(TrackedPeer probe, long now, long silence) {
+        return probe.lastHeardNanos >= 0 && now - probe.lastHeardNanos > silence;
+    }
+
     private TrackedPeer trackedPeer(int id) {
         for (TrackedPeer peer : peers) {
             if (peer.peer.id() == id) {
@@ -239,11 +256,38 @@ public final class ElectionNode implements MessageHandler {
         if (peer.id() == config.nodeId() || isConfiguredPeer(peer.id())) {
             return false;
         }
-        peers = Arrays.copyOf(peers, peers.length + 1);
-        peers[peers.length - 1] = new TrackedPeer(peer);
+        TrackedPeer tracked = new TrackedPeer(peer);
+        // Learned because a datagram arrived from it, so it has been heard from as of now. Without
+        // this a new peer would look infinitely silent and be forgotten on the next probe round.
+        tracked.lastHeardNanos = clock.nanoTime();
+
+        int evicted = peers.length < MAX_LEARNED_PEERS ? -1 : leastRecentlyHeard();
+        if (evicted < 0) {
+            peers = Arrays.copyOf(peers, peers.length + 1);
+            peers[peers.length - 1] = tracked;
+        } else {
+            // At the bound, so the quietest peer makes room. The bound is what stops a set keyed on
+            // something arriving from the network being a leak somebody else controls; eviction is
+            // cheap for the same reason forgetting is, since the next datagram teaches it again.
+            Peer gone = peers[evicted].peer;
+            log.info("cluster '{}': witness {} is tracking {} voters, so voter {} makes room for voter {}",
+                    config.applicationName(), config.nodeId(), MAX_LEARNED_PEERS, gone.id(), peer.id());
+            transport.forgetSender(gone.id());
+            peers[evicted] = tracked;
+        }
         log.info("cluster '{}': witness {} has learned voter {} at {}:{}",
                 config.applicationName(), config.nodeId(), peer.id(), peer.host(), peer.port());
         return true;
+    }
+
+    private int leastRecentlyHeard() {
+        int quietest = 0;
+        for (int i = 1; i < peers.length; i++) {
+            if (peers[i].lastHeardNanos < peers[quietest].lastHeardNanos) {
+                quietest = i;
+            }
+        }
+        return quietest;
     }
 
     public void start() {
@@ -410,7 +454,15 @@ public final class ElectionNode implements MessageHandler {
         if (decoder.decode(datagram, this)) {
             // Only now, with the tag verified and the sender known, may the transport learn where
             // that peer is speaking from.
-            transport.confirmSender(decoder.lastSenderId());
+            int senderId = decoder.lastSenderId();
+            transport.confirmSender(senderId);
+            // Any authenticated datagram is being heard from, not only an answer to a probe. A
+            // node that is voting and heartbeating is plainly present, and counting only probe
+            // replies would let asymmetric loss make a busy peer look silent.
+            TrackedPeer heard = trackedPeer(senderId);
+            if (heard != null) {
+                heard.lastHeardNanos = clock.nanoTime();
+            }
         }
     }
 
@@ -947,6 +999,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void probeRound(long now) {
+        forgetSilentPeers(now);
         for (TrackedPeer probe : peers) {
             if (probe.awaitingReply) {
                 probe.consecutiveMisses++;
@@ -960,6 +1013,62 @@ public final class ElectionNode implements MessageHandler {
             probe.awaitingReply = true;
             send(probe.peer.id(), encoder.ping(sendBuffer, currentTerm, probe.outstandingSequence));
         }
+    }
+
+    /**
+     * Drops learned voters that have gone quiet for far longer than being down.
+     *
+     * <p>Without this a witness only ever grows: {@link #learnPeer} adds and nothing removed, so a
+     * tenant whose node ids roll — ephemeral instances taking a new one each deploy — leaves a
+     * tracked peer and a probe every interval behind for every id it has ever used, for the life
+     * of the process.
+     *
+     * <p><strong>Only a witness does this, and it cannot cost anybody a leader.</strong> A node
+     * with a configured peer set never reaches here, because its peers are its quorum. A witness
+     * has no quorum to change: {@code Quorum.unknown} is never reached, it never campaigns and
+     * never leads, so its peer set feeds probing, reporting and departure datagrams and no
+     * decision that could elect anyone.
+     *
+     * <p><strong>Gone is not down.</strong> Down is {@code failureThreshold} missed probes, and a
+     * peer that is down is exactly the one a witness should keep watching — a garbage collection
+     * or a brief partition must not lose it. The window here is far longer, and being wrong about
+     * it costs nothing anyway: the next authenticated datagram from that node learns it again,
+     * which is how it arrived.
+     *
+     * <p>A departure announcement deliberately does not trigger this. {@code Leaving} is a hint
+     * that can be wrong and measurement stays authoritative — and making eviction reachable by one
+     * datagram is a door worth not opening, however harmless it would be.
+     */
+    private void forgetSilentPeers(long now) {
+        if (!config.isLearnedMembership()) {
+            return;
+        }
+        long silence = timings.probeInterval().toNanos() * FORGET_AFTER_PROBES;
+        int surviving = 0;
+        for (TrackedPeer probe : peers) {
+            if (!isSilentTooLong(probe, now, silence)) {
+                surviving++;
+            }
+        }
+        if (surviving == peers.length) {
+            // The steady state, and it allocates nothing: a scan and no array.
+            return;
+        }
+        TrackedPeer[] kept = new TrackedPeer[surviving];
+        int at = 0;
+        for (TrackedPeer probe : peers) {
+            if (isSilentTooLong(probe, now, silence)) {
+                log.info("cluster '{}': witness {} has not heard from voter {} for {}s and has"
+                                + " stopped tracking it; it will be learned again if it returns",
+                        config.applicationName(), config.nodeId(), probe.peer.id(),
+                        TimeUnit.NANOSECONDS.toSeconds(now - probe.lastHeardNanos));
+                transport.forgetSender(probe.peer.id());
+                peersForgotten++;
+            } else {
+                kept[at++] = probe;
+            }
+        }
+        peers = kept;
     }
 
     private void notifyPeerUp(Peer peer) {

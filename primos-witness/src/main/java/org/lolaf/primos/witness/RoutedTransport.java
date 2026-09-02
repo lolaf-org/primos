@@ -220,6 +220,19 @@ final class RoutedTransport implements Transport {
     }
 
     /**
+     * Drops a silent peer's endpoint, so the table tracks who is talking rather than who ever did.
+     *
+     * <p>Nothing is lost by being wrong: the next authenticated datagram from that node puts its
+     * address straight back, which is how it arrived in the first place.
+     */
+    @Override
+    public void forgetSender(int senderId) {
+        if (endpoints.remove(senderId) != null) {
+            log.debug("cluster '{}': forgot where node {} was speaking from", application, senderId);
+        }
+    }
+
+    /**
      * Takes the voters learned since the last call, for the server to hand to the node.
      *
      * <p>Drained between turns of the loop rather than applied inside one, so a node's peer set is

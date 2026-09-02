@@ -100,6 +100,23 @@ public interface Transport extends AutoCloseable {
     }
 
     /**
+     * Tells the transport that a peer has been silent long enough to stop being tracked.
+     *
+     * <p>The mirror of {@link #confirmSender}, and it exists because address learning without
+     * address forgetting is a table that only grows: a transport serving a node set that arrives
+     * from traffic — a witness server's — would otherwise hold an endpoint for every sender id it
+     * had ever answered, for as long as the process lived.
+     *
+     * <p>Safe to be wrong about, which is why silence is enough of a reason. Nothing durable is
+     * discarded and nothing has to be reconfigured: the next authenticated datagram from that peer
+     * teaches the address again, exactly as the first one did.
+     *
+     * <p>Ignored by transports whose peers are configured rather than learned.
+     */
+    default void forgetSender(int senderId) {
+    }
+
+    /**
      * Releases the socket or its equivalent. Idempotent.
      */
     @Override

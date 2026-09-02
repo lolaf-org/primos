@@ -595,6 +595,120 @@ class ElectionNodeTest {
         assertThat(witness.stats().timingMismatches()).isEqualTo(1);
     }
 
+    // ------------------------------------------------------------ learned peers
+
+    @Test
+    void a_witness_forgets_a_learned_voter_that_goes_quiet() {
+        ElectionNode witness = startedLearningWitness();
+        witness.learnPeer(Peer.application(7, "h", 1));
+        assertThat(witness.peerStats()).containsKey(7);
+
+        // Far past sixty probe intervals with nothing arriving from it.
+        clock.advance(Duration.ofMinutes(5));
+        witness.runOnce(0L);
+
+        assertThat(witness.peerStats())
+                .as("otherwise a tenant whose node ids roll leaves a tracked peer and a probe every"
+                        + " interval behind for every id it has ever used")
+                .doesNotContainKey(7);
+        assertThat(witness.peersForgotten()).isEqualTo(1);
+    }
+
+    /**
+     * The pair to the test above, and the one that matters more: a peer that is merely <em>down</em>
+     * is exactly the peer a witness should keep watching. Down is three missed probes; gone is a
+     * minute of silence, and confusing them loses the node during a garbage collection.
+     */
+    @Test
+    void a_voter_that_is_only_down_is_kept() {
+        ElectionNode witness = startedLearningWitness();
+        witness.learnPeer(Peer.application(7, "h", 1));
+
+        // Long enough to miss every probe and be reported down, nowhere near long enough to be gone.
+        clock.advance(Duration.ofSeconds(10));
+        witness.runOnce(0L);
+
+        assertThat(witness.peerStats()).containsKey(7);
+        assertThat(witness.peerStats().get(7).reachable())
+                .as("down, and still tracked; those are different questions")
+                .isFalse();
+        assertThat(witness.peersForgotten()).isZero();
+    }
+
+    @Test
+    void a_forgotten_voter_is_learned_again_the_moment_it_speaks() {
+        ElectionNode witness = startedLearningWitness();
+        witness.learnPeer(Peer.application(7, "h", 1));
+        clock.advance(Duration.ofMinutes(5));
+        witness.runOnce(0L);
+        assertThat(witness.peerStats()).doesNotContainKey(7);
+
+        assertThat(witness.learnPeer(Peer.application(7, "h", 1)))
+                .as("forgetting is cheap precisely because this costs nothing")
+                .isTrue();
+        assertThat(witness.peerStats()).containsKey(7);
+    }
+
+    @Test
+    void a_departure_announcement_does_not_forget_a_voter() {
+        ElectionNode witness = startedLearningWitness();
+        witness.learnPeer(Peer.application(7, "h", 1));
+
+        witness.onLeaving(7, 0);
+        witness.runOnce(0L);
+
+        assertThat(witness.peerStats())
+                .as("a departure is a hint that can be wrong, and eviction reachable by one"
+                        + " datagram is a door worth not opening")
+                .containsKey(7);
+        assertThat(witness.peersForgotten()).isZero();
+    }
+
+    @Test
+    void a_node_with_a_configured_peer_set_never_forgets_one() {
+        ElectionNode node = startedNode();
+
+        clock.advance(Duration.ofHours(1));
+        node.runOnce(0L);
+
+        assertThat(node.peerStats())
+                .as("a configured peer set is the quorum; losing one silently would be a way to"
+                        + " shrink it")
+                .containsKeys(2, 3);
+        assertThat(node.peersForgotten()).isZero();
+    }
+
+    @Test
+    void the_learned_set_has_a_ceiling_and_the_quietest_makes_room() {
+        ElectionNode witness = startedLearningWitness();
+        for (int id = 1; id <= 300; id++) {
+            if (id != witness.config().nodeId()) {
+                witness.learnPeer(Peer.application(id, "h", id));
+            }
+        }
+
+        assertThat(witness.peerStats().size())
+                .as("ageing bounds the set by legitimate traffic; this bounds it against a"
+                        + " keyholder cycling sender ids faster than that")
+                .isLessThanOrEqualTo(256);
+        assertThat(witness.peerStats())
+                .as("and it is the quietest that went, so the newest arrivals are still tracked")
+                .containsKey(300);
+    }
+
+    private ElectionNode startedLearningWitness() {
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .asWitness()
+                .learnedMembership()
+                .build();
+        ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
+                new Random(1L), MessageAuthenticator.disabled());
+        node.start();
+        return node;
+    }
+
     private ElectionNode startedWitness(boolean follows) {
         ClusterConfig.Builder config = ClusterConfig.builder()
                 .applicationName("t")
