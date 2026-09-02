@@ -581,7 +581,7 @@ public final class WitnessServer implements AutoCloseable {
      * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
      */
     private void adoptStatedTimings(Served application) {
-        if (!configStore.current().settings().configSource().isCluster()) {
+        if (!follows()) {
             return;
         }
         Timings stated = application.node.observedTimings();
@@ -603,16 +603,30 @@ public final class WitnessServer implements AutoCloseable {
 
     private ElectionNode newNode(ApplicationConfig application, RoutedTransport transport,
                                  StateStore store, Timings adopted) {
-        ClusterConfig config = ClusterConfig.builder()
+        ClusterConfig.Builder config = ClusterConfig.builder()
                 .applicationName(application.name())
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
                 .timings(timings(application, adopted))
-                .voteLogging(voteLogging)
-                .build();
-        return new ElectionNode(config, store, transport, clock, random,
+                .voteLogging(voteLogging);
+        if (follows()) {
+            config.followsStatedTimings();
+        }
+        return new ElectionNode(config.build(), store, transport, clock, random,
                 authenticatorFor(application));
+    }
+
+    /**
+     * Whether this witness applies what its clusters state, rather than only reporting it.
+     *
+     * <p>The builder override is part of the question, not beside it: a caller that passed
+     * intervals in code gets them whatever any datagram says, so nothing is being followed and a
+     * mismatch is a real one worth reporting.
+     */
+    private boolean follows() {
+        return timingsOverride == null
+                && configStore.current().settings().configSource().isCluster();
     }
 
     /**

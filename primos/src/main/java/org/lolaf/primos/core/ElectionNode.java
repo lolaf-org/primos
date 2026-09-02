@@ -672,6 +672,12 @@ public final class ElectionNode implements MessageHandler {
         if (probe == null) {
             return;
         }
+        if (config.isFollowingStatedTimings()) {
+            // Recorded above, and that is the whole of it. A difference here is not somebody's
+            // failover being quietly slower — it is the value this node is about to be rebuilt
+            // with, so the ERROR would fire once on every retune and be resolved a turn later.
+            return;
+        }
         boolean matches = heartbeatMillis == (int) timings.heartbeatInterval().toMillis()
                 && electionMinMillis == (int) timings.electionTimeoutMin().toMillis()
                 && electionMaxMillis == (int) timings.electionTimeoutMax().toMillis()

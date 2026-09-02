@@ -489,6 +489,53 @@ class ElectionNodeTest {
     }
 
     /**
+     * The pair to the tests above: a witness told to follow reports nothing, because there is
+     * nothing to report — the difference it sees is the value it is about to be rebuilt with, so
+     * an ERROR on every retune would describe a state lasting one turn as a fault.
+     */
+    @Test
+    void a_witness_that_follows_its_cluster_reports_no_mismatch() {
+        ElectionNode witness = startedWitness(true);
+
+        advertise(2, witness, 200, 1500, 3000, 2000, 3);
+
+        assertThat(witness.stats().timingMismatches())
+                .as("following is not disagreeing")
+                .isZero();
+        assertThat(witness.observedTimings())
+                .as("it still records what was stated; suppressing the report is not ignoring it")
+                .isNotNull();
+        assertThat(witness.observedTimings().heartbeatInterval().toMillis()).isEqualTo(200);
+    }
+
+    /**
+     * Without this the test above would pass on a witness that had simply stopped comparing.
+     */
+    @Test
+    void a_witness_that_does_not_follow_still_reports_a_mismatch() {
+        ElectionNode witness = startedWitness(false);
+
+        advertise(2, witness, 200, 1500, 3000, 2000, 3);
+
+        assertThat(witness.stats().timingMismatches()).isEqualTo(1);
+    }
+
+    private ElectionNode startedWitness(boolean follows) {
+        ClusterConfig.Builder config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .asWitness()
+                .peer(Peer.application(2, "h", 1));
+        if (follows) {
+            config.followsStatedTimings();
+        }
+        ElectionNode node = new ElectionNode(config.build(), store, network.transportFor(1), clock,
+                new Random(1L), MessageAuthenticator.disabled());
+        node.start();
+        return node;
+    }
+
+    /**
      * Delivers a real datagram rather than calling the handler, so the decoder, the size check and
      * {@code runOnce}'s wrapping are all on the path — which is the only way this is the production
      * path rather than a shape that resembles it.

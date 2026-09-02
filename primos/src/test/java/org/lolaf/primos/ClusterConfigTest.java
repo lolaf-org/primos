@@ -53,6 +53,18 @@ class ClusterConfigTest {
     }
 
     @Test
+    void an_application_node_may_not_follow_the_intervals_its_peers_state() {
+        assertThatThrownBy(() -> ClusterConfig.builder()
+                .applicationName("orders")
+                .nodeId(1)
+                .peer(Peer.application(2, "h", 1))
+                .followsStatedTimings()
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only a witness may follow");
+    }
+
+    @Test
     void a_minimal_config_defaults_its_timings() {
         ClusterConfig config = valid().build();
 

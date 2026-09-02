@@ -76,6 +76,9 @@ public class ClusterConfig {
     @Getter(AccessLevel.NONE)
     private final boolean learnedMembership;
 
+    @Getter(AccessLevel.NONE)
+    private final boolean followsStatedTimings;
+
     /**
      * Election, heartbeat, probe and advertisement intervals. Keep them uniform across a cluster,
      * witness included.
@@ -135,6 +138,16 @@ public class ClusterConfig {
     /**
      * Whether this node is itself the witness, and so must never campaign.
      */
+    /**
+     * Whether an owner outside this node applies what peers state, so a difference is not a fault.
+     *
+     * <p>See {@link ClusterConfig.Builder#followsStatedTimings()}. It suppresses the mismatch
+     * report and nothing else; no decision anywhere reads it.
+     */
+    public boolean isFollowingStatedTimings() {
+        return followsStatedTimings;
+    }
+
     public boolean isWitness() {
         return nodeType.isWitness();
     }
@@ -203,6 +216,12 @@ public class ClusterConfig {
                     "only a witness may have learned membership: an application node is configured"
                             + " with its peers, and accepting whoever turns up would let anyone who"
                             + " can reach the port join the vote");
+        }
+        if (followsStatedTimings && !nodeType.isWitness()) {
+            throw new IllegalArgumentException(
+                    "only a witness may follow the intervals its peers state: an application node"
+                            + " that stopped reporting a mismatch would lose the one signal that"
+                            + " its cluster's profile has drifted");
         }
         if (peers.isEmpty() && nodeType.isWitness() && !learnedMembership) {
             throw new IllegalArgumentException(
@@ -289,6 +308,29 @@ public class ClusterConfig {
             // Set directly rather than through a generated setter: Lombok skips generating one when
             // a method of that name already exists, and this no-argument form is the name.
             this.learnedMembership = true;
+            return this;
+        }
+
+        /**
+         * Declares that something outside this node applies the intervals its peers state.
+         *
+         * <p>For a witness server told to follow the clusters it serves, and only for it. It
+         * changes nothing this node does — the node still acts on no advertisement, and the value
+         * it runs is still the one it was built with. What it changes is what gets <em>said</em>:
+         * a difference between this node's intervals and a peer's is normally an error worth
+         * shouting about, because somebody's failover is slower than they believe and nothing else
+         * will ever mention it. Here it is not a disagreement at all, it is the value this node is
+         * about to be rebuilt with, and reporting it would describe a state that lasts one turn
+         * and reads as a fault every time a tenant retunes.
+         *
+         * <p>Only a witness may declare it, for the same reason only a witness may have learned
+         * membership: an application node that stopped reporting mismatches would lose the one
+         * signal that a cluster's profile has drifted.
+         */
+        public Builder followsStatedTimings() {
+            // Set directly rather than through a generated setter, as learnedMembership does and
+            // for the same reason: Lombok skips the setter when the name is already taken.
+            this.followsStatedTimings = true;
             return this;
         }
 
