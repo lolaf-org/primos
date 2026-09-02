@@ -400,6 +400,86 @@ class WitnessServerTest {
     }
 
     @Test
+    void a_forged_config_message_creates_no_application() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+
+        try (WitnessClient impostor = new WitnessClient("payments", 1, "not-the-secret",
+                WITNESS_ID, server.boundAddress())) {
+            impostor.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications())
+                .as("creating an application is the one consequential thing that happens before a"
+                        + " datagram reaches a node, so it must not happen on unverified bytes")
+                .isEmpty();
+        assertThat(server.routing().registrationBadTag()).isEqualTo(1L);
+        assertThat(server.routing().autoRegistrations()).isZero();
+    }
+
+    /**
+     * Without this the test above would pass on a witness that had simply stopped registering
+     * anybody, which is the same outage wearing the fix's clothes.
+     */
+    @Test
+    void a_signed_config_message_still_creates_one() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+
+        try (WitnessClient member = client("payments", 1)) {
+            member.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications()).containsExactly("payments");
+        assertThat(server.routing().registrationBadTag()).isZero();
+    }
+
+    /**
+     * The keyring's reservation rule reaching registration, which is the whole point of doing this
+     * with the candidate keys rather than with every key the witness holds.
+     */
+    @Test
+    void a_general_key_cannot_create_a_name_another_key_claims() {
+        settings(String.join("\n", "config.source=cluster",
+                "secret.general.value = " + SECRET,
+                "secret.orders.value = orders-secret",
+                "secret.orders.applications = orders-*"));
+        start();
+
+        try (WitnessClient withTheGeneralKey = client("orders-prod", 1)) {
+            withTheGeneralKey.announceConfig(server);
+        }
+        assertThat(server.servedApplications())
+                .as("a reserved name must not be brought into existence by the fleet key")
+                .isEmpty();
+
+        try (WitnessClient withTheRightKey = new WitnessClient("orders-prod", 1, "orders-secret",
+                WITNESS_ID, server.boundAddress())) {
+            withTheRightKey.announceConfig(server);
+        }
+        assertThat(server.servedApplications()).containsExactly("orders-prod");
+    }
+
+    /**
+     * The configuration that has always been documented as never to run still behaves as it did:
+     * with nothing to verify against, there is nothing this check can do.
+     */
+    @Test
+    void a_witness_with_no_keys_still_registers_whatever_arrives() {
+        // Written directly: the settings() helper adds the shared key, and this test is precisely
+        // about a witness that has none.
+        write(directory.resolve("witness.properties"), "config.source=cluster");
+        start();
+
+        try (WitnessClient anybody = new WitnessClient("payments", 1, null,
+                WITNESS_ID, server.boundAddress())) {
+            anybody.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications()).containsExactly("payments");
+    }
+
+    @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
         settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();

@@ -144,6 +144,18 @@ public final class WitnessServer implements AutoCloseable {
     private long droppedForFailedApplication;
     private long autoRegistrations;
     private long awaitingNodeConfig;
+    private long registrationBadTag;
+
+    /**
+     * The ring an unserved name's first datagram is checked against, and the settings it came from.
+     *
+     * <p>Cached because {@code Mac} initialisation is the expensive half of an HMAC, and this runs
+     * on datagrams naming applications nobody configured — which is exactly the traffic whose
+     * volume an attacker chooses. The snapshot is swapped whole and only when something changed,
+     * so comparing the reference is enough to know the keys are still the right ones.
+     */
+    private WitnessSettings admissionSettings;
+    private final Map<String, MessageAuthenticator> admissionRings = new HashMap<>();
 
     private WitnessServer(Builder builder) {
         this.configStore = Objects.requireNonNull(builder.configStore, "configStore");
@@ -291,7 +303,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         return new RoutingStats(unroutable, unservedApplication, autoRegistrationsRefused,
                 unusableName, droppedForFailedApplication, autoRegistrations, awaitingNodeConfig,
-                overflowed,
+                registrationBadTag, overflowed,
                 undeliverable);
     }
 
@@ -376,7 +388,8 @@ public final class WitnessServer implements AutoCloseable {
         }
         Served target = served.get(application);
         if (target == null) {
-            target = admit(application, MessageDecoder.peekMessageType(datagram), source);
+            target = admit(application, datagram, MessageDecoder.peekMessageType(datagram),
+                    source);
             if (target == null) {
                 return;
             }
@@ -393,7 +406,8 @@ public final class WitnessServer implements AutoCloseable {
      *
      * @return the application now serving it, or null if the datagram is to be dropped
      */
-    private Served admit(String application, MessageType claimed, InetSocketAddress source) {
+    private Served admit(String application, ByteBuffer datagram, MessageType claimed,
+                         InetSocketAddress source) {
         boolean firstSighting = rememberName(application);
         WitnessSettings settings = configStore.current().settings();
 
@@ -428,6 +442,29 @@ public final class WitnessServer implements AutoCloseable {
             }
             return null;
         }
+        // Nothing is created from bytes nobody has proved they could have written. Until this
+        // check, the cluster application limit was the only thing between whoever could reach the
+        // port and a state directory per datagram — which this plan called a bound on how full a
+        // witness could get, when it was really the whole of the admission control.
+        //
+        // The keys tried are the ones that claim this name, or those claiming nothing when none
+        // does, so a name somebody has reserved cannot be created by a holder of the general key.
+        // That is what makes the keyring's reservation rule reach registration and not only
+        // traffic for applications already being served.
+        if (!admissionRing(application, settings).verify(datagram)) {
+            registrationBadTag++;
+            if (firstSighting) {
+                log.warn("dropping a config message for unserved application '{}' from {}: no key"
+                                + " that may speak for that name accepts it, so nothing is created."
+                                + " Either that cluster holds a different key, or somebody who"
+                                + " holds none is trying.",
+                        application, source);
+            }
+            return null;
+        }
+        // verify() reads to the end of the datagram and the inbox copies from the current
+        // position, so the buffer is handed on exactly as it arrived.
+        datagram.position(0);
         if (served.size() >= settings.clusterApplicationLimit()) {
             autoRegistrationsRefused++;
             if (firstSighting) {
@@ -454,6 +491,44 @@ public final class WitnessServer implements AutoCloseable {
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
         return open(new ApplicationConfig(application, settings.timings(), true));
+    }
+
+    /**
+     * The keys an unserved name may be admitted by, built once per name per configuration.
+     *
+     * <p>With no key covering it there is nothing to check against and this admits whatever
+     * arrives — the same thing that has always happened, and the reason running a witness without
+     * keys is documented as something never to do. What it does not do is admit on the strength of
+     * some <em>other</em> tenant's key.
+     */
+    private MessageAuthenticator admissionRing(String application, WitnessSettings settings) {
+        if (settings != admissionSettings) {
+            admissionRings.clear();
+            admissionSettings = settings;
+        }
+        MessageAuthenticator cached = admissionRings.get(application);
+        if (cached != null) {
+            return cached;
+        }
+        List<WitnessKey> candidates = settings.keyring().candidatesFor(application);
+        MessageAuthenticator ring;
+        if (candidates.isEmpty()) {
+            ring = MessageAuthenticator.disabled();
+        } else {
+            List<MessageAuthenticator.KeySpec> specs = new ArrayList<>(candidates.size());
+            for (WitnessKey key : candidates) {
+                specs.add(MessageAuthenticator.KeySpec.of(key.name(), key.algorithm(),
+                        key.secret()));
+            }
+            ring = MessageAuthenticator.keyring(specs);
+        }
+        // Bounded the way the remembered-names set is, and for the same reason: these names arrive
+        // from the network, so an unbounded map of them is a leak an attacker grows a datagram at
+        // a time. Past the bound the ring is rebuilt each time, which costs work rather than heap.
+        if (admissionRings.size() < MAX_REMEMBERED_NAMES) {
+            admissionRings.put(application, ring);
+        }
+        return ring;
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
@@ -814,6 +889,15 @@ public final class WitnessServer implements AutoCloseable {
          * under {@code ConfigSource.FILE}.
          */
         long awaitingNodeConfig;
+
+        /**
+         * Config messages for an unserved application that no key covering it would accept.
+         *
+         * <p>The bound on who may create an application here. Sustained, it is either a cluster
+         * holding a key this witness does not, or somebody holding none trying to make state
+         * directories.
+         */
+        long registrationBadTag;
 
         /**
          * Datagrams dropped because an application's inbox was full.

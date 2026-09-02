@@ -409,12 +409,19 @@ This is the mode for a deployment whose operator has a hard constraint against a
 Serves any application name it hears, creating state for it. Less operational burden, a legitimate
 choice — and the way a typo becomes a split brain.
 
-**Only a node stating its own configuration creates an application.** A `Ping`, a `RequestVote` or a
-heartbeat naming an application this witness does not serve is dropped and counted under
-`awaitingNodeConfig`; nothing is created until one of that cluster's nodes says what intervals it is
+**Only a node stating its own configuration creates an application, and only if a key that may
+speak for that name accepts it.** A `Ping`, a `RequestVote` or a heartbeat naming an application
+this witness does not serve is dropped and counted under `awaitingNodeConfig`; nothing is created until one of that cluster's nodes says what intervals it is
 running. That is ordinary and brief while a cluster starts — its first probes and votes arrive
 before its first config message — and it is what stops the witness ever serving a tenant it has no
 timings for. Sustained, it means a cluster is talking to this witness and never saying who it is.
+
+A config message that no covering key accepts is dropped and counted under `registrationBadTag`,
+and **nothing is created**. That is the bound on who may make state directories here: reaching the
+port is not enough, and neither is holding some *other* tenant's key — the keys tried are the ones
+that claim that name, or those claiming nothing when none does. A witness configured with no keys
+at all has nothing to check against and admits whatever arrives, which is one more reason rule 3
+says never to run one.
 
 **Its precondition, which is easy to miss:** a cluster-created application has no file, so a key in
 the keyring has to cover it — either an unscoped one, or one whose pattern matches its name.
@@ -484,6 +491,7 @@ Worth alerting on:
 | WARN | `'X' is one or two characters from 'Y'` | **near miss — check both configurations** |
 | WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |
 | WARN | `refusing to auto-register` | `config.cluster.limit` reached |
+| WARN | `no key that may speak for that name accepts it` | a cluster holds a key this witness does not, or somebody holding none is trying to create applications |
 | WARN | `stated intervals that do not hold together` | a cluster advertised a profile that could not be built; the last good one stays in force |
 | INFO | `Holding off until one of its nodes states its configuration` | ordinary while a cluster starts; sustained means it never says who it is |
 | ERROR | `cannot read the configuration in ...` | a bad edit; the last good config is still serving |
