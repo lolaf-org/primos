@@ -240,6 +240,7 @@ public final class WitnessServer implements AutoCloseable {
             for (Peer peer : application.transport.drainLearned()) {
                 application.node.learnPeer(peer);
             }
+            adoptStatedTimings(application);
             quarantineIfFailed(application);
         }
 
@@ -521,7 +522,7 @@ public final class WitnessServer implements AutoCloseable {
                     + " rather than warned about.");
         }
         Served opened = new Served(application, newTransport(application.name()), store);
-        opened.node = newNode(application, opened.transport, store);
+        opened.node = newNode(application, opened.transport, store, null);
         served.put(application.name(), opened);
         opened.node.start();
         return opened;
@@ -544,7 +545,8 @@ public final class WitnessServer implements AutoCloseable {
         }
         application.config = updated;
         application.failed = false;
-        application.node = newNode(updated, application.transport, application.store);
+        application.node = newNode(updated, application.transport, application.store,
+                application.adoptedTimings);
         application.node.start();
         for (Map.Entry<Integer, InetSocketAddress> known : application.transport.endpoints()) {
             application.node.learnPeer(Peer.application(known.getKey(),
@@ -552,18 +554,61 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
+    /**
+     * Which profile this application's node runs, in the order that settles who wins.
+     *
+     * <p>The builder override first, because a caller assembling a server in code — a test driving
+     * deliberately fast intervals among them — means it and has no file to say so. Then what the
+     * cluster stated, which is the point of {@link ConfigSource#CLUSTER}. Then the files.
+     */
+    private Timings timings(ApplicationConfig application, Timings adopted) {
+        if (timingsOverride != null) {
+            return timingsOverride;
+        }
+        return adopted != null ? adopted : application.timings();
+    }
+
+    /**
+     * Follows a cluster's own intervals, when its operator has asked this witness to.
+     *
+     * <p>This is the whole of what {@link ConfigSource#CLUSTER} buys beyond registration: a tenant
+     * retunes its own nodes and its witness follows, with nobody editing a file here. The witness
+     * is the one member of a cluster whose configuration is owned by the wrong party — the tenant
+     * owns the profile, the witness operator owns the file — and this is what closes that.
+     *
+     * <p>The rebuild is the existing reconfiguration path, so it keeps the state store and every
+     * learned address: the term and the vote are on disk and are re-read, so the node comes back
+     * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
+     */
+    private void adoptStatedTimings(Served application) {
+        if (!configStore.current().settings().configSource().isCluster()) {
+            return;
+        }
+        Timings stated = application.node.observedTimings();
+        if (stated == null || stated.equals(application.adoptedTimings)) {
+            return;
+        }
+        log.info("application '{}' states its own intervals — heartbeat {}ms, election {}-{}ms,"
+                        + " probe {}ms, failure threshold {}. Following them.",
+                application.name, stated.heartbeatInterval().toMillis(),
+                stated.electionTimeoutMin().toMillis(), stated.electionTimeoutMax().toMillis(),
+                stated.probeInterval().toMillis(), stated.failureThreshold());
+        application.adoptedTimings = stated;
+        rebuild(application, application.config);
+    }
+
     private RoutedTransport newTransport(String application) {
         return new RoutedTransport(application, channel, selector);
     }
 
     private ElectionNode newNode(ApplicationConfig application, RoutedTransport transport,
-                                 StateStore store) {
+                                 StateStore store, Timings adopted) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName(application.name())
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
-                .timings(timingsOverride != null ? timingsOverride : application.timings())
+                .timings(timings(application, adopted))
                 .voteLogging(voteLogging)
                 .build();
         return new ElectionNode(config, store, transport, clock, random,
@@ -666,6 +711,17 @@ public final class WitnessServer implements AutoCloseable {
         private ApplicationConfig config;
         private ElectionNode node;
         private boolean failed;
+
+        /**
+         * The profile this cluster stated, once it has, under {@link ConfigSource#CLUSTER}.
+         *
+         * <p>Deliberately <em>beside</em> {@link #config} rather than in it. Configuration is what
+         * the files say; this is what the cluster says, and keeping them apart is what stops the
+         * two fighting — a reload would otherwise find the file's intervals differing from the
+         * adopted ones, rebuild back to the file's, and be overwritten again by the next
+         * advertisement, forever.
+         */
+        private Timings adoptedTimings;
 
         private Served(ApplicationConfig config, RoutedTransport transport, StateStore store) {
             this.name = config.name();

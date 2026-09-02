@@ -67,6 +67,14 @@ public final class FileConfigStore implements ConfigStore {
     private final Path applicationsDirectory;
     private final List<ConfigChangeListener> listeners = new CopyOnWriteArrayList<>();
 
+    /**
+     * Names already told that their timing keys are being ignored, so it is said once each.
+     *
+     * <p>Unbounded is safe here and nowhere else in this estate: these are filenames in a
+     * directory an operator owns, not names arriving from the network.
+     */
+    private final Set<String> warnedIgnoredTimings = new HashSet<>();
+
     private WatchService watcher;
     private volatile ConfigSnapshot current;
     private long reloadDueNanos = Long.MAX_VALUE;
@@ -497,7 +505,31 @@ public final class FileConfigStore implements ConfigStore {
         // algorithm above do. A tenant that says nothing gets what the witness was told; a tenant
         // on another network says so in its own file, without touching anyone else's.
         Timings timings = timings(properties, settings.timings());
+        warnIfTimingsIgnored(name, properties, settings);
         return new ApplicationConfig(name, secret, previous, algorithm.trim(), timings, false);
+    }
+
+    /**
+     * Says so when a file sets intervals that {@link ConfigSource#CLUSTER} will overrule.
+     *
+     * <p>Under that setting a cluster states its own profile and the witness follows it, so
+     * whatever is written here is read, parsed, and then replaced by the first thing its nodes
+     * say. One source or the other, never a merge of the two — but a key that is quietly ignored
+     * is worse than one that is refused, so it is said out loud, once per application.
+     */
+    private void warnIfTimingsIgnored(String name, Properties properties, WitnessSettings settings) {
+        if (!settings.configSource().isCluster()) {
+            return;
+        }
+        for (String key : properties.stringPropertyNames()) {
+            if (key.startsWith("timings.") && warnedIgnoredTimings.add(name)) {
+                log.warn("application '{}' sets {} but config.source=cluster, so its intervals come"
+                                + " from its own nodes. The value here is read and ignored; set"
+                                + " config.source=file to have this file decide instead.",
+                        name, key);
+                return;
+            }
+        }
     }
 
     /**

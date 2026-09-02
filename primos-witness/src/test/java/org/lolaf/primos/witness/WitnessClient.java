@@ -98,7 +98,14 @@ final class WitnessClient implements AutoCloseable {
      * {@code ConfigSource.CLUSTER}. LAN values, since nothing here is testing the numbers.
      */
     void announceConfig(WitnessServer server) {
-        write(encoder.nodeConfig(send, 0L, 50, 300, 600, 1000, 3));
+        announceConfig(server, 50, 300, 600, 1000, 3);
+    }
+
+    /** States a particular profile, for the tests about which one a witness ends up running. */
+    void announceConfig(WitnessServer server, int heartbeat, int electionMin, int electionMax,
+                        int probe, int failureThreshold) {
+        write(encoder.nodeConfig(send, 0L, heartbeat, electionMin, electionMax, probe,
+                failureThreshold));
         server.runOnce(Duration.ofMillis(20).toNanos());
         server.runOnce(0L);
     }

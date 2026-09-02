@@ -147,6 +147,24 @@ public final class ElectionNode implements MessageHandler {
     private long departuresObserved;
     private long timingMismatches;
 
+    /**
+     * The intervals a peer most recently stated, assembled and validated — witness only, null
+     * until one arrives.
+     *
+     * <p><strong>This node never reads it.</strong> It is published for an owner that has been
+     * told to follow the cluster it serves, and publishing is the whole of what happens here: the
+     * report-never-act rule that governs {@link #onNodeConfig} is untouched, because acting on
+     * this is a decision taken outside, by something that knows whether its operator asked for it.
+     *
+     * <p>Last valid statement wins. A cluster whose own nodes disagree is already being told so at
+     * ERROR by every one of them, and a witness arbitrating between them would be settling a
+     * dispute it has strictly less information about than they do.
+     */
+    @Getter
+    private Timings observedTimings;
+
+    private long unusableNodeConfigs;
+
 
     public ElectionNode(ClusterConfig config,
                         StateStore store,
@@ -640,6 +658,16 @@ public final class ElectionNode implements MessageHandler {
         if (term > currentTerm) {
             stepDown(term);
         }
+        // Before the peer lookup, deliberately. A witness learns its voters from traffic, so a
+        // node that has just stated its configuration is not in the table until this datagram has
+        // finished being handled — and under ConfigSource.CLUSTER that first statement is the one
+        // that created the application, so requiring a known sender would discard precisely the
+        // message the whole mode is built on. Same shape as the reply that went nowhere because
+        // confirmSender had not run yet.
+        if (config.isWitness()) {
+            recordObservedTimings(senderId, heartbeatMillis, electionMinMillis, electionMaxMillis,
+                    probeMillis, failureThreshold);
+        }
         TrackedPeer probe = trackedPeer(senderId);
         if (probe == null) {
             return;
@@ -672,6 +700,56 @@ public final class ElectionNode implements MessageHandler {
                 timings.electionTimeoutMin().toMillis(), timings.electionTimeoutMax().toMillis(),
                 probeMillis, timings.probeInterval().toMillis(),
                 failureThreshold, timings.failureThreshold());
+    }
+
+    /**
+     * Assembles what a peer stated into a {@link Timings}, so an owner can read one value.
+     *
+     * <p>All five are taken together rather than the one that changes a witness's mind, because a
+     * set built from a valid profile is internally consistent and a field spliced into another
+     * profile need not be: a witness on WAN intervals taking a LAN cluster's 300ms
+     * {@code electionTimeoutMin} beside its own 200ms heartbeat is below the five-heartbeat floor
+     * and would not build at all.
+     *
+     * <p>{@code advertisementInterval} is not on the wire — it only sets how often a node restates
+     * values that cannot change — so this node's own is kept, raised to the stated probe interval
+     * where that is longer, since a profile may not advertise faster than it probes.
+     *
+     * <p>Validation is {@link Timings}' own, which is the whole of the guard and is enough. It
+     * rejects a set whose relationships do not hold; a set whose relationships do hold can only be
+     * as wrong as the cluster that is running it, and that cluster has already broken itself worse
+     * than it broke anyone watching.
+     */
+    private void recordObservedTimings(int senderId, int heartbeatMillis, int electionMinMillis,
+                                       int electionMaxMillis, int probeMillis,
+                                       int failureThreshold) {
+        try {
+            Duration probe = Duration.ofMillis(probeMillis);
+            Duration advertisement = timings.advertisementInterval().compareTo(probe) < 0
+                    ? probe
+                    : timings.advertisementInterval();
+            Timings stated = Timings.builder()
+                    .heartbeatInterval(Duration.ofMillis(heartbeatMillis))
+                    .electionTimeoutMin(Duration.ofMillis(electionMinMillis))
+                    .electionTimeoutMax(Duration.ofMillis(electionMaxMillis))
+                    .probeInterval(probe)
+                    .advertisementInterval(advertisement)
+                    .failureThreshold(failureThreshold)
+                    .build();
+            observedTimings = stated;
+        } catch (RuntimeException e) {
+            unusableNodeConfigs++;
+            log.warn("cluster '{}': node {} stated intervals that do not hold together and were"
+                            + " ignored: {}",
+                    config.applicationName(), senderId, e.getMessage());
+        }
+    }
+
+    /**
+     * Node configs discarded because the intervals they stated could not form a valid profile.
+     */
+    public long unusableNodeConfigs() {
+        return unusableNodeConfigs;
     }
 
     @Override

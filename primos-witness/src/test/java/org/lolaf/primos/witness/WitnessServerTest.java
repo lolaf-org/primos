@@ -297,6 +297,108 @@ class WitnessServerTest {
     }
 
     @Test
+    void cluster_mode_follows_the_intervals_a_cluster_states() {
+        settings("config.source=cluster\nsecret=" + SECRET);
+        start();
+
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server, 200, 1500, 3000, 2000, 4);
+
+            // Asserted through the witness's own advertisement rather than by reaching into the
+            // server: what matters is that the cluster is told the witness now runs its profile.
+            WitnessClient.Reply back = orders.awaitNodeConfig(server);
+
+            assertThat(back).as("the witness never advertised back").isNotNull();
+            assertThat(back.heartbeatMillis).isEqualTo(200);
+            assertThat(back.electionMinMillis).isEqualTo(1500);
+            assertThat(back.electionMaxMillis).isEqualTo(3000);
+            assertThat(back.probeMillis).isEqualTo(2000);
+            assertThat(back.failureThreshold).isEqualTo(4);
+        }
+    }
+
+    @Test
+    void file_mode_ignores_the_intervals_a_cluster_states() {
+        settings(String.join("\n", "config.source=file", "secret=" + SECRET,
+                "timings.heartbeat.millis=20",
+                "timings.election.min.millis=100",
+                "timings.election.max.millis=200",
+                "timings.probe.millis=100",
+                "timings.advertisement.millis=100",
+                "timings.failure.threshold=3"));
+        application("orders");
+        start();
+
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server, 200, 1500, 3000, 2000, 4);
+
+            WitnessClient.Reply back = orders.awaitNodeConfig(server);
+
+            assertThat(back).isNotNull();
+            assertThat(back.heartbeatMillis)
+                    .as("an operator who forbade automatic change must not be overruled by a"
+                            + " datagram; the mismatch is reported and nothing else")
+                    .isEqualTo(20);
+            assertThat(back.electionMinMillis).isEqualTo(100);
+        }
+    }
+
+    @Test
+    void two_clusters_stating_different_intervals_each_get_their_own() {
+        settings("config.source=cluster\nsecret=" + SECRET);
+        start();
+
+        try (WitnessClient orders = client("orders", 1);
+             WitnessClient billing = client("billing", 2)) {
+            orders.announceConfig(server, 20, 100, 200, 100, 3);
+            billing.announceConfig(server, 200, 1500, 3000, 2000, 5);
+
+            WitnessClient.Reply toOrders = orders.awaitNodeConfig(server);
+            WitnessClient.Reply toBilling = billing.awaitNodeConfig(server);
+
+            assertThat(toOrders).isNotNull();
+            assertThat(toBilling).isNotNull();
+            assertThat(toOrders.heartbeatMillis)
+                    .as("following one tenant must not retune every other tenant")
+                    .isEqualTo(20);
+            assertThat(toBilling.heartbeatMillis).isEqualTo(200);
+            assertThat(toBilling.failureThreshold).isEqualTo(5);
+        }
+    }
+
+    @Test
+    void intervals_that_do_not_hold_together_are_ignored_rather_than_adopted() {
+        // The advertisement interval is not on the wire, so a witness keeps its own — and this
+        // test needs two of them. Both profiles here are deliberately fast so it does not spend
+        // thirty seconds waiting for the second.
+        settings(String.join("\n", "config.source=cluster", "secret=" + SECRET,
+                "timings.heartbeat.millis=20",
+                "timings.election.min.millis=100",
+                "timings.election.max.millis=200",
+                "timings.probe.millis=100",
+                "timings.advertisement.millis=200",
+                "timings.failure.threshold=3"));
+        start();
+
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server, 20, 100, 200, 100, 3);
+            assertThat(orders.awaitNodeConfig(server)).isNotNull();
+
+            // 300ms is below the five-heartbeat floor for a 200ms heartbeat, so this set could
+            // never have been built by a running node and is not one this witness will adopt.
+            orders.announceConfig(server, 200, 300, 600, 1000, 3);
+
+            WitnessClient.Reply back = orders.awaitNodeConfig(server);
+
+            assertThat(back).isNotNull();
+            assertThat(back.heartbeatMillis)
+                    .as("an unusable profile leaves the last good one in force")
+                    .isEqualTo(20);
+            assertThat(back.electionMinMillis).isEqualTo(100);
+        }
+    }
+
+    @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
         settings("config.source=cluster\nsecret=" + SECRET);
         start();
