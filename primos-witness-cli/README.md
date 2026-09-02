@@ -15,7 +15,7 @@ door onto it.
 |---|---|---|
 | deployment | a tarball and a systemd unit | a container image |
 | configuration | `witness.properties` and `applications/` | the same, plus Spring's environment |
-| health, metrics | the log, and `stats()` if you embed it | actuator endpoints |
+| health, metrics | the log, and a `PrimosStatsListener` if you embed it | actuator endpoints |
 | dependencies in the process | picocli and slf4j-simple | a Spring Boot application |
 | startup | a fraction of a second | a second or two |
 

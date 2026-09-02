@@ -276,8 +276,9 @@ closes the store and the transport itself: the node makes them, so the node rele
 cannot forget a vote it granted before stopping, which is what would otherwise let it vote twice in
 one term. Two things follow that are worth knowing rather than discovering:
 
-- `stats()` counts the current membership, not the process, so a restart begins the counters again
-  at zero and a scraper reads that as a counter going backwards.
+- A `PrimosStatsListener` keeps counting across a restart — it is registered on the node, not on
+  one membership of the cluster — but the durations it reports (`campaignNanos`, `leaderlessNanos`)
+  begin again with each one, which is what they should do.
 - **A `FAILED` node cannot be restarted.** It stopped because something it depends on is broken, and
   rejoining would put a node with, say, an unwritable store back where its answers count. Restart
   the process.

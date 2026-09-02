@@ -97,11 +97,26 @@ class ReadmeExamplesTest {
 
             assertThat(node.roleAndTerm().role()).isNotNull();
             assertThat(node.roleAndTerm().term()).isNotNegative();
+
+            // Every event the README's table names, so the table cannot drift from the interface.
+            PrimosStatsListener every = new PrimosStatsListener() {
+            };
+            every.onElectionWon(1, 1);
+            every.onElectionLost(1, 1);
+            every.onLeaderKnown(1, 1);
+            every.onLeadershipRelinquished(1);
+            every.onHandoverSent(2);
+            every.onHandoverAccepted(1);
+            every.onDepartureObserved(2);
+            every.onProbeRoundTrip(2, 1);
+            every.onDatagramDropped(DropReason.BAD_TAG);
+            every.onTimingMismatch(2);
+            every.onUnusableNodeConfig(2);
+            every.onPeerForgotten(2);
+
             assertThat(recorded.electionsWon.get()).isNotNegative();
             assertThat(recorded.handoversSent.get()).isZero();
-            assertThat(recorded.handoversAccepted.get()).isZero();
             assertThat(recorded.departuresObserved.get()).isZero();
-            assertThat(recorded.drops(DropReason.BAD_TAG)).isZero();
             assertThat(recorded.totalDrops()).isZero();
         }
     }

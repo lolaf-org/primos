@@ -246,13 +246,55 @@ that reason.
 
 ## Observability
 
-`slf4j-api` is the only dependency, so there is no Micrometer and no metrics registry. Instead
-`node.stats()` returns an immutable snapshot to wire into whatever you already use:
+`slf4j-api` is the only dependency, so there is no Micrometer and no metrics registry. The node
+tells you what it did, as it does it, and you increment whatever you already run:
+
+```java
+PrimosNode.builder()
+        .statsListener(new PrimosStatsListener() {
+            @Override
+            public void onElectionWon(long term, long campaignNanos) {
+                failovers.record(campaignNanos);      // how long the failover actually took
+            }
+
+            @Override
+            public void onProbeRoundTrip(int peerId, long nanos) {
+                rtt.record(nanos);                     // every sample, so a p99 is possible
+            }
+
+            @Override
+            public void onDatagramDropped(DropReason reason) {
+                drops.increment(reason);
+            }
+        })
+        // ...
+```
+
+**There is no `stats()` snapshot, deliberately.** A snapshot cannot carry the three things worth
+having — a *distribution*, since a p99 needs every sample and no polling interval recovers one from
+a last-value gauge; a *duration that begins and ends between two samples*, like how long a campaign
+took or how long the cluster had no leader, which are the two numbers most wanted after a failover
+and are gone before anybody looks; and an *event already superseded*, like leadership going A to B
+to A inside one interval, which is invisible to a poller and is exactly the flap worth alerting on.
+Everything a snapshot *could* have carried, it carried twice — the node counted, and any listener
+counted the same events again.
+
+What you branch on is still a plain call: `role()`, `roleAndTerm()`, `leader()`, `isRunning()`.
+
+**The contract is harder than `PrimosListener`'s: callbacks must not block *and* must not
+allocate.** They run on the node thread and some of them run per datagram, so every method takes
+primitives and enums, there is one sink rather than a list, and there is no executor — an iterator
+or a `Runnable` per drop is the allocation the shape exists to avoid. Compose with
+`PrimosStatsListener.of(a, b)`. A listener that throws is caught and logged: a metrics binder must
+not be able to stop consensus. There is a test asserting a counting listener adds **zero** bytes a
+turn on the drop path, because otherwise the rule is only a comment.
+
+`primos-micrometer` is exactly such a listener, and the library still names no third-party type.
 
 ### Mismatched timings are reported
 
 Every node restates its intervals to its peers, and a peer whose intervals differ is logged at ERROR with both sets
-side by side, then counted in `stats().timingMismatches()`. Coming back into agreement is logged too, because during a
+side by side, and reported to `onTimingMismatch`. Coming back into agreement is logged too, because during a
 rolling change half a cluster disagrees by design and you need to see it end.
 
 The cadence follows reachability rather than a fixed clock: **while any peer has not answered, a node restates itself
@@ -271,24 +313,28 @@ tenant retune without anybody editing the witness. The argument above does not c
 about nodes chasing each other during a rolling change, and a witness is not a member of that conversation — see the
 [witness README](primos-witness/README.md).
 
-```java
-PrimosStats stats = node.stats();
-stats.role();                       // and currentTerm(), timeInRole()
-stats.electionsStarted();           // and electionsWon()
-stats.handoversSent();              // leaderships handed on at shutdown
-stats.handoversAccepted();          // times this node was told to campaign
-stats.departuresObserved();         // peers that said they were leaving
-stats.drops(DropReason.BAD_TAG);    // and every other reason, plus totalDrops()
-stats.peers();                      // per peer: reachable, lastRoundTrip, sinceLastHeard
-```
+### What gets reported
 
-Two of those answer questions a rolling deploy raises immediately. `handoversSent` against the
-number of times this node was stopped while leading is the count of deploys that cost the cluster
-an election timeout. `departuresObserved` against the peer-down events separates orderly shutdowns
-from departures merely inferred from silence — which on the JVM might have been a garbage
-collection.
+| | |
+|---|---|
+| `onElectionWon` / `onElectionLost` | with how long the campaign took, timed from the pre-vote |
+| `onLeaderKnown` | with how long the cluster had none, across every election in the outage |
+| `onLeadershipRelinquished` | CheckQuorum stood this node down — it could not reach a majority |
+| `onHandoverSent` / `onHandoverAccepted` | leadership handed on at shutdown, and taken up |
+| `onDepartureObserved` | a peer said it was going |
+| `onProbeRoundTrip` | every sample, per peer |
+| `onDatagramDropped` | with the reason |
+| `onTimingMismatch`, `onUnusableNodeConfig`, `onPeerForgotten` | configuration a peer stated |
 
-The witness server exposes the same shape per served application, so a stray cluster on a
+Two answer questions a rolling deploy raises immediately. `onHandoverSent` against the number of
+times this node was stopped while leading is the count of deploys that cost the cluster an election
+timeout. `onDepartureObserved` against the peer-down events separates orderly shutdowns from
+departures merely inferred from silence — which on the JVM might have been a garbage collection.
+
+Role, leader and peer up/down are **not** here: they are on `PrimosListener`, and a binder that
+wants both implements both. Two ways to hear one thing is how two dashboards come to disagree.
+
+The witness server registers one listener per served application, so a stray cluster on a
 witness serving whatever it hears is visible on a dashboard.
 
 ## Timing
