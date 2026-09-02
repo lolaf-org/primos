@@ -102,7 +102,8 @@ final class ApplicationNames {
      *
      * <p>This is aimed at one specific disaster. Nodes configured {@code orders} and {@code ordres}
      * drop each other's datagrams for a mismatched name, so each sees the other as unreachable and
-     * asks the witness instead. A permissive witness auto-creates <em>two</em> buckets and grants a
+     * asks the witness instead. Under {@link ConfigSource#CLUSTER} it auto-creates <em>two</em>
+     * buckets and grants a
      * vote from each — two leaders out of one typo, with the cross-talk protection hiding the
      * cause. Nothing else in the system can see that, because from every other vantage point the
      * two clusters are simply unrelated.

@@ -280,7 +280,8 @@ public final class WitnessServer implements AutoCloseable {
     /**
      * One stats snapshot per served application, the same shape a node exposes.
      *
-     * <p>Per-application rather than aggregate on purpose: on a permissive witness a stray cluster
+     * <p>Per-application rather than aggregate on purpose: under {@link ConfigSource#CLUSTER} a
+     * stray cluster
      * that nobody meant to deploy is visible here and nowhere else.
      */
     public Map<String, PrimosStats> stats() {

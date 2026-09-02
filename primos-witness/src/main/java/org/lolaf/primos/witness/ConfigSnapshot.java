@@ -50,7 +50,7 @@ public final class ConfigSnapshot {
     }
 
     /**
-     * The same settings with one more application, for permissive auto-registration.
+     * The same settings with one more application, for a name created from the cluster.
      */
     public ConfigSnapshot with(ApplicationConfig application) {
         Map<String, ApplicationConfig> extended = new LinkedHashMap<>(applications);
