@@ -611,13 +611,91 @@ class FileConfigStoreTest {
         }
     }
 
+    // ------------------------------------------------------- detecting a change
+
+    @Test
+    void a_directory_that_has_not_moved_is_not_re_read() throws IOException {
+        settings("secret.platform.value = k");
+        application("orders", "");
+
+        try (FileConfigStore store = open()) {
+            Recording changes = new Recording();
+            store.addListener(changes);
+
+            for (int tick = 0; tick < 5; tick++) {
+                assertThat(rescan(store))
+                        .as("the steady state must cost a checksum, not a parse of every file")
+                        .isFalse();
+            }
+            assertThat(changes.added).isEmpty();
+            assertThat(changes.changed).isEmpty();
+        }
+    }
+
+    @Test
+    void an_edit_of_the_same_length_is_still_noticed() throws IOException {
+        settings("bind.port=9999");
+
+        try (FileConfigStore store = open()) {
+            // Identical length, and quite possibly the same filesystem timestamp. This is an
+            // ordinary edit, and the first version of the change detector could not see it.
+            settings("bind.port=8888");
+
+            assertThat(rescan(store)).isTrue();
+            assertThat(store.current().settings().bindAddress().getPort()).isEqualTo(8888);
+        }
+    }
+
+    /**
+     * The case that silently defeats {@code WatchService}, and the reason it is gone.
+     *
+     * <p>A Kubernetes ConfigMap volume is a symlink farm: an update writes a new timestamped
+     * directory, points {@code ..data} at it and deletes the old one. A watch registered on the
+     * resolved directory is then watching something deleted — it never fires again and nothing
+     * says so. Reading through the link sees the new bytes like any other edit.
+     */
+    @Test
+    void a_swapped_symlink_target_is_noticed_the_way_a_config_map_updates() throws IOException {
+        Path real = directory.resolve("..2026_09_02_10_00_00");
+        Files.createDirectories(real);
+        Files.write(real.resolve("witness.properties"),
+                "bind.port=9999".getBytes(StandardCharsets.UTF_8));
+        Path data = directory.resolve("..data");
+        try {
+            Files.createSymbolicLink(data, real);
+            Files.deleteIfExists(directory.resolve("witness.properties"));
+            Files.createSymbolicLink(directory.resolve("witness.properties"),
+                    data.resolve("witness.properties"));
+        } catch (UnsupportedOperationException | IOException e) {
+            // A filesystem without symlinks has nothing to prove here.
+            return;
+        }
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().bindAddress().getPort()).isEqualTo(9999);
+
+            Path replacement = directory.resolve("..2026_09_02_11_00_00");
+            Files.createDirectories(replacement);
+            Files.write(replacement.resolve("witness.properties"),
+                    "bind.port=8888".getBytes(StandardCharsets.UTF_8));
+            Files.delete(data);
+            Files.createSymbolicLink(data, replacement);
+
+            assertThat(rescan(store))
+                    .as("the kubelet swaps a symlink rather than writing the file, which a watch on"
+                            + " the resolved directory never sees")
+                    .isTrue();
+            assertThat(store.current().settings().bindAddress().getPort()).isEqualTo(8888);
+        }
+    }
+
     // --------------------------------------------------------------- helpers
 
     private FileConfigStore open() {
         return new FileConfigStore(directory, clock);
     }
 
-    /** Forces a reload the way the periodic safety net would, without waiting on the filesystem. */
+    /** Advances past the check interval and runs one, which is the whole reload mechanism. */
     private boolean rescan(FileConfigStore store) {
         clock.advance(Duration.ofSeconds(31));
         return store.poll(clock.nanoTime());

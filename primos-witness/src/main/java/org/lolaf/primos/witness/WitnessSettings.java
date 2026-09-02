@@ -62,16 +62,12 @@ public final class WitnessSettings {
     private final int clusterApplicationLimit;
 
     /**
-     * Quiet period after a file change before reloading, so one save is one reload.
-     */
-    private final Duration reloadDebounce;
-
-    /**
-     * How often the configuration directory is re-read regardless of events.
+     * How often the configuration is checked for change — the whole of the reload mechanism.
      *
-     * <p>A safety net, not an optimisation: {@code WatchService} is inotify on Linux but a slow
-     * polling fallback on macOS, and does not work at all on some network filesystems. Hot reload
-     * that silently never fires is worse than none.
+     * <p>Not a safety net any more: it replaced the {@code WatchService} that used to sit above it,
+     * because a watcher that can silently stop working is worse than a check that always runs. Each
+     * tick stats the files and does nothing further unless one has moved, so this is cheap enough
+     * to be seconds rather than the half-minute it was when every tick reparsed the directory.
      */
     private final Duration rescanInterval;
 
@@ -102,7 +98,6 @@ public final class WitnessSettings {
         this.configSource = Objects.requireNonNull(builder.configSource, "configSource");
         this.keyring = Objects.requireNonNull(builder.keyring, "keyring");
         this.clusterApplicationLimit = builder.clusterApplicationLimit;
-        this.reloadDebounce = Objects.requireNonNull(builder.reloadDebounce, "reloadDebounce");
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
         this.timings = Objects.requireNonNull(builder.timings, "timings");
         this.voteLogging = builder.voteLogging;
@@ -148,16 +143,10 @@ public final class WitnessSettings {
         private int clusterApplicationLimit = 64;
 
         /**
-         * Quiet period after a file change before reloading, so one save is one reload.
-         */
-        @Setter
-        private Duration reloadDebounce = Duration.ofMillis(250);
-
-        /**
          * How often the configuration directory is re-read regardless of events.
          */
         @Setter
-        private Duration rescanInterval = Duration.ofSeconds(30);
+        private Duration rescanInterval = Duration.ofSeconds(5);
 
         /**
          * The timing profile the served nodes run with. Keep it uniform across a cluster.

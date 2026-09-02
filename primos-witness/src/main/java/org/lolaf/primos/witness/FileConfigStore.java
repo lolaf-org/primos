@@ -36,6 +36,7 @@ import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.zip.CRC32;
 
 /**
  * Configuration as a directory of properties files.
@@ -76,9 +77,11 @@ public final class FileConfigStore implements ConfigStore {
      */
     private final Set<String> warnedIgnoredTimings = new HashSet<>();
 
-    private WatchService watcher;
+    /**
+     * A checksum of the configuration as last read. A tick that produces the same one does nothing.
+     */
+    private long stamp;
     private volatile ConfigSnapshot current;
-    private long reloadDueNanos = Long.MAX_VALUE;
     private long nextRescanNanos;
     private boolean closed;
 
@@ -97,7 +100,7 @@ public final class FileConfigStore implements ConfigStore {
         this.applicationsDirectory = directory.resolve(APPLICATIONS_DIRECTORY);
         this.current = read();
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
-        startWatching();
+        this.stamp = stamp();
         logServedApplications();
     }
 
@@ -357,35 +360,29 @@ public final class FileConfigStore implements ConfigStore {
 
     @Override
     public boolean poll(long nowNanos) {
-        if (closed) {
+        if (closed || nowNanos < nextRescanNanos) {
             return false;
         }
-        drainWatchEvents(nowNanos);
-
-        boolean due = nowNanos >= reloadDueNanos || nowNanos >= nextRescanNanos;
-        if (!due) {
-            return false;
-        }
-        reloadDueNanos = Long.MAX_VALUE;
         nextRescanNanos = nowNanos + current.settings().rescanInterval().toNanos();
+
+        long seen = stamp();
+        if (seen == stamp) {
+            // The common case by an enormous margin, and it costs a handful of stats rather than
+            // parsing every file to discover nothing moved.
+            return false;
+        }
+        stamp = seen;
         return reload();
     }
 
     @Override
     public long nextCheckNanos(long nowNanos) {
-        return Math.min(reloadDueNanos, nextRescanNanos);
+        return nextRescanNanos;
     }
 
     @Override
     public void close() {
         closed = true;
-        if (watcher != null) {
-            try {
-                watcher.close();
-            } catch (IOException e) {
-                log.debug("closing the config watcher failed", e);
-            }
-        }
     }
 
     /**
@@ -470,49 +467,63 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     /**
-     * Rescans the whole directory on any event rather than interpreting individual ones.
+     * A checksum over every file the configuration is made of, names included.
      *
-     * <p>Editors and file copies produce storms of create, modify and rename events, and a
-     * whole-directory rescan is both simpler and more robust than trying to reconstruct intent
-     * from them. The debounce turns one save into one reload.
+     * <p>This replaced a {@code WatchService} on 2026-09-02, and the reason is that the watcher was
+     * never the mechanism — the periodic re-read below it always ran regardless, so the watcher only
+     * ever bought latency. It bought it in the one currency this file will not spend: it could stop
+     * working without saying so. On a Kubernetes ConfigMap it does exactly that. The volume is a
+     * symlink farm; an update writes a new timestamped directory, swaps {@code ..data} atomically
+     * and deletes the old one — so a watch registered on the resolved directory is now watching
+     * something deleted, never fires again, and says nothing. On macOS the JDK has no native backend
+     * and polls every few seconds anyway; on NFS it does nothing at all. Now bare metal, a network
+     * filesystem, macOS and a ConfigMap are one code path, with no environment in which the
+     * mechanism quietly does less than it claims.
+     *
+     * <p><strong>Content rather than size and modification time</strong>, which is what this was
+     * first written as. A test caught it immediately: changing {@code bind.port} from 9999 to 8888
+     * is the same length, and filesystem timestamps are coarse enough that two writes can share
+     * one — so an entirely ordinary edit was invisible. Reading the files is affordable precisely
+     * because this replaced something more expensive: the old design parsed every file every thirty
+     * seconds, and this reads a few kilobytes every five and parses only when something moved.
+     *
+     * <p>{@link CRC32} for the same reason {@code FileStateStore} uses it — this detects an edit,
+     * it does not defend against one. The whole directory is re-listed each time rather than only
+     * the files already known, because a file being dropped in is the case this exists for, and
+     * names are folded into the sum so that a rename with identical content still counts.
      */
-    private void drainWatchEvents(long nowNanos) {
-        if (watcher == null) {
-            return;
-        }
-        boolean sawSomething = false;
-        WatchKey key;
-        while ((key = watcher.poll()) != null) {
-            key.pollEvents();
-            key.reset();
-            sawSomething = true;
-        }
-        if (sawSomething) {
-            Duration debounce = current.settings().reloadDebounce();
-            reloadDueNanos = nowNanos + debounce.toNanos();
-        }
-    }
-
-    private void startWatching() {
-        try {
-            watcher = directory.getFileSystem().newWatchService();
-            register(directory);
-            if (Files.isDirectory(applicationsDirectory)) {
-                register(applicationsDirectory);
+    private long stamp() {
+        CRC32 sum = new CRC32();
+        absorb(sum, directory.resolve(SETTINGS_FILE));
+        if (Files.isDirectory(applicationsDirectory)) {
+            List<Path> files = new ArrayList<>();
+            try (DirectoryStream<Path> stream =
+                         Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
+                stream.forEach(files::add);
+            } catch (IOException e) {
+                // Unreadable is a state like any other: it sums differently from readable, so it
+                // reloads once and the existing keep-the-last-good-configuration path reports it.
+                sum.update('?');
+                return sum.getValue();
             }
-        } catch (IOException | UnsupportedOperationException e) {
-            log.warn("this filesystem does not support watching {}; configuration will still be"
-                            + " re-read every {}s", directory,
-                    current.settings().rescanInterval().getSeconds(), e);
-            watcher = null;
+            files.sort(Comparator.comparing(Path::toString));
+            for (Path file : files) {
+                absorb(sum, file);
+            }
         }
+        return sum.getValue();
     }
 
-    private void register(Path path) throws IOException {
-        path.register(watcher,
-                StandardWatchEventKinds.ENTRY_CREATE,
-                StandardWatchEventKinds.ENTRY_MODIFY,
-                StandardWatchEventKinds.ENTRY_DELETE);
+    private static void absorb(CRC32 sum, Path file) {
+        sum.update(file.getFileName().toString().getBytes(StandardCharsets.UTF_8));
+        try {
+            // Read through the symlink, which is what makes a ConfigMap work: after a ..data swap
+            // the resolved file is a different inode, and its bytes are what this is asking about.
+            sum.update(Files.readAllBytes(file));
+        } catch (IOException e) {
+            // Absent or unreadable sums differently from present, which is the whole requirement.
+            sum.update('!');
+        }
     }
 
     private ConfigSnapshot read() {
@@ -553,8 +564,7 @@ public final class FileConfigStore implements ConfigStore {
         builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
-        builder.reloadDebounce(Duration.ofMillis(intValue(properties, "reload.debounce.millis", 250)));
-        builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 30)));
+        builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 5)));
         builder.timings(timings(properties, Timings.lan()));
         builder.voteLogging(booleanValue(properties, "vote.logging", true));
         return builder.build();

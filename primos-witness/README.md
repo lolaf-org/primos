@@ -199,8 +199,7 @@ which one shared file makes impossible.
 | `secret.<name>.applications` | none — claims nothing | yes |
 | `timings.*` | see below | yes — and read but ignored under `config.source=cluster` |
 | `vote.logging` | `true` | **no** — read at startup |
-| `reload.debounce.millis` | `250` | yes |
-| `reload.rescan.seconds` | `30` | yes |
+| `reload.rescan.seconds` | `5` | yes |
 
 `timings.profile` is `lan` or `wan` — a named profile rather than several separate intervals,
 because it is the *relationships* between them that have to hold. A witness genuinely on a third
@@ -385,9 +384,14 @@ The configuration directory is re-read while the server runs. **This is the poin
 because restarting a witness is the one genuinely risky operation in its lifecycle: while it is
 down, every two-node cluster it serves is back to tolerating zero failures.
 
-- A whole-directory rescan on any file event, debounced ~250ms, so one save is one reload.
-- A periodic rescan (~30s) as a genuine safety net — file watching is inotify on Linux but a slow
-  polling fallback on macOS, and does not work at all on some network filesystems.
+- **Every few seconds the configuration is checksummed**, and nothing further happens unless a
+  file has actually changed. That is the whole mechanism — there is no file watcher above it.
+- **There used to be one, and it was deleted because it could stop working silently.** On a
+  Kubernetes ConfigMap the volume is a symlink farm: an update writes a new timestamped directory,
+  swaps `..data` atomically and deletes the old one, so a watch registered on the resolved
+  directory is watching something deleted. It never fires again and nothing says so. On macOS the
+  JDK polls anyway; on NFS it does nothing at all. A check that always runs is worth more than a
+  notification that might have stopped.
 - **A malformed file never takes down the running configuration.** The candidate is parsed and
   validated whole, and published only if it is good; otherwise the last good configuration keeps
   serving and the failure is logged loudly.
