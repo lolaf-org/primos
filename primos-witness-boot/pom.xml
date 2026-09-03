@@ -98,6 +98,33 @@
     <build>
         <plugins>
             <!--
+                The parent pins annotationProcessorPaths for Lombok, and that switch turns OFF
+                discovery of processors on the classpath — so spring-boot-configuration-processor,
+                declared as a dependency below, silently never ran and this artifact shipped no
+                configuration metadata at all. In the packaging whose selling point is configuration
+                from the environment, that is the IDE completion an operator most wants. Naming both
+                here restores it; Lombok has to be repeated because this replaces the list rather
+                than adding to it.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                            <version>${spring-boot.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!--
                 The runnable jar, and phase 18 builds its image from the layers rather than from
                 the whole thing. Nothing here talks to a Docker daemon: ./mvnw verify must stay
                 green on a machine that has none.
