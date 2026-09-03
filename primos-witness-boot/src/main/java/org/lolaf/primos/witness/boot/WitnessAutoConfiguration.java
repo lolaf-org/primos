@@ -30,6 +30,8 @@ import org.springframework.core.env.Environment;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Builds a {@link WitnessServer} from {@code primos.witness.*} and the configuration directory,
@@ -49,15 +51,19 @@ import java.time.Duration;
 public class WitnessAutoConfiguration {
 
     /**
-     * The served set and the keys, re-read while the server runs.
+     * The served set and the keys.
      *
-     * <p>A file store rather than the properties Spring has already bound, and the reason is the
-     * one thing this packaging could quietly lose: onboarding a cluster must never need a restart.
-     * See {@link WitnessProperties}.
+     * <p>A file store by default, and the reason is the one thing this packaging could quietly
+     * lose: onboarding a cluster must never need a restart. The properties store is opt-in and says
+     * what it costs when it is chosen. See {@link WitnessProperties}.
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
     public ConfigStore witnessConfigStore(WitnessProperties properties) {
+        if (properties.configStore() == WitnessProperties.Store.PROPERTIES) {
+            return new PropertiesConfigStore(properties);
+        }
+        refuseSettingsThatTheFileOwns(properties);
         if (!Files.isDirectory(properties.configDirectory())) {
             // Checked here rather than left to the first read, so the message names the property
             // an operator has to fix instead of arriving as a file-not-found several layers down.
@@ -66,6 +72,39 @@ public class WitnessAutoConfiguration {
                     + " It must hold witness.properties and an applications/ directory.");
         }
         return new FileConfigStore(properties.configDirectory(), MonotonicClock.SYSTEM);
+    }
+
+    /**
+     * Refuses to start when settings that only the properties store reads are set under the file
+     * store.
+     *
+     * <p>Ignoring them would be the failure this module's whole precedence rule exists to prevent,
+     * arriving from the other direction: an operator sets {@code primos.witness.state-directory},
+     * nothing complains, and the state goes wherever {@code witness.properties} says instead — which
+     * is discovered when a restart cannot find a vote. There is no half of this worth guessing at,
+     * so it is a refusal rather than a warning.
+     */
+    private void refuseSettingsThatTheFileOwns(WitnessProperties properties) {
+        List<String> misplaced = new ArrayList<>();
+        if (properties.stateDirectory() != null) {
+            misplaced.add("state-directory");
+        }
+        if (!properties.applications().isEmpty()) {
+            misplaced.add("applications");
+        }
+        if (!properties.keys().isEmpty()) {
+            misplaced.add("keys");
+        }
+        if (misplaced.isEmpty()) {
+            return;
+        }
+        throw new IllegalStateException("primos.witness." + String.join(", primos.witness.",
+                misplaced) + " " + (misplaced.size() == 1 ? "is" : "are") + " only read with"
+                + " primos.witness.config-store=properties. Under the default file store these come"
+                + " from witness.properties in the configuration directory, which is re-read while"
+                + " the server runs — so binding them here would freeze them at boot and change"
+                + " nothing an operator could see. Move them into witness.properties, or switch the"
+                + " store and accept that onboarding a cluster then needs a restart.");
     }
 
     /**
