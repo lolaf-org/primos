@@ -22,6 +22,7 @@ import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
@@ -104,6 +105,20 @@ public class WitnessAutoConfiguration {
         Duration stopTimeout = environment.getProperty("spring.lifecycle.timeout-per-shutdown-phase",
                 Duration.class, Duration.ofSeconds(30));
         return new WitnessServerLifecycle(server, stopTimeout);
+    }
+
+    /**
+     * The health endpoint's view of this witness.
+     *
+     * <p>Contributed only when the application actually has actuator health on its classpath, so
+     * the module still works in a deployment that has stripped it.
+     */
+    @Bean
+    @ConditionalOnClass(HealthIndicator.class)
+    @ConditionalOnMissingBean
+    public WitnessHealthIndicator witnessHealthIndicator(WitnessServer server,
+                                                         WitnessServerLifecycle lifecycle) {
+        return new WitnessHealthIndicator(server, lifecycle);
     }
 
     /**

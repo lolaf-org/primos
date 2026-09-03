@@ -123,6 +123,15 @@ class WitnessAutoConfigurationTest {
                         .hasMessageContaining("primos.witness.config-directory"));
     }
 
+    @Test
+    void contributes_the_health_indicator_and_the_lifecycle() {
+        runner().withPropertyValues(configured("primos.witness.bind.host=127.0.0.1",
+                "primos.witness.bind.port=0")).run(context -> {
+            assertThat(context).hasSingleBean(WitnessServerLifecycle.class);
+            assertThat(context).hasSingleBean(WitnessHealthIndicator.class);
+        });
+    }
+
     /**
      * How the opt-in properties-only store arrives without a switch in the auto-configuration.
      */

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.lolaf.primos</groupId>
@@ -19,18 +18,24 @@
 
     <properties>
         <automatic.module.name>org.lolaf.primos.witness.boot</automatic.module.name>
+        <!-- Spring Boot's floor, as primos-spring-boot-starter is and for the same reason. The
+             library this wraps stays on 11 for everyone else. -->
         <maven.compiler.release>17</maven.compiler.release>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <dependency>
-                <groupId>org.junit</groupId>
-                <artifactId>junit-bom</artifactId>
-                <version>${junit.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
+            <!--
+                The Boot BOM alone, and first, which is the OPPOSITE of primos-spring-boot-starter
+                beside it. That is not a matter of taste. Maven takes the first match in
+                dependencyManagement, so this hands Boot the JUnit version along with everything
+                else. The starter tests itself with ApplicationContextRunner and never loads
+                SpringExtension, so the estate's own JUnit is fine there; this module runs the
+                Spring TestContext framework, and spring-test is version-locked to the JUnit it was
+                built against. With the estate's JUnit winning, every @SpringBootTest here died on a
+                NoSuchMethodError inside JUnit's own extension API — a failure that says nothing
+                whatever about the cause.
+            -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -47,9 +52,35 @@
             <artifactId>primos-witness</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!--
+            This one depends on spring-boot-starter and therefore takes Logback, where
+            primos-spring-boot-starter deliberately does not. The rule that separates them is who
+            inherits the choice: that module is a library and must leave an application its own
+            backend, while this is an application and nobody depends on it. It is the same argument
+            that puts slf4j-simple in primos-witness-cli, reaching the same answer for a packaging
+            whose selling point is configuration from the environment — logging.level.* and Boot's
+            structured logging are worth having in a container, and slf4j-simple honours neither.
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!--
+            The endpoint an operator and a readiness check read. It brings a web server with it,
+            which is a real cost on a process whose startup window is the window its two-node
+            clusters tolerate zero failures — and it is also most of why this packaging exists, so
+            it is paid deliberately and measured rather than assumed. What it must NOT be wired to
+            is a liveness probe: restarting a witness is the one genuinely risky operation in its
+            lifecycle, so a probe that can be wrong is a mechanism for causing the outage it is
+            watching for. Readiness, yes.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -66,6 +97,11 @@
 
     <build>
         <plugins>
+            <!--
+                The runnable jar, and phase 18 builds its image from the layers rather than from
+                the whole thing. Nothing here talks to a Docker daemon: ./mvnw verify must stay
+                green on a machine that has none.
+            -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
