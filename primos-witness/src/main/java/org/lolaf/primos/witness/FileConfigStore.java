@@ -565,7 +565,7 @@ public final class FileConfigStore implements ConfigStore {
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 5)));
-        builder.timings(timings(properties, Timings.lan()));
+        builder.defaultTimings(timings(properties, Timings.lan()));
         builder.voteLogging(booleanValue(properties, "vote.logging", true));
         return builder.build();
     }
@@ -579,7 +579,7 @@ public final class FileConfigStore implements ConfigStore {
         // Per application, falling back to the witness-wide value. A tenant that says nothing gets
         // what the witness was told; a tenant on another network says so in its own file, without
         // touching anyone else's.
-        Timings timings = timings(properties, settings.timings());
+        Timings timings = timings(properties, settings.defaultTimings());
         warnIfTimingsIgnored(name, properties, settings);
         return new ApplicationConfig(name, timings, false);
     }

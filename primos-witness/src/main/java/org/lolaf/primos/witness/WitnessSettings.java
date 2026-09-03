@@ -72,14 +72,29 @@ public final class WitnessSettings {
     private final Duration rescanInterval;
 
     /**
-     * The timing profile the served nodes run with.
+     * The witness-wide <em>default</em> intervals — not, despite the obvious reading, what any node
+     * is run with.
+     *
+     * <p>Worth stating plainly, because nothing consumes this at serving time and it looks dead:
+     * every served node takes its intervals from its own {@link ApplicationConfig}, since a witness
+     * serves clusters it does not own and one of them on another network must not decide the
+     * intervals for all of them. This value is what an {@code ApplicationConfig} falls back to, at
+     * the two places one is built:
+     *
+     * <ul>
+     *   <li>{@link FileConfigStore}, for an application whose file names no intervals of its own —
+     *       a tenant that says nothing gets what the witness was told;</li>
+     *   <li>auto-registration under {@link ConfigSource#CLUSTER}, where an application created from
+     *       a datagram has no file at all. It runs these until its nodes state their own, which
+     *       under that setting this witness then follows.</li>
+     * </ul>
      *
      * <p>Defaults to {@link Timings#lan()}, matching the library, because a witness whose pre-vote
      * window differs from its cluster's answers questions the cluster is not asking. A witness
      * genuinely on a third network wants {@link Timings#wan()}: a 50ms WAN round trip makes the
      * LAN election timeout marginal.
      */
-    private final Timings timings;
+    private final Timings defaultTimings;
 
     /**
      * Whether the served nodes log who voted for whom at INFO rather than DEBUG.
@@ -99,7 +114,7 @@ public final class WitnessSettings {
         this.keyring = Objects.requireNonNull(builder.keyring, "keyring");
         this.clusterApplicationLimit = builder.clusterApplicationLimit;
         this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
-        this.timings = Objects.requireNonNull(builder.timings, "timings");
+        this.defaultTimings = Objects.requireNonNull(builder.defaultTimings, "defaultTimings");
         this.voteLogging = builder.voteLogging;
     }
 
@@ -149,10 +164,11 @@ public final class WitnessSettings {
         private Duration rescanInterval = Duration.ofSeconds(5);
 
         /**
-         * The timing profile the served nodes run with. Keep it uniform across a cluster.
+         * What an application that names no intervals of its own falls back to. Keep it uniform
+         * across a cluster.
          */
         @Setter
-        private Timings timings = Timings.lan();
+        private Timings defaultTimings = Timings.lan();
 
         /**
          * Whether the served nodes log who voted for whom at INFO rather than DEBUG. On by default.

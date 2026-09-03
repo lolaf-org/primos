@@ -44,6 +44,7 @@ import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -150,7 +151,16 @@ public final class WitnessServer implements AutoCloseable {
     private final DatagramChannel channel;
     private final Selector selector;
     private final ByteBuffer receiveBuffer = ByteBuffer.allocate(RECEIVE_CAPACITY);
-    private final Map<String, Served> served = new LinkedHashMap<>();
+    /**
+     * The served applications, written only by the server thread and read from others.
+     *
+     * <p>Concurrent because the diagnostics below are read from wherever somebody asks — a health
+     * endpoint on an HTTP thread, most realistically — while this thread is adding an application a
+     * reload just found. A plain map throws {@link java.util.ConcurrentModificationException} at the
+     * reader when those coincide, which is a health check that fails <em>because</em> a tenant was
+     * being onboarded. The loop's own use is unchanged: one writer, and lookups still hash.
+     */
+    private final Map<String, Served> served = new ConcurrentHashMap<>();
     private final Set<String> namesSeen = new HashSet<>();
 
     private volatile boolean stopped;
@@ -294,7 +304,9 @@ public final class WitnessServer implements AutoCloseable {
      * The applications being served right now, auto-registered ones included.
      */
     public Set<String> servedApplications() {
-        return Collections.unmodifiableSet(new LinkedHashSet<>(served.keySet()));
+        // Sorted rather than in insertion order: a concurrent map has no order of its own, and a
+        // set of names that reshuffles between two reads is a diagnostic nobody can diff.
+        return Collections.unmodifiableSet(new TreeSet<>(served.keySet()));
     }
 
     /**
@@ -325,7 +337,7 @@ public final class WitnessServer implements AutoCloseable {
      * since that rebuilds its node.
      */
     public Set<String> quarantinedApplications() {
-        Set<String> quarantined = new LinkedHashSet<>();
+        Set<String> quarantined = new TreeSet<>();
         for (Served application : served.values()) {
             if (application.failed) {
                 quarantined.add(application.name);
@@ -533,7 +545,7 @@ public final class WitnessServer implements AutoCloseable {
         autoRegistrations++;
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
-        return open(new ApplicationConfig(application, settings.timings(), true));
+        return open(new ApplicationConfig(application, settings.defaultTimings(), true));
     }
 
     /**
@@ -885,7 +897,14 @@ public final class WitnessServer implements AutoCloseable {
 
         private ApplicationConfig config;
         private ElectionNode node;
-        private boolean failed;
+
+        /**
+         * Volatile for the same reason the map is concurrent: this is written by the server thread
+         * when a node fails and read by whoever asks what is quarantined. Without it there is no
+         * guarantee a reader ever sees the change, and "the health endpoint never noticed" is a
+         * worse failure than a stale answer.
+         */
+        private volatile boolean failed;
 
         /**
          * The profile this cluster stated, once it has, under {@link ConfigSource#CLUSTER}.

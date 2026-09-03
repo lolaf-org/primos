@@ -221,7 +221,7 @@ class FileConfigStoreTest {
     void nothing_configured_is_the_lan_profile() throws IOException {
         application("orders", "");
 
-        assertThat(open().current().settings().timings()).isEqualTo(Timings.lan());
+        assertThat(open().current().settings().defaultTimings()).isEqualTo(Timings.lan());
     }
 
     @Test
@@ -229,7 +229,7 @@ class FileConfigStoreTest {
         settings("timings.profile=wan");
         application("orders", "");
 
-        assertThat(open().current().settings().timings()).isEqualTo(Timings.wan());
+        assertThat(open().current().settings().defaultTimings()).isEqualTo(Timings.wan());
     }
 
     /**
@@ -249,7 +249,7 @@ class FileConfigStoreTest {
                 "timings.failure.threshold=5"));
         application("orders", "");
 
-        Timings timings = open().current().settings().timings();
+        Timings timings = open().current().settings().defaultTimings();
 
         assertThat(timings).isEqualTo(Timings.builder()
                 .heartbeatInterval(Duration.ofMillis(250))
