@@ -59,6 +59,28 @@ public interface PrimosStatsListener {
     };
 
     /**
+     * One sink that feeds several, since there is deliberately no list to add to.
+     *
+     * <p>Allocation-free per event: the array is built once, here, and walked by index.
+     */
+    static PrimosStatsListener of(PrimosStatsListener... listeners) {
+        PrimosStatsListener[] sinks = listeners.clone();
+        return new CompositeStatsListener(sinks);
+    }
+
+    /**
+     * Wraps a sink so that an exception from it is logged rather than reaching the algorithm's
+     * catch-all, which would mark the node permanently {@code FAILED} — a bug in a counter costing
+     * a cluster a voter.
+     *
+     * @param application the cluster name, for the log line when a call does throw
+     * @param nodeId      which node's listener threw, since a witness runs one per served cluster
+     */
+    static PrimosStatsListener guarded(PrimosStatsListener sink, String application, int nodeId) {
+        return GuardedStatsListener.guard(sink, application, nodeId);
+    }
+
+    /**
      * This node became leader.
      *
      * @param term          the term it won
@@ -161,15 +183,5 @@ public interface PrimosStatsListener {
      * configured peer set.
      */
     default void onPeerForgotten(int peerId) {
-    }
-
-    /**
-     * One sink that feeds several, since there is deliberately no list to add to.
-     *
-     * <p>Allocation-free per event: the array is built once, here, and walked by index.
-     */
-    static PrimosStatsListener of(PrimosStatsListener... listeners) {
-        PrimosStatsListener[] sinks = listeners.clone();
-        return new CompositeStatsListener(sinks);
     }
 }

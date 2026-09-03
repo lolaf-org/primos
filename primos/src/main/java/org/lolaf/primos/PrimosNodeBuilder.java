@@ -211,7 +211,7 @@ public final class PrimosNodeBuilder {
                 stopTimeout.toNanos(),
                 // Guarded here rather than inside the algorithm: a metrics binder that throws must
                 // not reach the node's catch-all and cost the cluster a voter.
-                GuardedStatsListener.guard(statsListener, clusterConfig.applicationName(),
+                PrimosStatsListener.guarded(statsListener, clusterConfig.applicationName(),
                         clusterConfig.nodeId()));
         for (PrimosListener listener : listeners) {
             // Added before the node starts, so none of them can miss the first transition.

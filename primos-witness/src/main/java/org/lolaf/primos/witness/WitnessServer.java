@@ -21,6 +21,8 @@ import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PrimosListener;
+import org.lolaf.primos.PrimosStatsListener;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.core.ElectionNode;
@@ -43,6 +45,7 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 /**
  * The standalone witness: one socket, one thread, and an ordinary voter per served application.
@@ -111,6 +114,13 @@ public final class WitnessServer implements AutoCloseable {
      */
     private static final long MAX_WAIT_NANOS = TimeUnit.SECONDS.toNanos(1);
 
+    /**
+     * A witness has nobody to tell about role changes: it never leads, and its transitions are
+     * already logged. Shared rather than one per served application, because it holds nothing.
+     */
+    private static final PrimosListener NO_EVENTS = new PrimosListener() {
+    };
+
     private final ConfigStore configStore;
     private final MonotonicClock clock;
     private final Random random;
@@ -124,6 +134,15 @@ public final class WitnessServer implements AutoCloseable {
      * files, because a caller that passed it meant it.
      */
     private final Timings timingsOverride;
+
+    /**
+     * Where each served application's counters go, asked once per application.
+     *
+     * <p>One sink per cluster rather than one for the server, because every number here is
+     * meaningless summed across tenants: a witness runs an {@code ElectionNode} per served
+     * application, and untagged meters would add one tenant's dropped datagrams to another's.
+     */
+    private final Function<String, PrimosStatsListener> statsListeners;
 
     private final boolean voteLogging;
     private final int nodeId;
@@ -166,6 +185,7 @@ public final class WitnessServer implements AutoCloseable {
         ConfigSnapshot snapshot = configStore.current();
         WitnessSettings settings = snapshot.settings();
         this.timingsOverride = builder.timings;
+        this.statsListeners = builder.statsListeners;
         this.voteLogging = settings.voteLogging();
         this.stateStores = builder.stateStores != null
                 ? builder.stateStores
@@ -281,12 +301,37 @@ public final class WitnessServer implements AutoCloseable {
      * What role one served application's node is in.
      *
      * <p>Always {@code FOLLOWER} on a healthy witness — it never campaigns and never leads — so
-     * this exists for tests and for a diagnostic, not for a decision. Counters left with
-     * {@code PrimosStats}: a witness registers a {@link org.lolaf.primos.PrimosStatsListener} per
-     * served application instead, tagged by name like everything else it does.
+     * this exists for tests and for a diagnostic, not for a decision. It does not report a
+     * quarantined application either, which still reads {@code FOLLOWER}; ask
+     * {@link #quarantinedApplications()} for that. Counters are not here at all: a witness
+     * registers a {@link PrimosStatsListener} per served application, tagged by name like
+     * everything else it does.
      */
     public Role role(String application) {
         return require(application).node.role();
+    }
+
+    /**
+     * The applications this witness has stopped serving because their node failed, most often
+     * because their state could no longer be made durable.
+     *
+     * <p>For a health endpoint, and shaped for the one rule that matters there: a quarantined
+     * tenant belongs in the detail, never in the verdict. A witness serving fifty clusters with
+     * one broken is doing its job for forty-nine, and reporting it as unhealthy would remove all
+     * fifty from rotation over one of them — which is the outage the quarantine exists to avoid,
+     * arrived at by a different route.
+     *
+     * <p>Empty on a healthy witness. A name leaves this set if the application is reconfigured,
+     * since that rebuilds its node.
+     */
+    public Set<String> quarantinedApplications() {
+        Set<String> quarantined = new LinkedHashSet<>();
+        for (Served application : served.values()) {
+            if (application.failed) {
+                quarantined.add(application.name);
+            }
+        }
+        return Collections.unmodifiableSet(quarantined);
     }
 
     /**
@@ -594,8 +639,9 @@ public final class WitnessServer implements AutoCloseable {
                     + " precisely the failure it was deployed to prevent, so this is refused"
                     + " rather than warned about.");
         }
-        Served opened = new Served(application, newTransport(application.name()), store);
-        opened.node = newNode(application, opened.transport, store, null);
+        Served opened = new Served(application, newTransport(application.name()), store,
+                statsListenerFor(application.name()));
+        opened.node = newNode(application, opened.transport, store, null, opened.stats);
         served.put(application.name(), opened);
         opened.node.start();
         return opened;
@@ -617,7 +663,7 @@ public final class WitnessServer implements AutoCloseable {
         application.config = updated;
         application.failed = false;
         application.node = newNode(updated, application.transport, application.store,
-                application.adoptedTimings);
+                application.adoptedTimings, application.stats);
         application.node.start();
         for (Map.Entry<Integer, InetSocketAddress> known : application.transport.endpoints()) {
             application.node.learnPeer(Peer.application(known.getKey(),
@@ -668,12 +714,45 @@ public final class WitnessServer implements AutoCloseable {
         rebuild(application, application.config);
     }
 
+    /**
+     * The sink for one application, resolved once when it starts being served and kept across
+     * every rebuild.
+     *
+     * <p>Once per application rather than once per node, because a node is rebuilt whenever a
+     * secret rotates or a cluster states new intervals, and a binder that registers its meters
+     * when it is created would register them again on each rebuild.
+     *
+     * <p>A factory that throws or returns null is a bug in the embedding application, and it is
+     * reported as one — but it does not stop this witness serving. The rule the SPI already states
+     * for a listener that throws holds for the call that produces it: a metrics binder must not be
+     * able to take a cluster's witness away from it.
+     */
+    private PrimosStatsListener statsListenerFor(String application) {
+        PrimosStatsListener sink;
+        try {
+            sink = statsListeners.apply(application);
+        } catch (RuntimeException e) {
+            log.error("the stats listener factory failed for application '{}'; serving it without"
+                    + " counters", application, e);
+            return PrimosStatsListener.NONE;
+        }
+        if (sink == null) {
+            log.error("the stats listener factory returned null for application '{}'; serving it"
+                    + " without counters", application);
+            return PrimosStatsListener.NONE;
+        }
+        // Guarded at the boundary, using the library's own wrapper rather than a second copy of
+        // it here: an exception from a counter would otherwise reach runOnce's catch-all, and on a
+        // witness that means this tenant is quarantined and its cluster loses its tie-breaker.
+        return PrimosStatsListener.guarded(sink, application, nodeId);
+    }
+
     private RoutedTransport newTransport(String application) {
         return new RoutedTransport(application, channel, selector);
     }
 
     private ElectionNode newNode(ApplicationConfig application, RoutedTransport transport,
-                                 StateStore store, Timings adopted) {
+                                 StateStore store, Timings adopted, PrimosStatsListener stats) {
         ClusterConfig.Builder config = ClusterConfig.builder()
                 .applicationName(application.name())
                 .nodeId(nodeId)
@@ -685,7 +764,7 @@ public final class WitnessServer implements AutoCloseable {
             config.followsStatedTimings();
         }
         return new ElectionNode(config.build(), store, transport, clock, random,
-                authenticatorFor(application));
+                authenticatorFor(application), NO_EVENTS, stats);
     }
 
     /**
@@ -798,6 +877,12 @@ public final class WitnessServer implements AutoCloseable {
         private final RoutedTransport transport;
         private final StateStore store;
 
+        /**
+         * Already guarded, and kept here so a rebuilt node is handed the same sink rather than a
+         * fresh one.
+         */
+        private final PrimosStatsListener stats;
+
         private ApplicationConfig config;
         private ElectionNode node;
         private boolean failed;
@@ -813,11 +898,13 @@ public final class WitnessServer implements AutoCloseable {
          */
         private Timings adoptedTimings;
 
-        private Served(ApplicationConfig config, RoutedTransport transport, StateStore store) {
+        private Served(ApplicationConfig config, RoutedTransport transport, StateStore store,
+                       PrimosStatsListener stats) {
             this.name = config.name();
             this.config = config;
             this.transport = transport;
             this.store = store;
+            this.stats = stats;
         }
 
         /**
@@ -973,7 +1060,34 @@ public final class WitnessServer implements AutoCloseable {
         @Setter
         private int receiveBufferBytes = 1 << 20;
 
+        /**
+         * Where each served application's counters go, given its name.
+         */
+        private Function<String, PrimosStatsListener> statsListeners =
+                application -> PrimosStatsListener.NONE;
+
         private Builder() {
+        }
+
+        /**
+         * Registers a {@link PrimosStatsListener} per served application.
+         *
+         * <p>A function of the name rather than one listener, because a witness runs an election
+         * per served cluster and every counter it produces is meaningless summed across them: one
+         * tenant's dropped datagrams added to another's is a number nobody can act on. The name is
+         * what a binder tags its meters with.
+         *
+         * <p>Called <strong>once per application</strong>, when this witness starts serving it,
+         * and not again when its node is rebuilt after a secret rotation or a change of intervals
+         * — so a binder may register its meters when it is created.
+         *
+         * <p>The contract on the listener itself is {@link PrimosStatsListener}'s and is not
+         * relaxed here: it runs on the server thread, which is the thread every served cluster
+         * depends on, so it must not block and must not allocate.
+         */
+        public Builder statsListeners(Function<String, PrimosStatsListener> statsListeners) {
+            this.statsListeners = Objects.requireNonNull(statsListeners, "statsListeners");
+            return this;
         }
 
         /**
