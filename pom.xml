@@ -90,6 +90,7 @@
         <module>primos</module>
         <module>primos-witness</module>
         <module>primos-witness-cli</module>
+        <module>primos-witness-boot</module>
         <module>primos-spring-boot-starter</module>
     </modules>
 
@@ -146,11 +147,6 @@
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
             <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
