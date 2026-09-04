@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.lolaf.primos</groupId>
+        <artifactId>primos-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>primos-micrometer</artifactId>
+
+    <name>Primos Micrometer</name>
+    <description>
+        Binds a primos node, and a witness server's served applications, onto a Micrometer
+        MeterRegistry. Its own module because Micrometer is the transitive tree an application must
+        be able to decline: the library never references a Micrometer type.
+    </description>
+
+    <properties>
+        <automatic.module.name>org.lolaf.primos.micrometer</automatic.module.name>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!-- Optional, so that an application embedding a node never receives the witness server
+             just because it wanted meters. Whoever uses WitnessMetrics already depends on it. -->
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos-witness</artifactId>
+            <version>${project.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

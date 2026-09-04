@@ -52,6 +52,7 @@
         <assertj-core.version>3.27.7</assertj-core.version>
         <awaitility.version>4.3.0</awaitility.version>
         <picocli.version>4.7.7</picocli.version>
+        <micrometer.version>1.17.1</micrometer.version>
         <spring-boot.version>4.1.0</spring-boot.version>
 
         <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
@@ -89,6 +90,7 @@
     <modules>
         <module>primos</module>
         <module>primos-witness</module>
+        <module>primos-micrometer</module>
         <module>primos-witness-cli</module>
         <module>primos-witness-boot</module>
         <module>primos-spring-boot-starter</module>
@@ -127,6 +129,13 @@
                 <groupId>info.picocli</groupId>
                 <artifactId>picocli</artifactId>
                 <version>${picocli.version}</version>
+            </dependency>
+            <!-- Reaches primos-micrometer alone, which exists so that an application wanting no
+                 Micrometer receives none. Java 8 bytecode, so the Java 11 target holds. -->
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-core</artifactId>
+                <version>${micrometer.version}</version>
             </dependency>
             <!-- Align every transitive org.junit.* artifact to a single JUnit version. -->
             <dependency>

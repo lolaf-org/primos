@@ -290,6 +290,9 @@ not be able to stop consensus. There is a test asserting a counting listener add
 turn on the drop path, because otherwise the rule is only a comment.
 
 `primos-micrometer` is exactly such a listener, and the library still names no third-party type.
+One dependency binds a node's meters onto whatever `MeterRegistry` you already run — the meter to
+alert on being `primos.leader`, a 0/1 gauge that sums to 1 across a healthy cluster. See that
+module's README for the catalogue.
 
 ### Mismatched timings are reported
 
