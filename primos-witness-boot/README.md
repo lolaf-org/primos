@@ -16,7 +16,7 @@ covers only what is different here.
 |---|---|---|
 | deployment | a tarball and a systemd unit | a container image, or the jar |
 | configuration | `witness.properties` and `applications/` | the same, plus Spring's environment |
-| health, metrics | the log | `/actuator/health`, and metrics when `primos-micrometer` lands |
+| health, metrics | the log | `/actuator/health`, and `/actuator/metrics` per served cluster |
 | dependencies in the process | picocli and slf4j-simple | a Spring Boot application, with Tomcat |
 | **startup, measured** | **~0.44s** | **~4.0s** |
 
@@ -142,12 +142,30 @@ groups off** for exactly that reason; a readiness check needs no group and can r
 watches a directory this process does not care about, and nothing but the witness may answer whether
 the witness is serving.
 
+## Metrics
+
+`primos-micrometer` is on the classpath, so `/actuator/metrics` carries the witness's own routing
+counters and a full set of node meters **per served cluster**, tagged with that cluster's name and
+this witness's node id. Nothing to configure; it binds when the application has a `MeterRegistry`.
+
+The two worth alerting on:
+
+- `primos.witness.routing{reason="undeliverable_replies"}` should stay at zero. A witness that
+  silently fails to answer looks exactly like a witness nobody is asking, while the cluster on the
+  other end waits out an election timeout for a vote that was never coming.
+- `primos.witness.applications{state="quarantined"}` above zero is the health detail as a number.
+
+The catalogue, and the tag rules, are in [`primos-micrometer`](../primos-micrometer/README.md).
+
 ## Startup
 
 Measured on the packaged jar, from exec to serving, five runs: **~0.44s** for the tarball and
 **~4.0s** here. `spring.main.lazy-initialization=true` brings this to ~3.6s and is **not** enabled:
 0.4s does not buy moving a misconfiguration from startup to first use, in a server whose whole
 posture is to fail loudly before it is trusted with a vote.
+
+Adding the metrics was measured rather than assumed, since this is the number that matters most
+here: binding them costs **~0.2s**, which is inside the run-to-run spread of the measurement.
 
 ## Build
 

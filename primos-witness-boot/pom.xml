@@ -74,6 +74,18 @@
             lifecycle, so a probe that can be wrong is a mechanism for causing the outage it is
             watching for. Readiness, yes.
         -->
+        <!-- Metrics are half of why this packaging exists, so unlike the starter beside it this
+             module takes them rather than leaving them optional: primos-micrometer binds a set of
+             meters per served cluster, and the registry is what carries them to /actuator/metrics. -->
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos-micrometer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-micrometer-metrics</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

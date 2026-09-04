@@ -79,6 +79,10 @@ properties cannot express is an `@Bean` away.
 | `PrimosListener` | republishes primos' callbacks as Spring events |
 | `LeaderLifecycleController` | only when `primos.leader-lifecycle.enabled=true` |
 | `PrimosHealthIndicator` | only when actuator health is on the classpath |
+| `PrimosMetrics` | only when `primos-micrometer` and a `MeterRegistry` are both present |
+
+Any `PrimosStatsListener` bean is installed the same way, composed into one sink if there are
+several — that SPI takes a single sink fixed when the node is built, so it cannot be added later.
 
 Any `PrimosListener` bean your application defines is registered on the node before it starts, so it
 cannot miss the first transition. **Do not inject `PrimosNode` into such a listener** — that is a
@@ -479,6 +483,26 @@ check rather than detected by it.
 than waiting for it to recover. `"state": "not-started"` stays `UP` — under `manual` it is the
 expected state until you start the node — but it says so, because a deployment that forgot to start
 its node looks identical to a healthy one from every other angle.
+
+---
+
+## Metrics
+
+Add `primos-micrometer` beside this starter and the node binds itself onto whatever `MeterRegistry`
+your application already has. Nothing to configure and no property to set: the counters are
+installed while the node is built, the gauges once every singleton exists, and both are tagged with
+your application name and node id.
+
+```xml
+<dependency>
+    <groupId>org.lolaf.primos</groupId>
+    <artifactId>primos-micrometer</artifactId>
+</dependency>
+```
+
+The alert worth having is `sum by (application) (primos_leader) != 1` — 0 during an election, 2 when
+the thing this library exists to prevent has happened anyway. The full catalogue is in
+[`primos-micrometer`](../primos-micrometer/README.md).
 
 ---
 

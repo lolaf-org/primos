@@ -63,6 +63,19 @@
             <artifactId>spring-boot-health</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Optional on both counts: an application that wants no Micrometer receives none, and
+             the auto-configuration that binds them backs off when either is absent. -->
+        <dependency>
+            <groupId>org.lolaf.primos</groupId>
+            <artifactId>primos-micrometer</artifactId>
+            <version>${project.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>

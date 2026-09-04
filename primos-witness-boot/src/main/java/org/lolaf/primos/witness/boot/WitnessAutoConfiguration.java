@@ -15,10 +15,12 @@
  */
 package org.lolaf.primos.witness.boot;
 
+import org.lolaf.primos.micrometer.WitnessMetrics;
 import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.witness.ConfigStore;
 import org.lolaf.primos.witness.FileConfigStore;
 import org.lolaf.primos.witness.WitnessServer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -117,7 +119,8 @@ public class WitnessAutoConfiguration {
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
-    public WitnessServer witnessServer(ConfigStore configStore, WitnessProperties properties) {
+    public WitnessServer witnessServer(ConfigStore configStore, WitnessProperties properties,
+                                       ObjectProvider<WitnessMetrics> metrics) {
         WitnessServer.Builder server = WitnessServer.builder()
                 .configStore(configStore)
                 .nodeId(properties.nodeId());
@@ -125,7 +128,17 @@ public class WitnessAutoConfiguration {
         if (bind != null) {
             server.bindAddress(bind);
         }
-        return server.build();
+        // A tenant's sink has to be in place before build(), because the constructor opens every
+        // application the configuration directory already names.
+        WitnessMetrics bound = metrics.getIfAvailable();
+        if (bound != null) {
+            server.statsListeners(bound.statsListeners());
+        }
+        WitnessServer built = server.build();
+        if (bound != null) {
+            bound.bind(built);
+        }
+        return built;
     }
 
     /**

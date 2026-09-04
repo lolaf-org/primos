@@ -47,6 +47,10 @@ class ReadmePropertiesTest {
      * Keys as they appear in prose, tables and properties blocks: backticked, in a table cell, or
      * on the left of an {@code =}. Indexed and mapped keys are normalised, since
      * {@code applications[0].name} and {@code keys.<name>.value} are one setting each.
+     *
+     * <p>A name followed by a {@code {tag="..."} } selector is a <em>meter</em> rather than a
+     * setting — the metrics section names {@code primos.witness.routing} that way — and the
+     * prefixes collide because both describe the same witness.
      */
     private static final Pattern KEY = Pattern.compile("primos\\.witness\\.[A-Za-z0-9.\\[\\]<>*_-]+");
 
@@ -72,6 +76,9 @@ class ReadmePropertiesTest {
         Set<String> keys = new LinkedHashSet<>();
         Matcher matcher = KEY.matcher(text);
         while (matcher.find()) {
+            if (matcher.end() < text.length() && text.charAt(matcher.end()) == '{') {
+                continue;
+            }
             String key = matcher.group()
                     .replaceAll("\\[[^\\]]*\\]", "")
                     .replaceAll("<[^>]*>", "*");

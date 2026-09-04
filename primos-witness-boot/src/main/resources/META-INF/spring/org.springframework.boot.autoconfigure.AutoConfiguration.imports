@@ -1,1 +1,2 @@
 org.lolaf.primos.witness.boot.WitnessAutoConfiguration
+org.lolaf.primos.witness.boot.WitnessMetricsAutoConfiguration

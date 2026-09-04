@@ -1,1 +1,2 @@
 org.lolaf.primos.spring.PrimosAutoConfiguration
+org.lolaf.primos.spring.PrimosMetricsAutoConfiguration

@@ -20,6 +20,7 @@ import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosListener;
 import org.lolaf.primos.PrimosNode;
+import org.lolaf.primos.PrimosStatsListener;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.spring.PrimosProperties.PeerProperties;
 import org.lolaf.primos.store.FileStateStore;
@@ -156,7 +157,8 @@ public class PrimosAutoConfiguration {
                                  ClusterConfig cluster,
                                  Supplier<StateStore> stores,
                                  Supplier<Transport> transports,
-                                 ObjectProvider<PrimosListener> listeners) {
+                                 ObjectProvider<PrimosListener> listeners,
+                                 ObjectProvider<PrimosStatsListener> statsListeners) {
         var builder = PrimosNode.builder()
                 .clusterConfig(cluster)
                 .store(stores)
@@ -178,6 +180,12 @@ public class PrimosAutoConfiguration {
             builder.macAlgorithm(properties.macAlgorithm());
         }
         listeners.orderedStream().forEach(builder::listener);
+        // One sink, fixed here, because some of these fire per datagram. Several beans compose
+        // into one rather than becoming a list the node would have to iterate.
+        PrimosStatsListener[] sinks = statsListeners.orderedStream().toArray(PrimosStatsListener[]::new);
+        if (sinks.length > 0) {
+            builder.statsListener(sinks.length == 1 ? sinks[0] : PrimosStatsListener.of(sinks));
+        }
         return builder.build();
     }
 
