@@ -1,8 +1,8 @@
 # primos-witness-boot
 
-The witness server as a Spring Boot application: actuator health, configuration from the
-environment, and the packaging [the container image](#the-container-image) is built from. A front
-door onto [`primos-witness`](../primos-witness); the other one is the tarball in
+The witness as a Spring Boot application: actuator health, configuration from the environment, and
+the packaging [the container image](#the-container-image) is built from. A front door onto
+[`primos-witness`](../primos-witness), which is the witness itself; the other one is the tarball in
 [`primos-witness-cli`](../primos-witness-cli).
 
 **The operator manual is [`primos-witness/README.md`](../primos-witness/README.md).** Almost

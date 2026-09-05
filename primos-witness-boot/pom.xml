@@ -9,11 +9,11 @@
 
     <artifactId>primos-witness-boot</artifactId>
 
-    <name>Primos Witness Server for Spring Boot</name>
+    <name>Primos Witness for Spring Boot</name>
     <description>
-        The witness server as a Spring Boot application: actuator, configuration from the
+        The witness as a Spring Boot application: actuator, configuration from the
         environment, metrics, and the packaging the container image is built from. One of two front
-        doors onto the same server; the other is the tarball, and neither holds any logic of its own.
+        doors onto the same witness; the other is the tarball, and neither holds any logic of its own.
     </description>
 
     <properties>

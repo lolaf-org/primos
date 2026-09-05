@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /**
- * The witness server as a Spring Boot application.
+ * The witness as a Spring Boot application.
  *
  * <p>One of two front doors onto {@code primos-witness}; the other is the tarball in
  * {@code primos-witness-cli}. This one is for people who already run containers and want actuator,

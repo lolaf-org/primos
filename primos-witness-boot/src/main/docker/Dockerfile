@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-# The witness server as a container image, built from the layered jar that `package` already leaves
+# The witness as a container image, built from the layered jar that `package` already leaves
 # in target/. Nothing in the Maven build talks to a Docker daemon — `./mvnw verify` must stay green
 # on a machine that has none — so this file is driven by hand or by CI:
 #
@@ -45,7 +45,7 @@ RUN java -Djarmode=tools -jar application.jar extract --layers --destination ext
 # --- the image --------------------------------------------------------------------------------
 FROM ${JRE_IMAGE}
 
-LABEL org.opencontainers.image.title="Primos witness server" \
+LABEL org.opencontainers.image.title="Primos witness" \
       org.opencontainers.image.description="A leader-ineligible voter, so a two-node cluster can elect a leader." \
       org.opencontainers.image.url="https://github.com/lolaf-org/primos" \
       org.opencontainers.image.source="https://github.com/lolaf-org/primos" \

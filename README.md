@@ -6,7 +6,7 @@ leader or a follower, and is told the moment that changes.
 *Primus inter pares* — first among equals. Also *cousins* in Spanish and Portuguese: peers, one
 of whom is currently first.
 
-> **Status: built and green, not yet published.** The library and the witness server are complete
+> **Status: built and green, not yet published.** The library and the witness are complete
 > and tested; what remains is documentation and the first release to Maven Central. Every design
 > decision, and the reasoning behind it, is in [PLAN.md](PLAN.md).
 
@@ -189,11 +189,11 @@ omitted.
 If you meant it, the warning is one line at startup. If you did not, it is the only thing that will
 tell you.
 
-### The witness server
+### The witness
 
-`primos-witness` is the witness server, serving many clusters at once, keyed by application name.
-It is a **library** — an ordinary jar that inherits nothing but `slf4j-api` — and the runnable
-packagings are their own modules: [`primos-witness-cli`](primos-witness-cli), a `tar.gz` beside a
+`primos-witness` is the witness itself, serving many clusters at once, keyed by application name.
+It is a **library** with no `main` — an ordinary jar that inherits nothing but `slf4j-api` — so it
+is not the thing you run. The processes are their own modules: [`primos-witness-cli`](primos-witness-cli), a `tar.gz` beside a
 systemd unit, and [`primos-witness-boot`](primos-witness-boot), a Spring Boot application and a
 container image. Neither front door holds logic of its own.
 
@@ -473,7 +473,7 @@ JDK 11 or newer. The library targets Java 11 (`maven.compiler.release`) and the 
 | module | what |
 |---|---|
 | `primos` | the library: API, role state machine, wire codec, transports, state store |
-| `primos-witness` | the witness server and its config store, as a library with no `main` — [README](primos-witness/README.md), which is also the operator manual |
+| `primos-witness` | the witness itself and its config store, as a library with no `main` — [README](primos-witness/README.md), which is also the operator manual |
 | `primos-micrometer` | meters for a node, and for a witness's served clusters — [README](primos-micrometer/README.md) |
 | `primos-witness-cli` | the picocli command line and the `tar.gz`/`zip` distribution — [README](primos-witness-cli/README.md) |
 | `primos-witness-boot` | the same server as a Spring Boot application, and the container image — [README](primos-witness-boot/README.md) |

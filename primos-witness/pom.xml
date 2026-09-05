@@ -9,10 +9,10 @@
 
     <artifactId>primos-witness</artifactId>
 
-    <name>Primos Witness Server</name>
+    <name>Primos Witness</name>
     <description>
-        The witness server as a library: a leader-ineligible voter, deployed in a third failure
-        domain, that lets a two-node active/passive pair survive a partition without split brain.
+        The witness as a library: a leader-ineligible voter, deployed in a third failure domain,
+        that lets a two-node active/passive pair survive a partition without split brain.
         One instance serves many clusters at once, keyed by application name. Runnable packagings
         live in their own modules, so an application embedding this inherits slf4j-api and nothing
         else.

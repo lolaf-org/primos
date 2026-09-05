@@ -1,7 +1,8 @@
 # primos-witness-cli
 
-The witness server as a process you install: a picocli command line over
+The witness as a process you install: a picocli command line over
 [`primos-witness`](../primos-witness), and a `tar.gz` an operator can unpack beside a systemd unit.
+This is one of the two processes that actually run a witness; the witness itself is the library.
 
 **The operator manual is [`primos-witness/README.md`](../primos-witness/README.md)**, and it ships
 in the distribution as `MANUAL.md` so it is to hand on a box with no browser. Almost everything

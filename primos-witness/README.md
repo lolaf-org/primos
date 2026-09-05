@@ -1,12 +1,13 @@
-# Primos Witness Server
+# Primos Witness
 
-A **witness** is a voter that never becomes leader. This is the server that provides one to many
-clusters at once.
+A **witness** is a voter that never becomes leader. This module is the witness itself: one socket,
+one thread, and an ordinary voter per served cluster, serving many clusters at once.
 
-Operator-facing, and it documents the server itself rather than any one way of running it —
-everything below is true of every packaging. `primos-witness` is a library with no `main`; the two
-runnable front doors are their own modules, [`primos-witness-cli`](../primos-witness-cli) and
-[`primos-witness-boot`](../primos-witness-boot), and **installing either one is documented there**.
+**It is a library with no `main`, so it is not the thing you run.** The processes are
+[`primos-witness-cli`](../primos-witness-cli) and [`primos-witness-boot`](../primos-witness-boot),
+and installing either one is documented there. This page is operator-facing and describes the
+witness itself, so everything on it holds whichever of them is running it.
+
 For the primos library, see the [project README](../README.md); for the reasoning behind every
 decision here, [PLAN.md](../PLAN.md).
 
@@ -334,7 +335,7 @@ claim the same applications, note that during the window either verifies them, w
 
 ### Hot reload
 
-The configuration directory is re-read while the server runs. **This is the point of the design**,
+The configuration directory is re-read while the witness runs. **This is the point of the design**,
 because restarting a witness is the one genuinely risky operation in its lifecycle: while it is
 down, every two-node cluster it serves is back to tolerating zero failures.
 
@@ -456,7 +457,7 @@ Worth alerting on:
 | ERROR | `cannot read the configuration in ...`                        | a bad edit; the last good config is still serving                                                                                   |
 | ERROR | `application 'X' has failed`                                  | that cluster is no longer served — see below                                                                                        |
 
-### One application failing does not stop the server
+### One application failing does not stop the witness
 
 If an application's state store fails — a full or broken disk — that application is **quarantined**:
 it stops being served, and every other tenant keeps working. One team's storage problem must not be

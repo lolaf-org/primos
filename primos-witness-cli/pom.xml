@@ -9,11 +9,11 @@
 
     <artifactId>primos-witness-cli</artifactId>
 
-    <name>Primos Witness Server CLI</name>
+    <name>Primos Witness CLI</name>
     <description>
-        The witness server as a process you install: a picocli command line over primos-witness, and
+        The witness as a process you install: a picocli command line over primos-witness, and
         a tar.gz an operator can unpack beside a systemd unit. One of two front doors onto the same
-        server; the other is a Spring Boot packaging, and neither holds any logic of its own.
+        witness; the other is a Spring Boot packaging, and neither holds any logic of its own.
     </description>
 
     <properties>
