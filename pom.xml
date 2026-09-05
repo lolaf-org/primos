@@ -56,6 +56,7 @@
         <spring-boot.version>4.1.0</spring-boot.version>
 
         <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.5.6</maven-failsafe-plugin.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
         <maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
@@ -353,13 +354,18 @@
                                 <!-- Shipped sample config an operator copies and edits; the same
                                      reasoning as the resources above. -->
                                 <exclude>**/src/main/dist/conf/**</exclude>
+                                <exclude>**/src/main/docker/conf/**</exclude>
                             </excludes>
                         </licenseSet>
                     </licenseSets>
-                    <!-- The launcher has no extension, so nothing maps it to a comment style
-                         and it would be reported as Unknown rather than checked. -->
+                    <!-- Neither the launcher nor the Dockerfile has an extension, so nothing
+                         maps them to a comment style and both would be reported as Unknown rather
+                         than checked. Mapped rather than excluded: they are shipped source like
+                         any other file here. -->
                     <mapping>
                         <primos-witness>SCRIPT_STYLE</primos-witness>
+                        <Dockerfile>SCRIPT_STYLE</Dockerfile>
+                        <dockerignore>SCRIPT_STYLE</dockerignore>
                     </mapping>
                 </configuration>
                 <executions>

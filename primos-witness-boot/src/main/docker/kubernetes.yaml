@@ -1,0 +1,174 @@
+# A witness on Kubernetes. Copy it, do not adapt it loosely: a container platform makes both of the
+# witness's safety mistakes the default, and the lines that stop it are marked below.
+#
+#   kubectl create secret generic primos-witness --from-literal=secret="$(openssl rand -base64 32)"
+#   kubectl apply -f kubernetes.yaml
+#
+# What is deliberately absent is as important as what is here: no Deployment, no livenessProbe, no
+# HorizontalPodAutoscaler, no PodDisruptionBudget that permits an eviction.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: primos-witness
+data:
+  witness.properties: |
+    bind.host=0.0.0.0
+    bind.port=7420
+    state.directory=/var/lib/primos-witness
+    config.source=file
+    timings.profile=lan
+    # env: rather than the secret itself, so the ConfigMap carries no secret and the value comes
+    # from the Secret below. file: and base64: are the other two spellings the store accepts.
+    secret.platform.value=env:PRIMOS_WITNESS_SECRET
+  # One file per served cluster, and the filename is the application name. Empty is a complete
+  # file: everything else has a witness-wide default, and the witness holds no addresses — it
+  # learns each node's endpoint from the first datagram that authenticates. A ConfigMap key cannot
+  # contain a '/', so the applications/ prefix is put back by the volume's items below.
+  orders.properties: ""
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: primos-witness
+spec:
+  # Headless: each node needs to reach this one witness, and there is nothing to load-balance
+  # across. A ClusterIP with more than one endpoint behind it would be rule 1 broken by the
+  # platform rather than by the operator.
+  clusterIP: None
+  selector:
+    app: primos-witness
+  ports:
+    # UDP. The default is TCP, and a witness behind a TCP port is never spoken to at all: total
+    # silence, indistinguishable from the partition it exists to survive.
+    - name: primos
+      port: 7420
+      protocol: UDP
+    - name: actuator
+      port: 8080
+      protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: primos-witness
+spec:
+  serviceName: primos-witness
+  # ONE. Never a Deployment, never two replicas, never an HPA. Two witnesses answering for one
+  # cluster is a double vote by construction — each grants its own vote in the same term and two
+  # nodes each believe they have a majority — and nothing outside the cluster can see it happen.
+  #
+  # A StatefulSet rather than a Deployment for two reasons beyond the name: its rolling update
+  # stops the old pod before starting the new one, where a Deployment overlaps them and briefly
+  # runs the two this rule forbids; and its volumeClaimTemplate binds the state to the identity.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: primos-witness
+  template:
+    metadata:
+      labels:
+        app: primos-witness
+    spec:
+      # Longer than spring.lifecycle.timeout-per-shutdown-phase, which defaults to 30s. The
+      # platform default is 30s exactly, so a clean stop — a Leaving datagram to every served
+      # cluster, then the state stores closed — can be SIGKILLed at the instant it finishes.
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # The state volume is mounted by a process that is not root; this is what makes it writable.
+        fsGroup: 1000
+      containers:
+        - name: witness
+          image: primos-witness:dev
+          ports:
+            - name: primos
+              containerPort: 7420
+              protocol: UDP
+            - name: actuator
+              containerPort: 8080
+          env:
+            # The secret is the whole of the admission gate: a witness learns its voters from
+            # traffic and cannot check a sender against a configured peer set the way a node does.
+            - name: PRIMOS_WITNESS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: primos-witness
+                  key: secret
+          # A readinessProbe and NO livenessProbe, and that is the whole point of this block.
+          #
+          # Restarting a witness is the one genuinely risky operation in its lifecycle: while it is
+          # down, every two-node cluster it serves tolerates zero failures. A liveness probe that
+          # can be wrong — a slow disk, a paused JVM, a blip in the probe path — is a mechanism for
+          # causing the outage it is watching for, and it will fire at exactly the moment the
+          # cluster is least able to afford it. This module switches Boot's probe groups off so
+          # that nobody gets /actuator/health/liveness by not thinking about it.
+          #
+          # Readiness is fine: being taken out of a headless Service's endpoints stops no vote that
+          # was going to be granted, because the nodes are already talking to the address they
+          # learned.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: actuator
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              # The heap is 65% of this (JDK_JAVA_OPTIONS in the Dockerfile), and the rest is
+              # metaspace, thread stacks, code cache and Tomcat. Sizing this to the tarball's
+              # -Xmx128m — which sizes a process with no framework in it — is an OOM kill that
+              # reads as a crash. No CPU limit: throttling a single-threaded loop that must answer
+              # a vote inside an election timeout buys nothing and can cost an election.
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ "ALL" ]
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/primos-witness
+            - name: config
+              mountPath: /etc/primos-witness
+              readOnly: true
+            # Tomcat wants a work directory, and the root filesystem is read-only.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: primos-witness
+            # items rather than the whole ConfigMap, because the server wants witness.properties at
+            # the top and a file per cluster under applications/, and a projected path may carry a
+            # subdirectory where a ConfigMap key may not. Editing this ConfigMap onboards a cluster
+            # without restarting the witness — the server re-reads the directory, and the only delay
+            # is the kubelet's sync.
+            items:
+              - key: witness.properties
+                path: witness.properties
+              - key: orders.properties
+                path: applications/orders.properties
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    # Never an emptyDir, and never a tmpfs. The witness fsyncs currentTerm/votedFor before
+    # answering any vote; one that forgets a vote across a reschedule can grant a second in a term
+    # it has already voted in, which elects two leaders. The claim must survive the pod, which is
+    # what a StatefulSet's template gives it — and it must be a storage class that is genuinely
+    # durable, not node-local scratch.
+    - metadata:
+        name: state
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            # Two fields per served cluster. This is a floor, not an estimate.
+            storage: 1Gi

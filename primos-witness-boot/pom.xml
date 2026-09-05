@@ -149,6 +149,18 @@
                     <layers>
                         <enabled>true</enabled>
                     </layers>
+                    <!--
+                        Lombok is `provided` in the parent, and repackage keeps provided-scope jars
+                        in BOOT-INF/lib — so a compile-time annotation processor was shipping inside
+                        the runnable jar and the container image built from it. spring-boot-starter-parent
+                        excludes it for exactly this reason, and this project does not inherit from it.
+                    -->
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
                 </configuration>
                 <executions>
                     <execution>
@@ -161,4 +173,51 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            The image's integration test, and it is a profile because ./mvnw verify must stay green
+            on a machine with no Docker daemon — the same reason nothing in the ordinary build talks
+            to one. Nothing here builds the image either: it is named, so that what is tested is
+            whatever was actually built and is about to be pushed.
+
+                docker build -f src/main/docker/Dockerfile -t primos-witness:it .
+                ./mvnw -Pdocker verify -Ddocker.image=primos-witness:it
+
+            Without the property the IT disables itself, so `-Pdocker` alone is a pass rather than a
+            confusing failure.
+        -->
+        <profile>
+            <id>docker</id>
+            <properties>
+                <!-- Empty unless -D names one, so an unset property interpolates to nothing rather
+                     than to the literal ${docker.image}, which would match the IT's guard
+                     and start a container called that. -->
+                <docker.image/>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>${maven-failsafe-plugin.version}</version>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <docker.image>${docker.image}</docker.image>
+                            </systemPropertyVariables>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>image-integration-test</id>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

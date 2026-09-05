@@ -1,0 +1,81 @@
+# A witness under Compose. Copy it, do not adapt it loosely: three of the lines here are the
+# difference between a witness that works and one that causes the split brain it was deployed to
+# prevent, and each is marked.
+#
+#   docker compose -f src/main/docker/docker-compose.yml up
+#
+# The image is built first — see the Dockerfile beside this file, or the README.
+
+services:
+  witness:
+    image: primos-witness:dev
+
+    # RULE 1: never more than one. No `deploy.replicas: 2`, no second service pointed at the same
+    # volume, no `docker compose up --scale witness=2`. Two witnesses answering for one cluster is
+    # a double vote by construction — each grants its own vote in the same term, and two nodes each
+    # believe they have a majority. It is invisible from the outside: both look healthy.
+    #
+    # If you want the witness itself to be highly available, the answer is that you do not. Losing
+    # it returns each cluster to the fault tolerance it had before you deployed one. That is a
+    # degradation, not an outage.
+    deploy:
+      replicas: 1
+
+    ports:
+      # RULE 2: /udp. `- "7420:7420"` publishes TCP, and the witness is then never spoken to at
+      # all — silence that is indistinguishable from a partition, which is the one thing a witness
+      # exists to survive, so nothing about it will look wrong.
+      - "7420:7420/udp"
+      # The actuator. Bind it to an address your monitoring can reach and nothing else can; it is
+      # not authenticated, and it names the clusters this witness serves.
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # RULE 3: a named volume, and never the container's writable layer. The witness fsyncs
+      # currentTerm/votedFor before answering any vote; one that forgets a vote across a restart can
+      # grant a second in a term it has already voted in, which elects two leaders.
+      - witness-state:/var/lib/primos-witness
+      # witness.properties and applications/, read-only: the server re-reads them while it runs, and
+      # never writes them.
+      - ./conf:/etc/primos-witness:ro
+
+    # The secret is the whole of the gate — the witness learns its voters from traffic and cannot
+    # check a sender against a configured peer set the way a node does. Keep it out of the file that
+    # is committed: witness.properties reads `secret.platform.value=env:PRIMOS_WITNESS_SECRET`,
+    # which is the store's own indirection — `file:` and `base64:` are the other two.
+    environment:
+      PRIMOS_WITNESS_SECRET: ${PRIMOS_WITNESS_SECRET:?set PRIMOS_WITNESS_SECRET}
+
+    # Longer than spring.lifecycle.timeout-per-shutdown-phase, which defaults to 30s. Compose's
+    # default is 10s: a clean stop — the Leaving datagram to every served cluster, then the state
+    # stores closed — can be SIGKILLed at the instant it finishes, and each of those clusters then
+    # waits out a probe timeout for a peer that had already gone.
+    stop_grace_period: 45s
+
+    read_only: true
+    # The only writable paths, and the reason read_only above is affordable: Tomcat wants a work
+    # directory, and the state lives on its volume.
+    tmpfs:
+      - /tmp
+
+    # No healthcheck, deliberately. Compose restarts nothing on one, but everything built on top of
+    # it reads a healthcheck as liveness, and restarting a witness is the one genuinely risky
+    # operation in its lifecycle: while it is down, every two-node cluster it serves tolerates zero
+    # failures. A probe that can be wrong is then a mechanism for causing the outage it watches for.
+    # Read /actuator/health yourself, from monitoring that pages a human rather than restarts a
+    # process.
+
+    restart: unless-stopped
+
+    mem_limit: 512m
+    # The heap is 65% of this (see JDK_JAVA_OPTIONS in the Dockerfile); the rest is metaspace,
+    # thread stacks, code cache and Tomcat. Sizing this to the tarball's -Xmx128m — a process with
+    # no framework in it — is an OOM kill that looks like a crash.
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  witness-state:

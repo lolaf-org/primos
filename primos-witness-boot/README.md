@@ -1,8 +1,8 @@
 # primos-witness-boot
 
 The witness server as a Spring Boot application: actuator health, configuration from the
-environment, and the packaging [the container image](../PLAN.md) is built from. A front door onto
-[`primos-witness`](../primos-witness); the other one is the tarball in
+environment, and the packaging [the container image](#the-container-image) is built from. A front
+door onto [`primos-witness`](../primos-witness); the other one is the tarball in
 [`primos-witness-cli`](../primos-witness-cli).
 
 **The operator manual is [`primos-witness/README.md`](../primos-witness/README.md).** Almost
@@ -170,8 +170,98 @@ here: binding them costs **~0.2s**, which is inside the run-to-run spread of the
 ## Build
 
 ```bash
-./mvnw -o -pl primos,primos-witness,primos-witness-boot package -DskipTests
+./mvnw -o -pl primos,primos-witness,primos-micrometer,primos-witness-boot package -DskipTests
 ```
 
-leaves a layered, runnable `target/primos-witness-boot-<version>.jar`. Nothing in the build talks to
-a Docker daemon: `./mvnw verify` stays green on a machine that has none.
+leaves a layered, runnable `target/primos-witness-boot-<version>.jar`, which is both the jar the
+quick start runs and what the image below is built from.
+
+## The container image
+
+Two rules decide whether a containerised witness is safe, and **a container platform makes both
+mistakes the default**. They are the manual's first two rules, restated for the platform that
+breaks them:
+
+- **One container per identity. Never two.** A `replicas: 1` StatefulSet, never a Deployment, never
+  an HPA, never a Service load-balancing across more than one pod. Two witnesses answering for one
+  cluster is a double vote by construction — each grants its own vote in the same term, and two
+  nodes each believe they have a majority. Nothing outside the cluster can see it happen.
+- **The state directory is a volume that outlives the container.** Never the writable layer, never
+  an `emptyDir`, never a `tmpfs`. The witness fsyncs `currentTerm`/`votedFor` before answering any
+  vote; one that forgets a vote across a restart or a reschedule can grant a second in a term it has
+  already voted in, which elects two leaders — the exact failure it was deployed to prevent.
+
+Everything else in this section is a consequence of one of those two, or of the fact that
+**restarting a witness is the one genuinely risky operation in its lifecycle**: while it is down,
+every two-node cluster it serves tolerates zero failures.
+
+### Building it
+
+```bash
+./mvnw -o -pl primos,primos-witness,primos-micrometer,primos-witness-boot package -DskipTests
+docker build -f primos-witness-boot/src/main/docker/Dockerfile -t primos-witness:dev primos-witness-boot
+```
+
+The `Dockerfile` is a plain multi-stage build over the layered jar — a named JRE 17 base, a
+non-root user, and nothing fetched at run time. Not `spring-boot:build-image`: buildpacks fetch
+at build time and produce an image whose contents nobody chose. **Nothing in the Maven build talks
+to a Docker daemon**, so `./mvnw verify` stays green on a machine that has none; CI builds the
+image in a separate job.
+
+### Running it
+
+```bash
+docker run -d --name primos-witness \
+  -p 7420:7420/udp \
+  -p 127.0.0.1:8080:8080 \
+  -v primos-witness-state:/var/lib/primos-witness \
+  -v /etc/primos-witness:/etc/primos-witness:ro \
+  -e PRIMOS_WITNESS_SECRET=... \
+  --read-only --tmpfs /tmp \
+  --memory 512m \
+  --stop-timeout 30 \
+  primos-witness:dev
+```
+
+Four of those lines fail silently if you drop them:
+
+| | why |
+|---|---|
+| `7420:7420/udp` | without `/udp` the published port is TCP and the witness is **never spoken to**. Total silence, which is indistinguishable from a partition — and a partition is what a witness exists to survive, so nothing will look wrong |
+| `-v ...:/var/lib/primos-witness` | rule 2. The image declares `VOLUME`, which stops votes landing in a layer `docker rm` discards, but an anonymous volume is fresh on the next `docker run`. Name it |
+| `--stop-timeout 30` | Docker's default grace is 10s and the shutdown timeout is 30s, so a clean stop — a `Leaving` datagram to every served cluster, then the state stores closed — can be `SIGKILL`ed at the instant it finishes, and every one of those clusters then waits out a probe timeout for a peer that had already gone |
+| `--memory 512m` | the heap is 65% of the limit (`JDK_JAVA_OPTIONS` in the Dockerfile). Sizing the container to the tarball launcher's `-Xmx128m` — which sizes a process with no framework in it — is an OOM kill that reads as a crash |
+
+`--read-only` is safe and worth keeping: the only paths written are `/tmp`, which Tomcat wants, and
+the state volume. The container runs as uid 1000 and needs no capabilities.
+
+Worked examples, both carrying all of the above and commented line by line:
+[`docker-compose.yml`](src/main/docker/docker-compose.yml) and
+[`kubernetes.yaml`](src/main/docker/kubernetes.yaml) in `src/main/docker`.
+
+### No `HEALTHCHECK`, and no liveness probe
+
+The image ships neither, deliberately, and phase 17 having given this packaging an endpoint to point
+one at does not change it — if anything it makes the rule easier to break.
+
+Restarting a witness is the one genuinely risky operation in its lifecycle. A liveness probe that
+can be wrong — a slow disk, a paused JVM, a blip in the probe path — is therefore a mechanism
+for causing the outage it is watching for, and it fires at the moment its clusters are least able
+to afford it. Docker restarts nothing on a failed `HEALTHCHECK`, but everything built on top of
+Docker reads one as liveness, which is why there is not one to read.
+
+**Readiness is fine**: point it at `/actuator/health`, which is `UP` exactly while this witness is
+serving. Alert a human on it; do not let a machine act on it.
+
+### Testing the image
+
+```bash
+docker build -f primos-witness-boot/src/main/docker/Dockerfile -t primos-witness:it primos-witness-boot
+./mvnw -pl primos-witness-boot -Pdocker verify -Ddocker.image=primos-witness:it
+```
+
+`WitnessImageIT` drives a real cluster node at the published UDP port: it asks for a vote, checks
+the vote reached the host volume rather than a layer, stops the container and asserts the departure
+datagram went out and that the process exited on `SIGTERM` rather than being killed. It is bound
+only in the `docker` profile and disables itself unless the image is named, so `./mvnw verify`
+needs no daemon.

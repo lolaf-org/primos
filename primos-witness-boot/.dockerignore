@@ -1,0 +1,26 @@
+#
+# Copyright © 2026 Lolaf.org
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The build context is this module directory, and the image needs exactly one file out of it: the
+# repackaged, layered jar. Narrowing it here does two jobs — it keeps target/classes, target/delombok
+# and the test output from being uploaded to the daemon on every build, and it leaves `target/*.jar`
+# in the Dockerfile matching one file rather than three, since the sources and javadoc jars sit in
+# the same directory.
+*
+!target/*.jar
+target/*-sources.jar
+target/*-javadoc.jar
+target/*.jar.original
