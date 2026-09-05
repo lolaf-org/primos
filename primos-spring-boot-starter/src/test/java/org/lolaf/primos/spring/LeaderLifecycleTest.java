@@ -25,6 +25,9 @@ import org.springframework.context.annotation.Configuration;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -189,6 +192,86 @@ class LeaderLifecycleTest {
                         .hasStackTraceContaining("nosuchbean"));
     }
 
+    /**
+     * The reason the transitions have a thread of their own.
+     *
+     * <p>Stopping a message listener container drains it and can take tens of seconds. Run on the
+     * thread that reported the role change, that stalls whatever is on the other end of it — the
+     * node thread, when no listener executor is configured — which misses heartbeats, triggers a
+     * spurious election and loses the leadership the stop was reacting to, which triggers another
+     * stop. The executor is what makes that impossible, and until now nothing said so.
+     *
+     * <p>The stop blocks on a latch rather than sleeping, so this asserts the design rather than
+     * the speed of the machine: while the latch is held the stop cannot have finished, so a
+     * controller that ran it inline could not have returned. The wait is bounded so that such a
+     * controller fails this test rather than hanging it.
+     */
+    @Test
+    void a_slow_stop_does_not_hold_the_thread_that_reported_the_role_change() {
+        runner().withUserConfiguration(SlowBean.class).run(context -> {
+            SlowStoppingBean gated = context.getBean(SlowStoppingBean.class);
+            LeaderLifecycleController controller = context.getBean(LeaderLifecycleController.class);
+
+            controller.onRoleChanged(Role.CANDIDATE, Role.LEADER, 4);
+            eventually(() -> assertThat(gated.isRunning()).isTrue());
+
+            gated.blockStops();
+            try {
+                long before = System.nanoTime();
+                controller.onRoleChanged(Role.LEADER, Role.FOLLOWER, 5);
+                Duration held = Duration.ofNanos(System.nanoTime() - before);
+
+                assertThat(held)
+                        .as("reporting a role change must not wait for the gated beans to stop")
+                        .isLessThan(Duration.ofSeconds(1));
+                // The negative twin. Without it a controller that stopped nothing whatever would
+                // pass the assertion above, which is the cheapest way to be fast.
+                assertThat(gated.isRunning())
+                        .as("the stop is genuinely in flight and genuinely slow")
+                        .isTrue();
+            } finally {
+                gated.releaseStops();
+            }
+
+            eventually(() -> assertThat(gated.isRunning()).isFalse());
+        });
+    }
+
+    /**
+     * The other half of what a single thread buys: a transition submitted while a slow one is in
+     * flight is queued behind it rather than dropped or interleaved. Leadership regained during a
+     * stop is the realistic way to get here, and a start that went missing would leave a leader
+     * with everything switched off — silent and indefinite.
+     */
+    @Test
+    void a_transition_arriving_during_a_slow_stop_is_applied_after_it() {
+        runner().withUserConfiguration(SlowBean.class).run(context -> {
+            SlowStoppingBean gated = context.getBean(SlowStoppingBean.class);
+            LeaderLifecycleController controller = context.getBean(LeaderLifecycleController.class);
+
+            controller.onRoleChanged(Role.CANDIDATE, Role.LEADER, 4);
+            eventually(() -> assertThat(gated.isRunning()).isTrue());
+
+            gated.blockStops();
+            try {
+                controller.onRoleChanged(Role.LEADER, Role.FOLLOWER, 5);
+                // Leadership back before the stop has finished. Both calls return immediately; the
+                // executor holds the second until the first is done.
+                controller.onRoleChanged(Role.FOLLOWER, Role.LEADER, 6);
+            } finally {
+                gated.releaseStops();
+            }
+
+            eventually(() -> {
+                assertThat(gated.isRunning())
+                        .as("the start for term 6 must survive the stop it was queued behind")
+                        .isTrue();
+                assertThat(gated.stops()).isEqualTo(1);
+                assertThat(gated.starts()).isEqualTo(2);
+            });
+        });
+    }
+
     @LeaderOnly
     static class GatedBean extends AutoStartingBean {
     }
@@ -222,6 +305,55 @@ class LeaderLifecycleTest {
         @Bean
         AutoStartingBean plain() {
             return new AutoStartingBean();
+        }
+    }
+
+    /**
+     * A gated bean whose stop blocks until the test lets go — a listener container draining, in
+     * miniature.
+     *
+     * <p>Not auto-start, unlike its parent. An auto-starting bean is stopped once during refresh,
+     * and a slow stop there would hold up the context rather than a transition, which is a
+     * different thing from the one these two tests are about.
+     */
+    @LeaderOnly
+    static class SlowStoppingBean extends AutoStartingBean {
+
+        private final AtomicReference<CountDownLatch> gate =
+                new AtomicReference<>(new CountDownLatch(0));
+
+        void blockStops() {
+            gate.set(new CountDownLatch(1));
+        }
+
+        void releaseStops() {
+            gate.get().countDown();
+        }
+
+        @Override
+        public void stop() {
+            try {
+                // Bounded, so a controller that stops inline fails these tests rather than hanging
+                // them. A test that can hang reports nothing at all.
+                gate.get().await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            super.stop();
+        }
+
+        @Override
+        public boolean isAutoStartup() {
+            return false;
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class SlowBean {
+
+        @Bean
+        SlowStoppingBean slow() {
+            return new SlowStoppingBean();
         }
     }
 }
