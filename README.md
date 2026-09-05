@@ -193,13 +193,14 @@ tell you.
 
 `primos-witness` is the witness server, serving many clusters at once, keyed by application name.
 It is a **library** — an ordinary jar that inherits nothing but `slf4j-api` — and the runnable
-packagings are their own modules: `primos-witness-cli` today, a Spring Boot one later. Neither
-front door holds logic of its own.
+packagings are their own modules: [`primos-witness-cli`](primos-witness-cli), a `tar.gz` beside a
+systemd unit, and [`primos-witness-boot`](primos-witness-boot), a Spring Boot application and a
+container image. Neither front door holds logic of its own.
 
-**Operators want [the witness README](primos-witness/README.md)** — installing, configuring, key
-rotation, configuration sources, what to alert on, and troubleshooting. In brief,
-`primos-witness-cli` ships as a `tar.gz`/`zip` with a launcher, its jars, and a commented sample
-configuration:
+**Operators want [the witness README](primos-witness/README.md)** — configuring, key rotation,
+configuration sources, what to alert on, and troubleshooting, all of it true whichever front door
+runs it. Installing one is documented with that front door. In brief, the tarball ships a launcher,
+its jars and a commented sample configuration:
 
 ```
 bin/primos-witness --config /etc/primos-witness
@@ -472,7 +473,10 @@ JDK 11 or newer. The library targets Java 11 (`maven.compiler.release`) and the 
 | module | what |
 |---|---|
 | `primos` | the library: API, role state machine, wire codec, transports, state store |
-| `primos-witness` | the standalone witness server, its config store, and its distribution — [README](primos-witness/README.md) |
+| `primos-witness` | the witness server and its config store, as a library with no `main` — [README](primos-witness/README.md), which is also the operator manual |
+| `primos-micrometer` | meters for a node, and for a witness's served clusters — [README](primos-micrometer/README.md) |
+| `primos-witness-cli` | the picocli command line and the `tar.gz`/`zip` distribution — [README](primos-witness-cli/README.md) |
+| `primos-witness-boot` | the same server as a Spring Boot application, and the container image — [README](primos-witness-boot/README.md) |
 | `primos-spring-boot-starter` | Spring Boot auto-configuration and a leadership-gated lifecycle — [README](primos-spring-boot-starter/README.md) |
 
 The library and the witness are two artifacts rather than the usual api/impl split, deliberately:

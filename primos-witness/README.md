@@ -4,9 +4,10 @@ A **witness** is a voter that never becomes leader. This is the server that prov
 clusters at once.
 
 Operator-facing, and it documents the server itself rather than any one way of running it —
-everything below is true of every packaging. `primos-witness` is a library; the runnable front doors
-are their own modules, today [`primos-witness-cli`](../primos-witness-cli) and later a Spring Boot
-one. For the primos library, see the [project README](../README.md); for the reasoning behind every
+everything below is true of every packaging. `primos-witness` is a library with no `main`; the two
+runnable front doors are their own modules, [`primos-witness-cli`](../primos-witness-cli) and
+[`primos-witness-boot`](../primos-witness-boot), and **installing either one is documented there**.
+For the primos library, see the [project README](../README.md); for the reasoning behind every
 decision here, [PLAN.md](../PLAN.md).
 
 ---
@@ -20,12 +21,12 @@ A witness in a **third failure domain** makes it 3 voters with quorum 2. Whichev
 reaches the witness has a majority and leads; the other stands down. A partition gets a winner and
 a loser instead of two winners.
 
-| configuration | voters | quorum | tolerates |
-|---|---|---|---|
-| 2 nodes | 2 | 2 | **0** |
-| 2 nodes + witness | 3 | 2 | 1 |
-| 3 nodes | 3 | 2 | 1 |
-| 3 nodes + witness | 4 | 3 | **1** |
+| configuration     | voters | quorum | tolerates |
+|-------------------|--------|--------|-----------|
+| 2 nodes           | 2      | 2      | **0**     |
+| 2 nodes + witness | 3      | 2      | 1         |
+| 3 nodes           | 3      | 2      | 1         |
+| 3 nodes + witness | 4      | 3      | **1**     |
 
 It helps even-sized clusters and hurts odd-sized ones — 3 nodes + witness needs three of four
 processes alive instead of two of three. That is suboptimal, not unsafe, so primos warns and keeps
@@ -79,49 +80,21 @@ cannot be provoked at all.
 
 ---
 
-## Installing
+## Running one
 
-Unpack the `primos-witness-cli` distribution wherever you keep such things:
+There are two front doors, and neither holds any logic of its own: both build the same
+`WitnessServer` from the same configuration directory, which is what the rest of this page
+describes.
 
-```
-primos-witness-cli-<version>/
-├── bin/primos-witness
-├── lib/*.jar
-├── conf-sample/                 # heavily commented; copy it, do not point at it
-│   ├── witness.properties
-│   └── applications/example.properties
-└── LICENSE.txt
-```
+- **[`primos-witness-cli`](../primos-witness-cli)** — a `tar.gz` you unpack beside a systemd unit,
+  with a picocli command line. Unpacking it, the options, the exit codes and the unit file are in
+  that module's README. Starts in ~0.44s, and has no framework anywhere near it.
+- **[`primos-witness-boot`](../primos-witness-boot)** — a Spring Boot application, a container image
+  and a runnable jar, with `/actuator/health` and metrics per served cluster. The image, its compose
+  and Kubernetes examples, and the two rules a container platform breaks by default are in that
+  module's README. Starts in ~4.0s.
 
-```sh
-install -d -m 0750 /etc/primos-witness/applications
-install -d -m 0750 /var/lib/primos-witness
-cp -r primos-witness-cli-*/conf-sample/* /etc/primos-witness/
-```
-
-`conf-sample/` is deliberately a *sample* rather than the live path, so that upgrading never
-overwrites `witness.properties` — an upgrade that replaced your secrets with placeholders would
-take out every cluster the witness serves.
-
-Requires a JRE 11 or newer on `PATH`, or `JAVA_HOME` set.
-
-### Running
-
-```sh
-bin/primos-witness --config /etc/primos-witness
-```
-
-| option | default | notes |
-|---|---|---|
-| `--config <directory>` | `/etc/primos-witness` | must exist |
-| `--node-id <id>` | `1023` | 0–1023. **Fixed once deployed** — see below |
-| `--bind <host:port>` | from configuration | overrides `bind.host`/`bind.port` |
-| `-h`, `--help` | | |
-| `-V`, `--version` | | which build this box is running |
-
-Exit codes, for whatever supervises it: **0** normal, **2** for a mistyped option or a missing
-configuration directory — reported as one sentence and the usage text — and **1** for a failure to
-start, which is logged with its cause.
+Whichever you run, two things below belong to the witness rather than to the packaging.
 
 **The node id is durable.** It is recorded in every served application's `votedFor`, and every
 cluster must configure the same value as its witness peer's id. Changing it on a running witness
@@ -130,39 +103,13 @@ makes its recorded votes unattributable. Pick it once.
 Each cluster is configured with the matching peer:
 
 ```java
-.witness(Peer.witness(1023, "witness.example.com", 7420))
+.witness(Peer.witness(1023, "witness.example.com",7420))
 ```
 
-### systemd
-
-```ini
-[Unit]
-Description=Primos witness server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=exec
-User=primos
-Group=primos
-ExecStart=/opt/primos-witness/bin/primos-witness --config /etc/primos-witness
-Restart=on-failure
-RestartSec=5s
-
-# The state directory must survive. Everything else may be locked down.
-ReadWritePaths=/var/lib/primos-witness
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`SIGTERM` is a clean shutdown: the loop finishes its turn, tells every served cluster it is going
-away so none of them waits out a probe timeout, and closes its state stores before exiting. Give it
-a moment rather than following up with `SIGKILL`.
+**A clean stop is worth waiting for.** On `SIGTERM` the loop finishes its turn, tells every served
+cluster it is going away so none of them waits out a probe timeout, and closes its state stores
+before exiting. Give it the time to do that — systemd's `TimeoutStopSec`, Docker's `--stop-timeout`,
+Kubernetes' `terminationGracePeriodSeconds` — rather than following up with `SIGKILL`.
 
 ### Firewall
 
@@ -184,8 +131,8 @@ A directory, not a single file:
     └── billing.properties
 ```
 
-Under `config.source=file` the split earns its keep on shared infrastructure: adding a cluster is a
-**file drop** rather than an edit to a file every tenant contends over.
+Under `config.source=file` the split earns its keep on shared infrastructure: adding a cluster is a **file drop** rather
+than an edit to a file every tenant contends over.
 
 **Under `config.source=cluster` there is no per-tenant file to drop, and `applications/` need not
 exist at all.** Applications are created by the config messages their nodes send, timings come from
@@ -195,19 +142,19 @@ the shape that fits a single Kubernetes ConfigMap, since a ConfigMap key cannot 
 
 ### `witness.properties`
 
-| key | default | hot-reloadable |
-|---|---|---|
-| `bind.host` | `0.0.0.0` | **no** — read and ignored until restart |
-| `bind.port` | `7420` | **no** |
-| `state.directory` | `<config>/state` | **no** |
-| `config.source` | `file` | yes |
-| `config.cluster.limit` | `64` | yes |
-| `secret.<name>.value` | none | yes |
-| `secret.<name>.algorithm` | `HmacSHA256` | yes |
-| `secret.<name>.applications` | none — claims nothing | yes |
-| `timings.*` | see below | yes — and read but ignored under `config.source=cluster` |
-| `vote.logging` | `true` | **no** — read at startup |
-| `reload.rescan.seconds` | `5` | yes |
+| key                          | default               | hot-reloadable                                           |
+|------------------------------|-----------------------|----------------------------------------------------------|
+| `bind.host`                  | `0.0.0.0`             | **no** — read and ignored until restart                  |
+| `bind.port`                  | `7420`                | **no**                                                   |
+| `state.directory`            | `<config>/state`      | **no**                                                   |
+| `config.source`              | `file`                | yes                                                      |
+| `config.cluster.limit`       | `64`                  | yes                                                      |
+| `secret.<name>.value`        | none                  | yes                                                      |
+| `secret.<name>.algorithm`    | `HmacSHA256`          | yes                                                      |
+| `secret.<name>.applications` | none — claims nothing | yes                                                      |
+| `timings.*`                  | see below             | yes — and read but ignored under `config.source=cluster` |
+| `vote.logging`               | `true`                | **no** — read at startup                                 |
+| `reload.rescan.seconds`      | `5`                   | yes                                                      |
 
 `timings.profile` is `lan` or `wan` — a named profile rather than several separate intervals,
 because it is the *relationships* between them that have to hold. A witness genuinely on a third
@@ -283,15 +230,15 @@ That is deliberate — the name cannot disagree with the file's own contents. It
 the wire's rules at load (printable ASCII, no spaces, at most 32 bytes) and rejected rather than
 silently truncated.
 
-| key | notes |
-|---|---|
-| `timings.profile` | `lan` or `wan`; falls back to the witness-wide value |
-| `timings.heartbeat.millis` | `50` by default |
-| `timings.election.min.millis` | `300` |
-| `timings.election.max.millis` | `600`; set with its pair |
-| `timings.probe.millis` | `1000` |
-| `timings.advertisement.millis` | `30000`; never shorter than the probe interval |
-| `timings.failure.threshold` | `3` |
+| key                            | notes                                                |
+|--------------------------------|------------------------------------------------------|
+| `timings.profile`              | `lan` or `wan`; falls back to the witness-wide value |
+| `timings.heartbeat.millis`     | `50` by default                                      |
+| `timings.election.min.millis`  | `300`                                                |
+| `timings.election.max.millis`  | `600`; set with its pair                             |
+| `timings.probe.millis`         | `1000`                                               |
+| `timings.advertisement.millis` | `30000`; never shorter than the probe interval       |
+| `timings.failure.threshold`    | `3`                                                  |
 
 An empty file is valid and means "serve this cluster, with whatever key the keyring says covers
 it". **Key material here is refused, not ignored** — see *Keys* below for where it goes and why.
@@ -313,11 +260,10 @@ its state store and its learned addresses.
 Every key this witness holds lives in `witness.properties`, never in an application's own file:
 
 ```properties
-secret.platform.value       = file:/etc/primos-witness/keys/platform
-secret.platform.algorithm   = HmacSHA256
-
-secret.orders.value         = env:ORDERS_KEY
-secret.orders.applications  = orders-*, *-test
+secret.platform.value=file:/etc/primos-witness/keys/platform
+secret.platform.algorithm=HmacSHA256
+secret.orders.value=env:ORDERS_KEY
+secret.orders.applications=orders-*, *-test
 ```
 
 **Why witness-wide rather than per application.** A cluster that arrives over the network has no
@@ -359,11 +305,11 @@ either key verifies it. That is not detected. Do not overlap.
 
 The spectrum that produces, along one axis and independent of `config.source`:
 
-| keyring | what you get |
-|---|---|
+| keyring            | what you get                                                                                                      |
+|--------------------|-------------------------------------------------------------------------------------------------------------------|
 | every key unscoped | any cluster may arrive, and **every keyholder can speak for every other** — one team, many clusters, one template |
-| some scoped | a general key for the fleet, dedicated keys for the tenants that matter |
-| every key scoped | only the named families can be served at all, and no keyholder can reach another's names |
+| some scoped        | a general key for the fleet, dedicated keys for the tenants that matter                                           |
+| every key scoped   | only the named families can be served at all, and no keyholder can reach another's names                          |
 
 The last row is a legitimate lockdown, and under `config.source=cluster` it is also how you get an
 explicit tenant list while their timings still come from their own nodes — the scope lists *are*
@@ -423,7 +369,8 @@ choice — and the way a typo becomes a split brain.
 
 **Only a node stating its own configuration creates an application, and only if a key that may
 speak for that name accepts it.** A `Ping`, a `RequestVote` or a heartbeat naming an application
-this witness does not serve is dropped and counted under `awaitingNodeConfig`; nothing is created until one of that cluster's nodes says what intervals it is
+this witness does not serve is dropped and counted under `awaitingNodeConfig`; nothing is created until one of that
+cluster's nodes says what intervals it is
 running. That is ordinary and brief while a cluster starts — its first probes and votes arrive
 before its first config message — and it is what stops the witness ever serving a tenant it has no
 timings for. Sustained, it means a cluster is talking to this witness and never saying who it is.
@@ -447,10 +394,10 @@ attacker pick the weakest one both ends accept. That is why the keyring stays in
 `witness.properties` under either mode — and why **how much isolation you get is decided by your
 patterns, not by `config.source`**. See [Keys](#keys).
 
-| differs | what happens |
-|---|---|
+| differs                  | what happens                                                                                                    |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------|
 | the key or its algorithm | every datagram fails verification, counted under `BAD_TAG`. Total, and obvious. Add a key covering that cluster |
-| timings | nothing. The witness follows what that cluster's nodes state, per application, and rebuilds when they change |
+| timings                  | nothing. The witness follows what that cluster's nodes state, per application, and rebuilds when they change    |
 
 **The walkthrough that is the reason `file` is the default:**
 
@@ -494,20 +441,20 @@ witness 1023 is serving 2 application(s)
 
 Worth alerting on:
 
-| level | message | means |
-|---|---|---|
-| WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody. Under `cluster` this is INFO, because empty is the intended shape |
-| WARN | `no keys are configured` | see rule 3 |
-| WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
-| WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |
-| WARN | `'X' is one or two characters from 'Y'` | **near miss — check both configurations** |
-| WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |
-| WARN | `refusing to auto-register` | `config.cluster.limit` reached |
-| WARN | `no key that may speak for that name accepts it` | a cluster holds a key this witness does not, or somebody holding none is trying to create applications |
-| WARN | `stated intervals that do not hold together` | a cluster advertised a profile that could not be built; the last good one stays in force |
-| INFO | `Holding off until one of its nodes states its configuration` | ordinary while a cluster starts; sustained means it never says who it is |
-| ERROR | `cannot read the configuration in ...` | a bad edit; the last good config is still serving |
-| ERROR | `application 'X' has failed` | that cluster is no longer served — see below |
+| level | message                                                       | means                                                                                                                               |
+|-------|---------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| WARN  | `no applications configured`                                  | `config.source=file` with an empty `applications/` serves nobody. Under `cluster` this is INFO, because empty is the intended shape |
+| WARN  | `no keys are configured`                                      | see rule 3                                                                                                                          |
+| WARN  | `... is world-readable and may contain a cluster secret`      | fix the file mode                                                                                                                   |
+| WARN  | `dropping traffic for unserved application 'X'`               | a cluster is asking and being refused                                                                                               |
+| WARN  | `'X' is one or two characters from 'Y'`                       | **near miss — check both configurations**                                                                                           |
+| WARN  | `auto-registering application 'X'`                            | `config.source=cluster` serving someone unconfigured                                                                                |
+| WARN  | `refusing to auto-register`                                   | `config.cluster.limit` reached                                                                                                      |
+| WARN  | `no key that may speak for that name accepts it`              | a cluster holds a key this witness does not, or somebody holding none is trying to create applications                              |
+| WARN  | `stated intervals that do not hold together`                  | a cluster advertised a profile that could not be built; the last good one stays in force                                            |
+| INFO  | `Holding off until one of its nodes states its configuration` | ordinary while a cluster starts; sustained means it never says who it is                                                            |
+| ERROR | `cannot read the configuration in ...`                        | a bad edit; the last good config is still serving                                                                                   |
+| ERROR | `application 'X' has failed`                                  | that cluster is no longer served — see below                                                                                        |
 
 ### One application failing does not stop the server
 
@@ -546,7 +493,7 @@ directory stays; remove it by hand only once you are certain the cluster is gone
 
 **A cluster cannot reach the witness.** Its nodes log `the witness (N) is unreachable`. Check UDP
 reachability on the port first, then that the witness logs the application as served, then that the
-node ids match — the witness's `--node-id` must equal the id each cluster configures with
+node ids match — the witness's own node id must equal the id each cluster configures with
 `Peer.witness(id, ...)`.
 
 **The witness sees the traffic but never answers.** Almost always the secret. A datagram failing
