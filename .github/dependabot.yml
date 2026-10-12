@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+
+    groups:
+      maven-plugins:
+        patterns:
+          - "org.apache.maven.plugins:*"
+          - "org.codehaus.mojo:*"
+          - "org.sonatype.central:*"
+          - "com.mycila:license-maven-plugin"
+          - "org.projectlombok:lombok-maven-plugin"
+      test-libraries:
+        patterns:
+          - "org.junit:*"
+          - "org.junit.jupiter:*"
+          - "org.mockito:*"
+          - "org.assertj:*"
+          - "org.awaitility:*"
+
+    # slf4j is held at 2.0.x deliberately.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "org.slf4j:*"
+      # 3.10 stages resolver files into the Central bundle, which the Portal rejects
+      - dependency-name: "org.apache.maven:apache-maven"
+        versions: [">= 3.10.0"]
