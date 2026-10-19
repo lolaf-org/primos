@@ -446,11 +446,8 @@
                                     <message>Maven 3.6.3 or newer is required: older versions ignore the child.*.inherit.append.path attributes the published poms rely on.</message>
                                 </requireMavenVersion>
                                 <requireJavaVersion>
-                                    <!-- 11 is both the target and the minimum build JDK, deliberately:
-                                         the test suite must be runnable on the oldest JDK primos
-                                         supports, not merely compiled against its API. -->
-                                    <version>[11,)</version>
-                                    <message>Building primos needs JDK 11 or newer, which is also the version it targets.</message>
+                                    <version>[17,)</version>
+                                    <message>Building primos needs JDK 17 or newer, for the two Spring Boot modules. The libraries still run on Java 11.</message>
                                 </requireJavaVersion>
                                 <requireReleaseDeps>
                                     <onlyWhenRelease>true</onlyWhenRelease>
@@ -483,7 +480,7 @@
                             </execution>
                         </executions>
                         <configuration>
-                            <!-- keyname come from ci secret -->
+                            <!-- keyname comes from the CI secret -->
                             <bestPractices>true</bestPractices>
                             <gpgArguments>
                                 <arg>--pinentry-mode</arg>
@@ -502,6 +499,11 @@
                             <!-- Upload and validate, do not publish automatically -->
                             <autoPublish>false</autoPublish>
                             <waitUntil>validated</waitUntil>
+                            <!-- central-publishing ignores maven.deploy.skip: a module missing here is published -->
+                            <excludeArtifacts>
+                                <excludeArtifact>primos-witness-cli</excludeArtifact>
+                                <excludeArtifact>primos-witness-boot</excludeArtifact>
+                            </excludeArtifacts>
                         </configuration>
                     </plugin>
                 </plugins>

@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
- * Writes the six messages into a caller-owned buffer.
+ * Writes the nine messages into a caller-owned buffer.
  *
  * <p>Allocation-free: the application name is padded once at construction, and every message is
  * written into a buffer the node reuses for the life of the process. The buffer comes back flipped

@@ -62,7 +62,7 @@ public final class WireFormat {
     public static final int OFFSET_SENDER = 48;
 
     /**
-     * Size of the header carried by all six messages.
+     * Size of the header carried by all nine messages.
      */
     public static final int HEADER_BYTES = 52;
 

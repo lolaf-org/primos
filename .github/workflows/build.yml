@@ -6,48 +6,34 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        java: [ '17', '25' ]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ matrix.java }}
-          cache: maven
-      - run: ./mvnw --batch-mode --no-transfer-progress verify
+    uses: lolaf-org/workflows/.github/workflows/maven-build.yml@v1.0.2
+    with:
+      # The lowest JDK that builds every module: the two Spring Boot modules compile for 17.
+      java-version: '17'
 
-  # The container image, which `verify` above deliberately does not touch: nothing in the reactor
-  # talks to a Docker daemon, so without this job a Dockerfile naming a jar that has moved would
-  # build green and fail on an operator's first `docker run` — the trap the tarball's launcher has
-  # already fallen into once.
-  #
-  # It builds and tests; it pushes nothing. Publishing an image is release plumbing and belongs with
-  # the rest of it, and a job that pushed from a branch would put an untagged build behind a moving
-  # tag that somebody is running.
+  # Nothing in the reactor talks to a Docker daemon, so without this job a Dockerfile naming a jar
+  # that has moved would build green and fail on an operator's first `docker run`. It pushes nothing.
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '17'
           cache: maven
-      # The image is built from the layered jar, so the jar has to exist first — and its own
-      # modules with it, since this is a reactor build against the local repository.
       - run: ./mvnw --batch-mode --no-transfer-progress install -DskipTests
       - run: docker build -f primos-witness-boot/src/main/docker/Dockerfile -t primos-witness:ci primos-witness-boot
-      # The image that was just built, named rather than rebuilt: what is tested is the artifact,
-      # not a second one that happens to come from the same Dockerfile.
+      # The image just built, named rather than rebuilt: what is tested is the artifact.
       - run: >
           ./mvnw --batch-mode --no-transfer-progress -pl primos-witness-boot -Pdocker verify
           -Ddocker.image=primos-witness:ci

@@ -18,7 +18,7 @@ package org.lolaf.primos.wire;
 import lombok.Getter;
 
 /**
- * The six messages, and the fixed size of each.
+ * The nine messages, and the fixed size of each.
  *
  * <p>{@code REQUEST_VOTE} and {@code APPEND_ENTRIES} carry no payload at all: the term and the
  * sender live in the header, which is everything they need. That is also why there is no

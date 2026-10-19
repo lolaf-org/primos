@@ -1,0 +1,118 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseVersion:
+        description: 'Version to release, without a leading v (e.g. 0.9.0). Ignored when performOnly.'
+        required: false
+        type: string
+      developmentVersion:
+        description: 'Version to leave main on afterwards (e.g. 0.9.1-SNAPSHOT). Ignored when performOnly.'
+        required: false
+        type: string
+      dryRun:
+        description: 'Rehearse: build and verify only - no commit, no tag, no push, no upload'
+        required: false
+        default: false
+        type: boolean
+      # Recovery, not routine. If prepare pushed and perform then failed, the tag is real and only the
+      # deployment is missing
+      performOnly:
+        description: 'Skip prepare and deploy an existing tag (set tag below)'
+        required: false
+        default: false
+        type: boolean
+      tag:
+        description: 'Tag to deploy when performOnly (e.g. v0.9.0)'
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    uses: lolaf-org/workflows/.github/workflows/maven-release.yml@v1.0.2
+    with:
+      release-version: ${{ inputs.releaseVersion }}
+      development-version: ${{ inputs.developmentVersion }}
+      dry-run: ${{ inputs.dryRun }}
+      perform-only: ${{ inputs.performOnly }}
+      tag: ${{ inputs.tag }}
+      java-version: '17'
+      timeout-minutes: 60
+    secrets: inherit
+
+  # The shared workflow ends at the GitHub Release; what an operator installs is the tarball and the image
+  distribution:
+    needs: release
+    if: ${{ !inputs.dryRun }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Derive the version
+        id: version
+        env:
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+          PERFORM_ONLY: ${{ inputs.performOnly }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$PERFORM_ONLY" = "true" ]; then
+            version="${TAG#v}"
+          else
+            version="$RELEASE_VERSION"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '17'
+          cache: maven
+
+      - name: Build the tarball and the Boot witness jar
+        run: ./mvnw -B -T1C install -DskipTests -pl primos-witness-cli,primos-witness-boot -am
+
+      - name: Attach the tarball to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release upload "$TAG" --clobber "primos-witness-cli/target/primos-witness-cli-$VERSION.tar.gz"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The source label links the package to this repository on GHCR
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: primos-witness-boot
+          file: primos-witness-boot/src/main/docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/primos-witness:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/primos-witness:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
