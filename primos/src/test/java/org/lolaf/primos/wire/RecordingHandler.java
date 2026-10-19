@@ -35,8 +35,8 @@ final class RecordingHandler implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntries(int senderId, long term) {
-        received.add("appendEntries(" + senderId + "," + term + ")");
+    public void onAppendEntries(int senderId, long term, long leaderVersion) {
+        received.add("appendEntries(" + senderId + "," + term + ",version=" + leaderVersion + ")");
     }
 
     @Override

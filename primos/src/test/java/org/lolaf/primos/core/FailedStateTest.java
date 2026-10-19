@@ -173,7 +173,7 @@ class FailedStateTest {
     }
 
     private void appendEntriesFrom(int from, long term) {
-        deliver(from, (encoder, buffer) -> encoder.appendEntries(buffer, term));
+        deliver(from, (encoder, buffer) -> encoder.appendEntries(buffer, term, 0));
     }
 
     /**

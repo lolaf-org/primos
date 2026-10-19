@@ -81,7 +81,7 @@ final class CapturedReply implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntries(int senderId, long term) {
+    public void onAppendEntries(int senderId, long term, long leaderVersion) {
         messages.add("appendEntries/" + term);
     }
 

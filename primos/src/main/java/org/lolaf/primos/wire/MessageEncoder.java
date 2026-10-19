@@ -77,10 +77,11 @@ public final class MessageEncoder {
     }
 
     /**
-     * The heartbeat. No payload: the term and the leader's id are both in the header.
+     * The heartbeat, carrying the version the leader last published in this term; 0 before any.
      */
-    public ByteBuffer appendEntries(ByteBuffer out, long term) {
+    public ByteBuffer appendEntries(ByteBuffer out, long term, long leaderVersion) {
         header(out, MessageType.APPEND_ENTRIES, 0, term);
+        out.putLong(leaderVersion);
         return finish(out);
     }
 

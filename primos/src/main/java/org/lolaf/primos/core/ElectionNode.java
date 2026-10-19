@@ -644,7 +644,7 @@ public final class ElectionNode implements MessageHandler {
 
     private void broadcastHeartbeat() {
         for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm));
+            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, 0L));
         }
     }
 
@@ -845,7 +845,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntries(int senderId, long term) {
+    public void onAppendEntries(int senderId, long term, long leaderVersion) {
         if (term < currentTerm) {
             send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false));
             return;

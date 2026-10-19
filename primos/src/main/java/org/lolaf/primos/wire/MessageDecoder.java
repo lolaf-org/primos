@@ -240,7 +240,7 @@ public final class MessageDecoder {
                         datagram.get(WireFormat.HEADER_BYTES) != 0, preVote);
                 break;
             case APPEND_ENTRIES:
-                handler.onAppendEntries(senderId, term);
+                handler.onAppendEntries(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES));
                 break;
             case APPEND_ENTRIES_REPLY:
                 handler.onAppendEntriesReply(senderId, term,

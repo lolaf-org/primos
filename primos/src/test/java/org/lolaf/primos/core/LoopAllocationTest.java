@@ -255,13 +255,13 @@ class LoopAllocationTest {
     private static ByteBuffer fromAStranger() {
         MessageEncoder encoder = new MessageEncoder("t", 999, MessageAuthenticator.disabled());
         ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        return copyOf(encoder.appendEntries(scratch, 1));
+        return copyOf(encoder.appendEntries(scratch, 1, 0));
     }
 
     private static ByteBuffer heartbeatFrom(int peerId) {
         MessageEncoder encoder = new MessageEncoder("t", peerId, MessageAuthenticator.disabled());
         ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        return copyOf(encoder.appendEntries(scratch, 1));
+        return copyOf(encoder.appendEntries(scratch, 1, 0));
     }
 
     private static ByteBuffer copyOf(ByteBuffer encoded) {

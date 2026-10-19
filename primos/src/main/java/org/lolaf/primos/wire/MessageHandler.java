@@ -39,9 +39,9 @@ public interface MessageHandler {
     void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote);
 
     /**
-     * A heartbeat from a leader.
+     * A heartbeat from a leader, with the version it last published in this term.
      */
-    void onAppendEntries(int senderId, long term);
+    void onAppendEntries(int senderId, long term, long leaderVersion);
 
     /**
      * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.

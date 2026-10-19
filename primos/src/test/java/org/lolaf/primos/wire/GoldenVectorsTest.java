@@ -48,7 +48,7 @@ class GoldenVectorsTest {
 
     private static final String APPEND_ENTRIES =
             "50524d53010300006f7264657273000000000000000000000000000000000000"
-                    + "0000000000000000000000000000002a00000003";
+                    + "0000000000000000000000000000002a000000030000000000000007";
 
     private static final String APPEND_ENTRIES_REPLY =
             "50524d53010400006f7264657273000000000000000000000000000000000000"
@@ -116,8 +116,8 @@ class GoldenVectorsTest {
     }
 
     @Test
-    void append_entries_is_pure_header_and_never_carries_entries() {
-        assertThat(hex(encoder.appendEntries(buffer, 42))).isEqualTo(APPEND_ENTRIES);
+    void append_entries_carries_a_big_endian_leader_version_and_never_entries() {
+        assertThat(hex(encoder.appendEntries(buffer, 42, 7))).isEqualTo(APPEND_ENTRIES);
     }
 
     @Test
@@ -144,7 +144,7 @@ class GoldenVectorsTest {
 
     @Test
     void the_application_name_is_zero_padded_to_a_fixed_width_field() {
-        String encoded = hex(encoder.appendEntries(buffer, 42));
+        String encoded = hex(encoder.appendEntries(buffer, 42, 0));
         String field = encoded.substring(WireFormat.OFFSET_APPLICATION * 2,
                 (WireFormat.OFFSET_APPLICATION + WireFormat.APPLICATION_BYTES) * 2);
 
@@ -156,7 +156,7 @@ class GoldenVectorsTest {
     void every_message_is_the_size_the_specification_says() {
         assertThat(MessageType.REQUEST_VOTE.messageBytes()).isEqualTo(52);
         assertThat(MessageType.REQUEST_VOTE_REPLY.messageBytes()).isEqualTo(53);
-        assertThat(MessageType.APPEND_ENTRIES.messageBytes()).isEqualTo(52);
+        assertThat(MessageType.APPEND_ENTRIES.messageBytes()).isEqualTo(60);
         assertThat(MessageType.APPEND_ENTRIES_REPLY.messageBytes()).isEqualTo(53);
         assertThat(MessageType.PING.messageBytes()).isEqualTo(60);
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);

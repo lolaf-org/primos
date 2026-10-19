@@ -54,7 +54,7 @@ leader; here that field simply is the sender, already in the header.
 |-----:|---------|--------:|----------------:|---------|
 | `0x01` | `RequestVote` | 0 | 52 | ask for a vote, or with the pre-vote flag, whether one would be given |
 | `0x02` | `RequestVoteReply` | 1 | 53 | grant or refuse it |
-| `0x03` | `AppendEntries` | 0 | 52 | the leader's heartbeat |
+| `0x03` | `AppendEntries` | 8 | 60 | the leader's heartbeat, with the version it last published |
 | `0x04` | `AppendEntriesReply` | 1 | 53 | acknowledge the heartbeat |
 | `0x05` | `Ping` | 8 | 60 | reachability probe |
 | `0x06` | `PingReply` | 8 | 60 | probe answer |
@@ -94,8 +94,17 @@ duplicated datagram is never a second vote.
 
 ### `AppendEntries` (`0x03`)
 
-No payload. It never carries entries, because there is no log: it is purely the heartbeat by which a leader asserts its
-term. A receiver whose term is not ahead becomes a follower of the sender and resets its election timer.
+| offset | size | field |
+|-------:|-----:|-------|
+| 52 | 8 | leader version: the version the leader last published in this term, `0` before any |
+
+It never carries entries, because there is no log: it is the heartbeat by which a leader asserts its term. A receiver
+whose term is not ahead becomes a follower of the sender and resets its election timer.
+
+The leader version lets the application tell followers that the leader's own data has changed, without primos ever
+carrying that data. It only increases within a term and restarts at `0` with each term, so a pair `(term, version)`
+orders every publication: a duplicated or reordered heartbeat carries a pair already seen, and is not reported twice.
+The election never reads it.
 
 ### `AppendEntriesReply` (`0x04`)
 
