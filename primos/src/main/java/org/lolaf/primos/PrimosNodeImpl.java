@@ -24,6 +24,7 @@ import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Random;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -63,6 +64,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
     private volatile RoleAndTerm roleAndTerm;
     private volatile Leader leader;
+    private volatile long leadershipConfirmedNanos = Long.MIN_VALUE;
     private volatile boolean running;
 
     private Thread thread;
@@ -167,6 +169,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
+    public OptionalLong leadershipConfirmedNanos() {
+        long confirmed = leadershipConfirmedNanos;
+        return running && confirmed != Long.MIN_VALUE ? OptionalLong.of(confirmed) : OptionalLong.empty();
+    }
+
+    @Override
     public Role role() {
         return roleAndTerm.role();
     }
@@ -260,6 +268,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private void standDown() {
         RoleAndTerm last = roleAndTerm;
         leader = null;
+        leadershipConfirmedNanos = Long.MIN_VALUE;
         roleAndTerm = new RoleAndTerm(Role.FOLLOWER, last.term());
         if (last.role() != Role.FOLLOWER) {
             dispatcher.onRoleChanged(last.role(), Role.FOLLOWER, last.term());
@@ -273,6 +282,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             roleAndTerm = new RoleAndTerm(election.role(), election.currentTerm());
         }
         leader = election.leader();
+        leadershipConfirmedNanos = election.leadershipConfirmedNanos();
     }
 
     @Override

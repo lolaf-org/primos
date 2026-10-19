@@ -107,6 +107,7 @@ public final class ElectionNode implements MessageHandler {
     private final Set<Integer> preVotesGranted = new HashSet<>();
     private final ByteBuffer sendBuffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
     private TrackedPeer[] peers;
+    private long[] confirmationScratch = new long[0];
     @Getter
     private Role role = Role.FOLLOWER;
     @Getter
@@ -1173,6 +1174,55 @@ public final class ElectionNode implements MessageHandler {
     public boolean isReachable(int peerId) {
         TrackedPeer trackedPeer = trackedPeer(peerId);
         return trackedPeer != null && trackedPeer.reachable;
+    }
+
+    /**
+     * While leading, the instant by which a quorum, this node included, had last answered its heartbeats, on the
+     * clock's base; {@code Long.MIN_VALUE} otherwise. A lease built on it cannot outlive this leadership: a node votes
+     * for a successor only after hearing no leader for {@code electionTimeoutMin}, so a quorum's last answer here
+     * comes at least that long before any successor's election.
+     *
+     * <p>Right after an election it reads as the election itself, which {@code becomeLeader} stamps on every peer:
+     * winning was a quorum of round trips. Allocation-free, because it is read every turn.
+     */
+    public long leadershipConfirmedNanos() {
+        if (role != Role.LEADER) {
+            return Long.MIN_VALUE;
+        }
+        int needed = quorum.required() - 1;
+        if (needed <= 0) {
+            return clock.nanoTime();
+        }
+        if (confirmationScratch.length < peers.length) {
+            confirmationScratch = new long[peers.length];
+        }
+        int count = 0;
+        for (TrackedPeer trackedPeer : peers) {
+            confirmationScratch[count++] = trackedPeer.lastRoundTripNanos;
+        }
+        if (count < needed) {
+            return Long.MIN_VALUE;
+        }
+        long confirmed = nthLatest(confirmationScratch, count, needed);
+        return confirmed == NO_CONTACT ? Long.MIN_VALUE : confirmed;
+    }
+
+    /**
+     * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
+     */
+    private static long nthLatest(long[] values, int count, int n) {
+        for (int i = 0; i < n; i++) {
+            int latest = i;
+            for (int j = i + 1; j < count; j++) {
+                if (values[j] > values[latest]) {
+                    latest = j;
+                }
+            }
+            long swap = values[i];
+            values[i] = values[latest];
+            values[latest] = swap;
+        }
+        return values[n - 1];
     }
 
     private boolean hasQuorumContact(long now) {

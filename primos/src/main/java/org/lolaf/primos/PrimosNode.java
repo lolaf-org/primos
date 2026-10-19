@@ -16,6 +16,7 @@
 package org.lolaf.primos;
 
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * One application instance's membership of a cluster: it starts, joins, and can answer
@@ -105,6 +106,13 @@ public interface PrimosNode extends AutoCloseable {
      * Leadership can be lost at any instant, so a present result is not a promise to still lead.
      */
     Optional<PublishedVersion> publishChange();
+
+    /**
+     * While this node leads, the instant, on {@link System#nanoTime()}'s base, by which a quorum of voters had last
+     * answered it; empty otherwise. A lease that ends a fixed time after this cannot outlive this node's leadership,
+     * because a successor is elected only once a quorum has heard nothing from it for an election timeout.
+     */
+    OptionalLong leadershipConfirmedNanos();
 
     /**
      * Registers a listener. Allowed after {@link #start()}, in which case it is immediately

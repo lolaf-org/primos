@@ -30,6 +30,9 @@ state.
 - **The term as a fencing token.** `roleAndTerm()` reads the role and the term together, so work done as leader can
   carry the term to an external system that rejects anything older. The documentation explains why a role check alone
   is not enough.
+- **Leader leases.** `leadershipConfirmedNanos()` says, while a node leads, by when a quorum had last answered it. A
+  lease that ends a fixed time after that cannot outlive the leadership, because a successor is only elected once a
+  quorum has heard nothing from the leader for an election timeout.
 - **Durable votes.** `FileStateStore` writes the term and the vote to disk before acting on them, so a node that
   restarts cannot vote twice in one term.
 - **Fast planned failover.** A leader that stops hands leadership to a follower in about one round trip instead of an

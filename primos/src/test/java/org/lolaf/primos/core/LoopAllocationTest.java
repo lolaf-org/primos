@@ -202,10 +202,14 @@ class LoopAllocationTest {
         return (threads.getThreadAllocatedBytes(id) - before) / turns;
     }
 
-    /** One turn: enough virtual time that the probe and advertisement deadlines both fire. */
+    /**
+     * One turn: enough virtual time that the probe and advertisement deadlines both fire, then the read the production
+     * loop makes after every turn.
+     */
     private void turn(ElectionNode node) {
         clock.advance(STEP);
         node.runOnce(0);
+        node.leadershipConfirmedNanos();
     }
 
     private ElectionNode node(Transport transport) {

@@ -125,6 +125,11 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
+        public java.util.OptionalLong leadershipConfirmedNanos() {
+            return java.util.OptionalLong.empty();
+        }
+
+        @Override
         public void addListener(PrimosListener listener) {
             // nothing to do
         }
