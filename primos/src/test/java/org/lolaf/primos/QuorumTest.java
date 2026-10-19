@@ -29,7 +29,7 @@ class QuorumTest {
         for (int id = 2; id <= applicationNodes; id++) {
             peers.add(Peer.application(id, "host-" + id, 7000));
         }
-        ClusterConfig.Builder builder = ClusterConfig.builder()
+        ClusterConfig.ClusterConfigBuilder builder = ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)
                 .peers(peers);

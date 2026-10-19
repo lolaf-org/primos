@@ -753,7 +753,7 @@ class ElectionNodeTest {
     }
 
     private ElectionNode startedWitness(boolean follows) {
-        ClusterConfig.Builder config = ClusterConfig.builder()
+        ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
                 .asWitness()

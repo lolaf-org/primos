@@ -63,7 +63,7 @@ import java.util.Objects;
  * is the whole reason one is fifty milliseconds and the other is thirty seconds.
  */
 @Value
-@Builder(builderClassName = "Builder", buildMethodName = "buildUnvalidated")
+@Builder(buildMethodName = "buildUnvalidated")
 public class Timings {
 
     /**
@@ -195,7 +195,7 @@ public class Timings {
     /**
      * Every rule, checked before a {@link Timings} escapes its builder.
      *
-     * <p>Called from {@link Builder#build()} rather than from a constructor, because the
+     * <p>Called from {@link TimingsBuilder#build()} rather than from a constructor, because the
      * constructor is Lombok's now — which is also why the generated build method is named
      * {@code buildUnvalidated} and wrapped: it is the only seam where this can run without
      * hand-writing the {@code @Builder.Default} machinery.
@@ -261,7 +261,7 @@ public class Timings {
         return this;
     }
 
-    public static class Builder {
+    public static class TimingsBuilder {
 
         public Timings build() {
             return buildUnvalidated().validate();

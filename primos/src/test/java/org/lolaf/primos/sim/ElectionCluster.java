@@ -61,7 +61,7 @@ public final class ElectionCluster {
         Peer witnessPeer = withWitness ? Peer.witness(WITNESS_ID, "sim", 7000) : null;
 
         for (int id = 1; id <= applicationNodes; id++) {
-            ClusterConfig.Builder config = ClusterConfig.builder()
+            ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
                     .applicationName("sim")
                     .nodeId(id)
                     .timings(timings)

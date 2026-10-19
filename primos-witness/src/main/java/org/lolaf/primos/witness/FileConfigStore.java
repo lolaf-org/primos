@@ -155,7 +155,7 @@ public final class FileConfigStore implements ConfigStore {
                     + " one end against the other's default is how an invalid or too-narrow range"
                     + " is built. Set both.");
         }
-        Timings.Builder builder = Timings.builder();
+        Timings.TimingsBuilder builder = Timings.builder();
         if (heartbeat != null) {
             builder.heartbeatInterval(Duration.ofMillis(heartbeat));
         }

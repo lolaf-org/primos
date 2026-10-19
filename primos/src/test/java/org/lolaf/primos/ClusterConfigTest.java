@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ClusterConfigTest {
 
-    private static ClusterConfig.Builder valid() {
+    private static ClusterConfig.ClusterConfigBuilder valid() {
         return ClusterConfig.builder()
                 .applicationName("orders")
                 .nodeId(1)

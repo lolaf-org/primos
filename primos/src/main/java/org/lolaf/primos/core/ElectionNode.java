@@ -223,7 +223,7 @@ public final class ElectionNode implements MessageHandler {
         this.encoder = new MessageEncoder(config.applicationName(), config.nodeId(), authenticator);
         // A node answers only its configured peers, by id. A witness server cannot: its members
         // are not configured, so it has nothing to compare an id against and the authentication
-        // tag is the whole of its admission control. See ClusterConfig.Builder#learnedMembership.
+        // tag is the whole of its admission control. See ClusterConfig.ClusterConfigBuilder#learnedMembership.
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
                 config.isLearnedMembership() ? id -> true : this::isConfiguredPeer, this.stats);
     }

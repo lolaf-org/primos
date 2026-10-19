@@ -32,7 +32,7 @@ import java.util.*;
  * cluster shrank" is how a split brain gets talked into existence.
  */
 @Getter
-@Builder(builderClassName = "Builder", buildMethodName = "buildUnvalidated")
+@Builder(buildMethodName = "buildUnvalidated")
 public class ClusterConfig {
 
     /**
@@ -46,7 +46,7 @@ public class ClusterConfig {
     private final int nodeId;
 
     /**
-     * Set through {@link Builder#asWitness()} rather than by naming the type, so that declaring a
+     * Set through {@link ClusterConfigBuilder#asWitness()} rather than by naming the type, so that declaring a
      * witness is one named decision.
      */
     @lombok.Builder.Default
@@ -141,7 +141,7 @@ public class ClusterConfig {
     /**
      * Whether an owner outside this node applies what peers state, so a difference is not a fault.
      *
-     * <p>See {@link ClusterConfig.Builder#followsStatedTimings()}. It suppresses the mismatch
+     * <p>See {@link ClusterConfig.ClusterConfigBuilder#followsStatedTimings()}. It suppresses the mismatch
      * report and nothing else; no decision anywhere reads it.
      */
     public boolean isFollowingStatedTimings() {
@@ -156,7 +156,7 @@ public class ClusterConfig {
      * Whether this witness's voters arrive rather than being configured.
      *
      * <p>True only for the standalone witness server. See
-     * {@link ClusterConfig.Builder#learnedMembership()}.
+     * {@link ClusterConfig.ClusterConfigBuilder#learnedMembership()}.
      */
     public boolean isLearnedMembership() {
         return learnedMembership;
@@ -187,7 +187,7 @@ public class ClusterConfig {
     /**
      * Every rule, checked before a {@link ClusterConfig} escapes its builder.
      *
-     * <p>Called from {@link Builder#build()} rather than from a constructor, because the
+     * <p>Called from {@link ClusterConfigBuilder#build()} rather than from a constructor, because the
      * constructor is Lombok's now — which is why the generated build method is named
      * {@code buildUnvalidated} and wrapped.
      */
@@ -245,7 +245,7 @@ public class ClusterConfig {
         }
     }
 
-    public static class Builder {
+    public static class ClusterConfigBuilder {
 
         private static String requireAndTrimApplicationName(String name) {
             Objects.requireNonNull(name, "applicationName");
@@ -281,7 +281,7 @@ public class ClusterConfig {
          * <p>A named decision rather than {@code nodeType(WITNESS)}, which the generated setter
          * also allows — this is the one that says what it means.
          */
-        public Builder asWitness() {
+        public ClusterConfigBuilder asWitness() {
             return nodeType(PeerType.WITNESS);
         }
 
@@ -304,7 +304,7 @@ public class ClusterConfig {
          *
          * <p>Only a witness may do this, and a witness that does may start with no peers at all.
          */
-        public Builder learnedMembership() {
+        public ClusterConfigBuilder learnedMembership() {
             // Set directly rather than through a generated setter: Lombok skips generating one when
             // a method of that name already exists, and this no-argument form is the name.
             this.learnedMembership = true;
@@ -327,7 +327,7 @@ public class ClusterConfig {
          * membership: an application node that stopped reporting mismatches would lose the one
          * signal that a cluster's profile has drifted.
          */
-        public Builder followsStatedTimings() {
+        public ClusterConfigBuilder followsStatedTimings() {
             // Set directly rather than through a generated setter, as learnedMembership does and
             // for the same reason: Lombok skips the setter when the name is already taken.
             this.followsStatedTimings = true;

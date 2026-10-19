@@ -156,7 +156,7 @@ public class PropertiesConfigStore implements ConfigStore {
                     + " on every reset, and setting one end against the other's default is how an"
                     + " invalid or too-narrow range is built. Set both.");
         }
-        Timings.Builder builder = Timings.builder();
+        Timings.TimingsBuilder builder = Timings.builder();
         if (timings.heartbeatInterval() != null) {
             builder.heartbeatInterval(timings.heartbeatInterval());
         }

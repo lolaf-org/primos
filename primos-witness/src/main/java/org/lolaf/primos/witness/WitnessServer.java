@@ -765,7 +765,7 @@ public final class WitnessServer implements AutoCloseable {
 
     private ElectionNode newNode(ApplicationConfig application, RoutedTransport transport,
                                  StateStore store, Timings adopted, PrimosStatsListener stats) {
-        ClusterConfig.Builder config = ClusterConfig.builder()
+        ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
                 .applicationName(application.name())
                 .nodeId(nodeId)
                 .asWitness()
