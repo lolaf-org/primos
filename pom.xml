@@ -496,6 +496,7 @@
                         <configuration>
                             <!-- The <server> id in settings.xml holding the Portal token. -->
                             <publishingServerId>central</publishingServerId>
+                            <checksums>required</checksums>
                             <!-- Upload and validate, do not publish automatically -->
                             <autoPublish>false</autoPublish>
                             <waitUntil>validated</waitUntil>
