@@ -4,11 +4,11 @@
 #
 #   docker compose -f src/main/docker/docker-compose.yml up
 #
-# The image is built first — see the Dockerfile beside this file, or docs/witness-spring-boot.md.
+# The image is the published one; to run a local build, tag it with this name or change it below.
 
 services:
   witness:
-    image: primos-witness:dev
+    image: ghcr.io/lolaf-org/primos-witness:0.9.0
 
     # RULE 1: never more than one. No `deploy.replicas: 2`, no second service pointed at the same
     # volume, no `docker compose up --scale witness=2`. Two witnesses answering for one cluster is

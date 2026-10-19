@@ -15,7 +15,7 @@ backend.
 <dependency>
     <groupId>org.lolaf.primos</groupId>
     <artifactId>primos-spring-boot-starter</artifactId>
-    <version>${primos.version}</version>
+    <version>0.9.0</version>
 </dependency>
 ```
 

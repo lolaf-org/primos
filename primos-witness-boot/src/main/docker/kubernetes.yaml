@@ -84,7 +84,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: witness
-          image: primos-witness:dev
+          image: ghcr.io/lolaf-org/primos-witness:0.9.0
           ports:
             - name: primos
               containerPort: 7420

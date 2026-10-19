@@ -27,9 +27,12 @@ Both build the same witness from the same configuration directory, and neither h
 The tarball unpacks into a `primos-witness/` directory and runs from there: its configuration in `conf/`, its state in
 `data/`, both beside the launcher.
 
+Download it from the [GitHub Release](https://github.com/lolaf-org/primos/releases):
+
 ```sh
 cd /opt
-tar xzf primos-witness-cli-<version>.tar.gz
+curl -fLO https://github.com/lolaf-org/primos/releases/download/v0.9.0/primos-witness-cli-0.9.0.tar.gz
+tar xzf primos-witness-cli-0.9.0.tar.gz
 cp -r primos-witness/conf-sample primos-witness/conf
 chmod 0750 primos-witness/conf
 ```

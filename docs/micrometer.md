@@ -11,7 +11,7 @@ configure.
 <dependency>
     <groupId>org.lolaf.primos</groupId>
     <artifactId>primos-micrometer</artifactId>
-    <version>${primos.version}</version>
+    <version>0.9.0</version>
 </dependency>
 ```
 

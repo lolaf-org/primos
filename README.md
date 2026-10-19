@@ -36,7 +36,7 @@ application keeps its own state; primos only tells it who is currently in charge
 <dependency>
     <groupId>org.lolaf.primos</groupId>
     <artifactId>primos</artifactId>
-    <version>${primos.version}</version>
+    <version>0.9.0</version>
 </dependency>
 ```
 
@@ -76,7 +76,8 @@ Everything else is in the [documentation](docs/README.md).
 
 ## Status
 
-Built and tested, not yet published to Maven Central. The API may still change before the first release.
+0.9.0 is the first release, on Maven Central. The API may still change before 1.0; every change is listed in the
+[changelog](CHANGELOG.md).
 
 ## Licence
 

@@ -8,6 +8,9 @@ environment, and the jar the [container image](#the-container-image) is built fr
 
 ## Quick start
 
+The published form is the [container image](#running-it), `ghcr.io/lolaf-org/primos-witness:0.9.0`. The jar it
+wraps runs on its own too, once [built from source](#building-it):
+
 ```bash
 java -jar primos-witness-boot-<version>.jar \
   --primos.witness.config-directory=/etc/primos-witness
@@ -156,18 +159,6 @@ default**. They are the manual's first two rules, restated for the platform that
 Everything else in this section is a consequence of one of those two, or of the fact that restarting a witness is the
 one genuinely risky operation in its lifecycle.
 
-### Building the image
-
-```bash
-./mvnw -o -pl primos,primos-witness,primos-micrometer,primos-witness-boot package -DskipTests
-docker build -f primos-witness-boot/src/main/docker/Dockerfile -t primos-witness:dev primos-witness-boot
-```
-
-The `Dockerfile` is a plain multi-stage build over the layered jar: a named JRE 17 base, a non-root user, and nothing
-fetched at run time. Not `spring-boot:build-image`, because buildpacks fetch at build time and produce an image whose
-contents nobody chose. **Nothing in the Maven build talks to a Docker daemon**, so `./mvnw verify` stays green on a
-machine that has none; CI builds the image in a separate job.
-
 ### Running it
 
 ```bash
@@ -180,7 +171,7 @@ docker run -d --name primos-witness \
   --read-only --tmpfs /tmp \
   --memory 512m \
   --stop-timeout 30 \
-  primos-witness:dev
+  ghcr.io/lolaf-org/primos-witness:0.9.0
 ```
 
 Four of those lines fail silently if you drop them:
@@ -197,6 +188,18 @@ The container runs as uid 1000 and needs no capabilities.
 
 A bind-mount source must be an absolute path: a relative one is read as a named volume, and the symptom is silence on
 the port.
+
+### Building the image from source
+
+```bash
+./mvnw -o -pl primos,primos-witness,primos-micrometer,primos-witness-boot package -DskipTests
+docker build -f primos-witness-boot/src/main/docker/Dockerfile -t primos-witness:dev primos-witness-boot
+```
+
+The `Dockerfile` is a plain multi-stage build over the layered jar: a named JRE 17 base, a non-root user, and nothing
+fetched at run time. Not `spring-boot:build-image`, because buildpacks fetch at build time and produce an image whose
+contents nobody chose. **Nothing in the Maven build talks to a Docker daemon**, so `./mvnw verify` stays green on a
+machine that has none; CI builds the image in a separate job.
 
 Worked examples, both carrying all of the above and commented line by line:
 [`docker-compose.yml`](../primos-witness-boot/src/main/docker/docker-compose.yml) and
