@@ -23,6 +23,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
 import org.lolaf.primos.PeerType;
 import org.lolaf.primos.RecordingStats;
 
@@ -64,6 +65,34 @@ class ReachabilityTest {
         assertThat(cluster.node(1).election().isReachable(3)).isFalse();
         assertThat(cluster.node(1).election().isReachable(2)).isTrue();
         assertThat(events.down).containsExactly(3);
+    }
+
+    @Test
+    void a_peer_that_says_it_is_leaving_is_reported_down_as_having_left() {
+        Simulation simulation = new Simulation(12L).checking(Invariants.all());
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingListener events = listenOn(cluster, 1);
+        simulation.run(Duration.ofSeconds(5));
+
+        cluster.node(3).stopCleanly();
+        simulation.run(Duration.ofSeconds(10));
+
+        assertThat(events.downWithReason).containsExactly("3/LEFT");
+    }
+
+    @Test
+    void a_peer_that_crashes_is_reported_down_as_unreachable_never_as_having_left() {
+        Simulation simulation = new Simulation(13L).checking(Invariants.all());
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingListener events = listenOn(cluster, 1);
+        simulation.run(Duration.ofSeconds(5));
+
+        simulation.crash(3);
+        simulation.run(Duration.ofSeconds(10));
+
+        assertThat(events.downWithReason)
+                .as("a crash says nothing, so the only honest reason is that it stopped answering")
+                .containsExactly("3/UNREACHABLE");
     }
 
     @Test
@@ -208,6 +237,7 @@ class ReachabilityTest {
 
         final List<Integer> up = new ArrayList<>();
         final List<Integer> down = new ArrayList<>();
+        final List<String> downWithReason = new ArrayList<>();
         final List<Integer> witnessesUp = new ArrayList<>();
 
         @Override
@@ -219,8 +249,9 @@ class ReachabilityTest {
         }
 
         @Override
-        public void onPeerDown(Peer peer) {
+        public void onPeerDown(Peer peer, PeerDownReason reason) {
             down.add(peer.id());
+            downWithReason.add(peer.id() + "/" + reason);
         }
     }
 }

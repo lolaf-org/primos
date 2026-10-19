@@ -19,7 +19,8 @@ seconds, and a node that shut down politely stays reported as alive for that who
 back the false positives the tuning existed to prevent.
 
 So the fix is not a shorter timeout but a message. A shutdown is the one departure a node knows about in advance and
-can say out loud: it sends `Leaving` to every peer, and `onPeerDown` fires at once instead of a timeout later.
+can say out loud: it sends `Leaving` to every peer, and `onPeerDown` fires at once instead of a timeout later, with
+`PeerDownReason.LEFT` so a listener can tell an orderly stop from a peer that went silent (`UNREACHABLE`).
 
 Crashes, kills, power loss and partitions still take the probe timeout, as they must. The timeout stays long; it just
 stops being paid for the common case.

@@ -1014,7 +1014,7 @@ public final class ElectionNode implements MessageHandler {
         trackedPeer.reachable = false;
         log.info("cluster '{}': node {} {} {} said it is shutting down",
                 config.applicationName(), config.nodeId(), trackedPeer.peer.isWitness() ? "witness" : "peer", senderId);
-        listener.onPeerDown(trackedPeer.peer);
+        listener.onPeerDown(trackedPeer.peer, PeerDownReason.LEFT);
     }
 
     /**
@@ -1164,7 +1164,7 @@ public final class ElectionNode implements MessageHandler {
         } else {
             log.warn("cluster '{}': peer {} is unreachable", config.applicationName(), peer.id());
         }
-        listener.onPeerDown(peer);
+        listener.onPeerDown(peer, PeerDownReason.UNREACHABLE);
     }
 
     /**

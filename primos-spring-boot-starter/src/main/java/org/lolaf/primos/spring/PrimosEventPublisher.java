@@ -17,6 +17,7 @@ package org.lolaf.primos.spring;
 
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
 import org.lolaf.primos.PrimosListener;
 import org.lolaf.primos.Role;
 import org.springframework.context.ApplicationEventPublisher;
@@ -59,7 +60,7 @@ class PrimosEventPublisher implements PrimosListener {
     }
 
     @Override
-    public void onPeerDown(Peer peer) {
-        events.publishEvent(new PrimosEvents.PeerDown(peer));
+    public void onPeerDown(Peer peer, PeerDownReason reason) {
+        events.publishEvent(new PrimosEvents.PeerDown(peer, reason));
     }
 }

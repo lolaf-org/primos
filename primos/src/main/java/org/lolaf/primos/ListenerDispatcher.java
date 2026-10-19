@@ -109,8 +109,8 @@ final class ListenerDispatcher implements PrimosListener {
     }
 
     @Override
-    public void onPeerDown(Peer peer) {
-        each("onPeerDown", listener -> listener.onPeerDown(peer));
+    public void onPeerDown(Peer peer, PeerDownReason reason) {
+        each("onPeerDown", listener -> listener.onPeerDown(peer, reason));
     }
 
     private void each(String event, Consumer<PrimosListener> delivery) {

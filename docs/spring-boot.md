@@ -384,7 +384,9 @@ class LeadershipListener {
     @EventListener
     void onPeerDown(PrimosEvents.PeerDown event) {
         // Reachability, not membership. The cluster did not shrink and quorum is unchanged.
-        alerting.warn("peer {} is unreachable", event.peer().id());
+        if (event.reason() == PeerDownReason.UNREACHABLE) {
+            alerting.warn("peer {} is unreachable", event.peer().id());   // a clean stop is not an alert
+        }
     }
 }
 ```

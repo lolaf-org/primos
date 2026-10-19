@@ -24,6 +24,7 @@ import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
 import org.lolaf.primos.PrimosListener;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.PrimosStatsListener;
@@ -387,7 +388,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
         }
 
         @Override
-        public void onPeerDown(Peer peer) {
+        public void onPeerDown(Peer peer, PeerDownReason reason) {
             int slot = slot(peer.id());
             if (slot < peerUp.length) {
                 peerUp[slot].set(0);

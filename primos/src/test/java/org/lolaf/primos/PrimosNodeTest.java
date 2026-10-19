@@ -562,7 +562,7 @@ class PrimosNodeTest {
         }
 
         @Override
-        public void onPeerDown(Peer peer) {
+        public void onPeerDown(Peer peer, PeerDownReason reason) {
             peerEvents.incrementAndGet();
         }
     }

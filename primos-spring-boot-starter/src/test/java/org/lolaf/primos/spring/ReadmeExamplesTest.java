@@ -18,6 +18,7 @@ package org.lolaf.primos.spring;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.RoleAndTerm;
 import org.springframework.boot.ApplicationArguments;
@@ -184,8 +185,10 @@ class ReadmeExamplesTest {
         @EventListener
         void onPeerDown(PrimosEvents.PeerDown event) {
             // Reachability, not membership. The cluster did not shrink and quorum is unchanged.
-            Peer peer = event.peer();
-            assertThat(peer.id()).isNotNegative();
+            if (event.reason() == PeerDownReason.UNREACHABLE) {
+                Peer peer = event.peer();
+                assertThat(peer.id()).isNotNegative();
+            }
         }
 
         private void forwardWorkTo(String host, int port) {

@@ -186,7 +186,7 @@ class UdpClusterTest {
                 java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
         @Override
-        public void onPeerDown(Peer peer) {
+        public void onPeerDown(Peer peer, PeerDownReason reason) {
             down.add(peer.id());
         }
 

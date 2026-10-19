@@ -127,8 +127,9 @@ Three rules decide whether an assignment built on this is safe:
 - **Fence by term.** Every action taken on a shard carries the term of the assignment it came from, and whatever the
   action touches rejects a term lower than the highest it has seen. For a moment two nodes may each believe they own a
   shard; the term is what makes the stale owner's work fail. See [Using leadership safely](using-leadership-safely.md).
-- **Assign over the configured members, not the reachable ones.** `onPeerDown` means unreachable, and on the JVM a
-  garbage collection looks the same. Reshuffling on every peer-down event moves shards on every pause.
+- **Move shards on a departure at once, on silence only after a grace period.** `onPeerDown` with
+  `PeerDownReason.LEFT` is a clean stop and certain; with `UNREACHABLE` it may be a garbage collection, and moving
+  shards on every pause reshuffles them for nothing.
 - **Spread the fetches if there are many nodes.** Every follower is told at about the same moment; with dozens of
   nodes, a small random delay before fetching keeps them off the leader all at once.
 

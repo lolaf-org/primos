@@ -220,8 +220,8 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public void onPeerDown(Peer peer) {
-        dispatcher.onPeerDown(peer);
+    public void onPeerDown(Peer peer, PeerDownReason reason) {
+        dispatcher.onPeerDown(peer, reason);
     }
 
     private void loop() {

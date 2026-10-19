@@ -17,6 +17,7 @@ package org.lolaf.primos.spring;
 
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
 import org.lolaf.primos.Role;
 
 import java.util.Optional;
@@ -91,8 +92,9 @@ public final class PrimosEvents {
      * three votes. Reading this event as "the cluster is smaller now" is how a split brain is talked
      * into existence.
      *
-     * @param peer the peer
+     * @param peer   the peer
+     * @param reason {@code LEFT} when it said it was going, {@code UNREACHABLE} when it went silent and may come back
      */
-    public record PeerDown(Peer peer) {
+    public record PeerDown(Peer peer, PeerDownReason reason) {
     }
 }
