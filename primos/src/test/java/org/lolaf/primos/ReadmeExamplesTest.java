@@ -16,6 +16,7 @@
 package org.lolaf.primos;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -23,6 +24,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -210,5 +215,112 @@ class ReadmeExamplesTest {
                         .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("state store is required");
+    }
+
+    // ------------------------------------------------- docs/leader-data.md
+
+    @Test
+    void the_leader_data_example_publishes_and_a_follower_applies_only_the_matching_term() throws IOException {
+        try (PrimosNode node = PrimosNode.builder()
+                     .clusterConfig(ClusterConfig.builder().applicationName("orders").nodeId(1).build())
+                     .store(() -> new FileStateStore(directory))
+                     .transport(UdpTransport.builder().bindAddress(new InetSocketAddress("127.0.0.1", 0)))
+                     .build()) {
+            AssignmentPublisher publisher = new AssignmentPublisher();
+            publisher.attachTo(node);
+            node.start();
+
+            await().atMost(5, TimeUnit.SECONDS).until(() -> publisher.current() != null);
+            Edition published = publisher.current();
+            assertThat(published.term).isEqualTo(node.roleAndTerm().term());
+            assertThat(published.version).isEqualTo(1);
+
+            Peer leaderAt = Peer.application(1, "127.0.0.1", 7420);
+            AssignmentFollower stale = new AssignmentFollower(host -> published);
+            stale.fetch(leaderAt, published.term + 1, 1);
+            assertThat(stale.applied).as("fetched data from another term is not the current leader's").isNull();
+
+            AssignmentFollower follower = new AssignmentFollower(host -> published);
+            follower.onLeaderVersion(Leader.at(leaderAt), published.term, published.version);
+            await().atMost(5, TimeUnit.SECONDS).until(() -> follower.applied == published);
+        }
+    }
+
+    interface Fetcher {
+        Edition fetch(String host);
+    }
+
+    static final class Assignment {
+        static Assignment compute() {
+            return new Assignment();
+        }
+    }
+
+    static final class Edition {
+        final long term;
+        final long version;
+        final Assignment assignment;
+
+        Edition(long term, long version, Assignment assignment) {
+            this.term = term;
+            this.version = version;
+            this.assignment = assignment;
+        }
+    }
+
+    static class AssignmentPublisher implements PrimosListener {
+
+        private final AtomicReference<Edition> served = new AtomicReference<>();
+        private final ExecutorService work = Executors.newSingleThreadExecutor();
+        private PrimosNode node;
+
+        void attachTo(PrimosNode node) {
+            this.node = node;
+            node.addListener(this);
+        }
+
+        @Override
+        public void onRoleChanged(Role previous, Role current, long term) {
+            if (current == Role.LEADER) {
+                work.submit(this::rebalance);
+            }
+        }
+
+        void rebalance() {
+            Assignment next = Assignment.compute();
+            node.publishChange().ifPresent(published ->
+                    served.set(new Edition(published.term(), published.version(), next)));
+        }
+
+        Edition current() {
+            return served.get();
+        }
+    }
+
+    static class AssignmentFollower implements PrimosListener {
+
+        private final ExecutorService work = Executors.newSingleThreadExecutor();
+        private final Fetcher fetcher;
+        private volatile Edition applied;
+
+        AssignmentFollower(Fetcher fetcher) {
+            this.fetcher = fetcher;
+        }
+
+        @Override
+        public void onLeaderVersion(Leader leader, long term, long version) {
+            if (leader.isSelf()) {
+                return;
+            }
+            leader.peer().ifPresent(at -> work.submit(() -> fetch(at, term, version)));
+        }
+
+        void fetch(Peer leader, long term, long version) {
+            Edition edition = fetcher.fetch(leader.host());
+            if (edition == null || edition.term != term || edition.version < version) {
+                return;
+            }
+            applied = edition;
+        }
     }
 }

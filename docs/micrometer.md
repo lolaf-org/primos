@@ -94,6 +94,8 @@ they say how close the cluster is to having no leader at all.
 | `primos.peers.forgotten` | counter | learned voters dropped after going quiet; zero on a node |
 | `primos.role.changes` | counter | role transitions, tagged `to` |
 | `primos.leader.changes` | counter | leader changes seen, including losing one |
+| `primos.versions.published` | counter | versions this node published as leader; several between two heartbeats count once |
+| `primos.versions.received` | counter | leader versions this node was told about as a follower |
 
 Three of these answer questions no snapshot could. `primos.campaign` and `primos.leaderless` are durations that begin
 and end between two scrapes, the two numbers most wanted after a failover. `primos.probe.rtt` carries every sample,

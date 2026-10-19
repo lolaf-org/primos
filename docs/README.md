@@ -12,6 +12,7 @@ before your application acts on being leader.
 | [Cluster sizing and the witness](cluster-sizing.md) | How many voters do I need, why does a pair need a witness, and what does a one-node cluster do? |
 | [Clean shutdown](clean-shutdown.md) | Why does a planned restart cost one round trip instead of an election timeout? |
 | [Timings](timings.md) | Which profile do I pick, what does failover cost, and how do I derive my own intervals? |
+| [Leader data](leader-data.md) | How does a leader tell every node that its data changed, so each can fetch it, for sharding for example? |
 | [Observability](observability.md) | What does a node report as it runs, and why is there no stats snapshot? |
 | [Micrometer](micrometer.md) | Which meters do I get on my `MeterRegistry`, and which one do I alert on? |
 | [Spring Boot](spring-boot.md) | How do I configure a node from `application.properties` and gate my beans on leadership? |

@@ -36,6 +36,10 @@ state.
   election timeout, and any node that stops tells its peers, so they report it down at once rather than after a probe
   timeout.
 - **Restartable nodes.** A stopped node can be started again and rejoins with the term and vote it left with.
+- **Leader data.** A leader calls `publishChange()` when data it owns changes, a shard assignment for example, and
+  every node is told through `onLeaderVersion`, so each can fetch the data from the leader over its own channel. The
+  data never goes through primos, so it can be any size. With Spring Boot it arrives as a `PrimosEvents.LeaderVersion`
+  event, and `primos-micrometer` counts versions published and received.
 - **Authentication.** With a cluster secret set, every datagram carries an HMAC (SHA-256 by default) and is checked
   before anything in it is read.
 - **Timing profiles.** `Timings.lan()` and `Timings.wan()`, or your own intervals, which are refused when they

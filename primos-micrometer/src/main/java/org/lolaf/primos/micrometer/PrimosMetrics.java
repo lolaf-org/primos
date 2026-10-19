@@ -106,6 +106,8 @@ public final class PrimosMetrics implements PrimosStatsListener {
     private final Counter handoverAccepted;
     private final Counter peersForgotten;
     private final Counter leaderChanges;
+    private final Counter versionsPublished;
+    private final Counter versionsReceived;
     private final Counter[] dropped;
     private final Counter[] roleChanges;
 
@@ -190,6 +192,10 @@ public final class PrimosMetrics implements PrimosStatsListener {
                 "Learned voters dropped after going quiet. Always zero with a configured peer set", base);
         this.leaderChanges = counter("primos.leader.changes",
                 "Leader changes seen by this node, including losing one", base);
+        this.versionsPublished = counter("primos.versions.published",
+                "Versions this node published as leader; several between two heartbeats count once", base);
+        this.versionsReceived = counter("primos.versions.received",
+                "Leader versions this node was told about as a follower", base);
 
         this.dropped = new Counter[DropReason.values().length];
         for (DropReason reason : DropReason.values()) {
@@ -365,6 +371,11 @@ public final class PrimosMetrics implements PrimosStatsListener {
         @Override
         public void onLeaderChanged(Optional<Leader> leader, long term) {
             leaderChanges.increment();
+        }
+
+        @Override
+        public void onLeaderVersion(Leader leader, long term, long version) {
+            (leader.isSelf() ? versionsPublished : versionsReceived).increment();
         }
 
         @Override

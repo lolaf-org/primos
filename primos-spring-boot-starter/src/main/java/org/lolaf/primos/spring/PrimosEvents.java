@@ -62,6 +62,18 @@ public final class PrimosEvents {
     }
 
     /**
+     * The leader published a change to its data with {@code PrimosNode.publishChange()}. Fetch the
+     * data from it over your own channel and apply it only if it carries this term; when
+     * {@link Leader#isSelf()}, this node is the leader and there is nothing to fetch.
+     *
+     * @param leader  the leader that published
+     * @param term    its term, which the fetched data must carry
+     * @param version the version published, the latest this node has heard of
+     */
+    public record LeaderVersion(Leader leader, long term, long version) {
+    }
+
+    /**
      * A configured peer became reachable.
      *
      * <p>Reachability, never membership: the cluster did not grow, and quorum is unchanged.

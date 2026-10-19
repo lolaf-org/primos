@@ -63,7 +63,8 @@ with no peers at all does.
 ## Listening
 
 Every `PrimosListener` method has a default, so override only what you need: `onRoleChanged`, `onLeaderChanged`,
-`onPeerUp`, `onPeerDown`.
+`onLeaderVersion`, `onPeerUp`, `onPeerDown`. `onLeaderVersion` says the leader's own data changed; see
+[Leader data](leader-data.md).
 
 **Callbacks arrive on the node thread.** Hand real work to your own executor, or you are holding up heartbeats. A
 callback slower than half the heartbeat interval is logged as such.

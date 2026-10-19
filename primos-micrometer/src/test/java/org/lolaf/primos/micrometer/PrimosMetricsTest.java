@@ -243,6 +243,24 @@ class PrimosMetricsTest {
                 .isEqualTo(1.0);
     }
 
+    @Test
+    void a_publication_is_counted_on_the_leader_and_on_the_follower_told_of_it() {
+        ClusterConfig one = cluster(1, 2);
+        PrimosMetrics metrics = PrimosMetrics.create(registry, one);
+        PrimosNode node = start(builder(one).statsListener(metrics));
+        metrics.bind(node);
+        PrimosNode other = start(builder(cluster(2, 1)));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader() || other.role().isLeader());
+        boolean metredNodeLeads = node.role().isLeader();
+
+        (metredNodeLeads ? node : other).publishChange().orElseThrow(AssertionError::new);
+
+        String moved = metredNodeLeads ? "primos.versions.published" : "primos.versions.received";
+        String still = metredNodeLeads ? "primos.versions.received" : "primos.versions.published";
+        await().atMost(5, TimeUnit.SECONDS).until(() -> counter(moved) == 1.0);
+        assertThat(counter(still)).isZero();
+    }
+
     // ------------------------------------------------------------- helpers
 
     private double gauge(String name, String... tags) {

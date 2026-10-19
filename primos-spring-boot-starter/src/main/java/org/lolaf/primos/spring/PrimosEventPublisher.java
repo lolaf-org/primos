@@ -49,6 +49,11 @@ class PrimosEventPublisher implements PrimosListener {
     }
 
     @Override
+    public void onLeaderVersion(Leader leader, long term, long version) {
+        events.publishEvent(new PrimosEvents.LeaderVersion(leader, term, version));
+    }
+
+    @Override
     public void onPeerUp(Peer peer) {
         events.publishEvent(new PrimosEvents.PeerUp(peer));
     }

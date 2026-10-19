@@ -92,6 +92,19 @@ class LeaderLifecycleEndToEndTest {
         });
     }
 
+    @Test
+    void a_published_change_reaches_an_ordinary_event_listener() {
+        runner().run(context -> {
+            PrimosNode node = context.getBean(PrimosNode.class);
+            eventually(() -> assertThat(node.role()).isEqualTo(Role.LEADER));
+
+            long term = node.publishChange().orElseThrow(AssertionError::new).term();
+
+            eventually(() -> assertThat(context.getBean(RoleRecorder.class).versions())
+                    .containsExactly(term + "/1/self"));
+        });
+    }
+
     /**
      * The pair that matters for {@code manual}: nothing runs until the application says so, and
      * then everything does. The negative half is what proves the positive one is not passing by
@@ -151,13 +164,24 @@ class LeaderLifecycleEndToEndTest {
 
         private final List<Role> roles = new CopyOnWriteArrayList<>();
 
+        private final List<String> versions = new CopyOnWriteArrayList<>();
+
         @EventListener
         void onRoleChanged(PrimosEvents.RoleChanged event) {
             roles.add(event.current());
         }
 
+        @EventListener
+        void onLeaderVersion(PrimosEvents.LeaderVersion event) {
+            versions.add(event.term() + "/" + event.version() + (event.leader().isSelf() ? "/self" : ""));
+        }
+
         List<Role> roles() {
             return roles;
+        }
+
+        List<String> versions() {
+            return versions;
         }
     }
 

@@ -389,7 +389,8 @@ class LeadershipListener {
 }
 ```
 
-Four events: `RoleChanged`, `LeaderChanged`, `PeerUp`, `PeerDown`.
+Five events: `RoleChanged`, `LeaderChanged`, `LeaderVersion`, `PeerUp`, `PeerDown`. `LeaderVersion` says the leader
+published a change to its own data, for followers to fetch; see [Leader data](leader-data.md).
 
 **Every event carries its own term. Use the value you are handed** rather than re-reading the node: dispatch happens
 off the node thread, so by the time your listener runs the answer may have moved on. That is why the term is on the
