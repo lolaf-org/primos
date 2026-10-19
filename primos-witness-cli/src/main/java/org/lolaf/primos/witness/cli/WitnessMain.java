@@ -29,6 +29,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The process: parse a handful of arguments, open the configuration, serve until told to stop.
@@ -120,10 +122,10 @@ public final class WitnessMain implements Callable<Integer> {
      * is fsynced before it is acted on, so an exit that gives up here loses nothing that had been
      * promised.
      */
-    private static void stopAndWaitFor(WitnessServer server, Thread serverThread) {
+    private static void stopAndAwait(WitnessServer server, CountDownLatch closed) {
         server.stop();
         try {
-            serverThread.join(SHUTDOWN_TIMEOUT.toMillis());
+            closed.await(SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -165,21 +167,22 @@ public final class WitnessMain implements Callable<Integer> {
             builder.bindAddress(bindAddress);
         }
 
+        CountDownLatch closed = new CountDownLatch(1);
         try (WitnessServer server = builder.build()) {
-            // The hook asks the loop to finish its turn and then waits for it, rather than closing
-            // anything itself. Two reasons, and both are the difference between a clean stop and a
-            // torn one. Closing a state store from the signal thread while the server thread is
-            // mid-write is exactly the corruption the store exists to prevent. And the JVM exits
-            // the moment its hooks return — without the join, SIGTERM would cut the server thread
-            // off before it had closed anything at all.
-            Thread serverThread = Thread.currentThread();
-            Thread shutdown = new Thread(() -> stopAndWaitFor(server, serverThread), "primos-witness-shutdown");
+            // The hook asks the loop to finish its turn and waits for the server to be closed,
+            // rather than closing anything itself: closing a state store from the signal thread
+            // while the server thread is mid-write is the corruption the store exists to prevent,
+            // and the JVM exits the moment its hooks return. It waits on a latch, not on the main
+            // thread, because main then calls System.exit, which blocks forever during shutdown.
+            Thread shutdown = new Thread(() -> stopAndAwait(server, closed), "primos-witness-shutdown");
             Runtime.getRuntime().addShutdownHook(shutdown);
             try {
                 server.run();
             } finally {
                 removeHook(shutdown);
             }
+        } finally {
+            closed.countDown();
         }
     }
 
