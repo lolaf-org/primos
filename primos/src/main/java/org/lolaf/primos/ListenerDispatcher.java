@@ -99,6 +99,11 @@ final class ListenerDispatcher implements PrimosListener {
     }
 
     @Override
+    public void onLeaderVersion(Leader leader, long term, long version) {
+        each("onLeaderVersion", listener -> listener.onLeaderVersion(leader, term, version));
+    }
+
+    @Override
     public void onPeerUp(Peer peer) {
         each("onPeerUp", listener -> listener.onPeerUp(peer));
     }

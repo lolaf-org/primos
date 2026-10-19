@@ -60,6 +60,7 @@ public final class ElectionNode implements MessageHandler {
      * these are {@link MonotonicClock#nanoTime()} readings, which may legitimately be negative.
      */
     private static final long NO_CONTACT = Long.MIN_VALUE;
+    private static final long NOT_PUBLISHING = -1;
     /**
      * Probe intervals of silence after which a witness stops tracking a learned voter.
      */
@@ -117,6 +118,14 @@ public final class ElectionNode implements MessageHandler {
     private Leader leader;
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
+    // publishChange() runs on the caller's thread and everything else here on the node thread, so the
+    // term being led and the counter for it are only changed together under this lock.
+    private final Object publication = new Object();
+    private long publishingTerm = NOT_PUBLISHING;
+    private volatile long publishedVersion;
+    private long sentVersion;
+    private long reportedTerm = NOT_PUBLISHING;
+    private long reportedVersion;
     private long lastLeaderContactNanos;
     private long probeDeadlineNanos;
     private long probeSequence;
@@ -421,7 +430,62 @@ public final class ElectionNode implements MessageHandler {
         Role previous = role;
         role = next;
         roleChangedAtNanos = clock.nanoTime();
+        // Before the listener, so a publishChange() made from the election callback counts.
+        if (next == Role.LEADER || previous == Role.LEADER) {
+            synchronized (publication) {
+                publishingTerm = next == Role.LEADER ? currentTerm : NOT_PUBLISHING;
+                publishedVersion = 0;
+            }
+        }
         listener.onRoleChanged(previous, next, currentTerm);
+    }
+
+    /**
+     * Counts one more change to the leader's data in its current term, and has the node thread
+     * carry it in the next heartbeat. Callable from any thread.
+     *
+     * @return the term and version published, or empty when this node is not leading
+     */
+    public Optional<PublishedVersion> publishChange() {
+        long term;
+        long version;
+        synchronized (publication) {
+            if (publishingTerm == NOT_PUBLISHING) {
+                return Optional.empty();
+            }
+            term = publishingTerm;
+            version = ++publishedVersion;
+        }
+        transport.wakeup();
+        return Optional.of(new PublishedVersion(term, version));
+    }
+
+    /**
+     * Sends a publication at once rather than at the next heartbeat, and reports it to this node.
+     */
+    private void announcePublication() {
+        long version = publishedVersion;
+        if (version != sentVersion) {
+            broadcastHeartbeat();
+            heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
+        }
+        reportLeaderVersion(currentTerm, version);
+    }
+
+    /**
+     * Reports a pair newer than the last one reported. Version 0 is never reported: it means the
+     * leader has published nothing, and onLeaderChanged has already said who leads.
+     */
+    private void reportLeaderVersion(long term, long version) {
+        if (version < 1 || config.isWitness()) {
+            return;
+        }
+        if (term < reportedTerm || (term == reportedTerm && version <= reportedVersion)) {
+            return;
+        }
+        reportedTerm = term;
+        reportedVersion = version;
+        listener.onLeaderVersion(leader, term, version);
     }
 
     private void setLeader(int next) {
@@ -506,6 +570,7 @@ public final class ElectionNode implements MessageHandler {
                 broadcastHeartbeat();
                 heartbeatDeadlineNanos = now + timings.heartbeatInterval().toNanos();
             }
+            announcePublication();
             return;
         }
         if (!config.isWitness() && now >= electionDeadlineNanos) {
@@ -643,8 +708,10 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void broadcastHeartbeat() {
+        long version = publishedVersion;
+        sentVersion = version;
         for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, 0L));
+            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, version));
         }
     }
 
@@ -862,6 +929,7 @@ public final class ElectionNode implements MessageHandler {
         resetElectionTimer();
 
         send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true));
+        reportLeaderVersion(term, leaderVersion);
     }
 
     @Override

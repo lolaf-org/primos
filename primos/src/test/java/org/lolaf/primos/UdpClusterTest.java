@@ -151,6 +151,34 @@ class UdpClusterTest {
                 .allMatch(nanos -> nanos > 0, "a positive round trip");
     }
 
+    @Test
+    void a_published_change_reaches_every_follower_through_its_listener() {
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
+        List<String> told = java.util.Collections.synchronizedList(new ArrayList<>());
+        PrimosListener recorder = new PrimosListener() {
+            @Override
+            public void onLeaderVersion(Leader leader, long term, long version) {
+                told.add(term + "/" + version + (leader.isSelf() ? "/self" : ""));
+            }
+        };
+        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
+        PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
+        for (PrimosNode node : new PrimosNode[] {one, two, three}) {
+            node.addListener(recorder);
+        }
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+        PrimosNode leader = leaderOf(one, two, three);
+        PrimosNode follower = leader == one ? two : one;
+
+        assertThat(follower.publishChange()).as("a follower has nothing to publish").isEmpty();
+        PublishedVersion published = leader.publishChange().orElseThrow(AssertionError::new);
+
+        String expected = published.term() + "/" + published.version();
+        await().atMost(5, TimeUnit.SECONDS).until(() -> told.size() == 3);
+        assertThat(told).containsExactlyInAnyOrder(expected + "/self", expected, expected);
+    }
+
     /** Records which peers a node reported down, since that is no longer readable from a snapshot. */
     private static final class RecordingListener implements PrimosListener {
 

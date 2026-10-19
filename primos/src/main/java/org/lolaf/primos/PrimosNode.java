@@ -98,6 +98,15 @@ public interface PrimosNode extends AutoCloseable {
     Optional<Leader> leader();
 
     /**
+     * Tells every node that this leader's own data changed, so each can fetch it. Primos carries
+     * only the version, in every heartbeat; the data stays with the application.
+     *
+     * @return the term and version to store with the data, or empty when this node is not leading.
+     * Leadership can be lost at any instant, so a present result is not a promise to still lead.
+     */
+    Optional<PublishedVersion> publishChange();
+
+    /**
      * Registers a listener. Allowed after {@link #start()}, in which case it is immediately
      * delivered a synthetic event describing the current state, so a late listener cannot miss the
      * transition it was registered for.

@@ -159,6 +159,14 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
+    public synchronized Optional<PublishedVersion> publishChange() {
+        if (!running) {
+            return Optional.empty();
+        }
+        return election.publishChange();
+    }
+
+    @Override
     public Role role() {
         return roleAndTerm.role();
     }
@@ -199,6 +207,11 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     public void onLeaderChanged(Optional<Leader> next, long term) {
         leader = next.orElse(null);
         dispatcher.onLeaderChanged(next, term);
+    }
+
+    @Override
+    public void onLeaderVersion(Leader leader, long term, long version) {
+        dispatcher.onLeaderVersion(leader, term, version);
     }
 
     @Override

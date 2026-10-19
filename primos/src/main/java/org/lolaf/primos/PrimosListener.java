@@ -56,6 +56,15 @@ public interface PrimosListener {
     }
 
     /**
+     * The leader published a change with {@link PrimosNode#publishChange()}: fetch its data from it,
+     * over your own channel, and apply it only if it carries this term. Told once per publication,
+     * never for version 0, and to the leader too, where {@link Leader#isSelf()} says there is
+     * nothing to fetch.
+     */
+    default void onLeaderVersion(Leader leader, long term, long version) {
+    }
+
+    /**
      * A peer became reachable. Check {@link Peer#isWitness()} before treating it as somewhere work
      * can be sent: a witness votes but does not run the application.
      */

@@ -120,6 +120,11 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
+        public Optional<PublishedVersion> publishChange() {
+            return Optional.empty();
+        }
+
+        @Override
         public void addListener(PrimosListener listener) {
             // nothing to do
         }
