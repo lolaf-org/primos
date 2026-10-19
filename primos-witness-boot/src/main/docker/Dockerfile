@@ -52,7 +52,7 @@ LABEL org.opencontainers.image.title="Primos witness" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 # A witness holds one identity's votes and needs no privileges to do it. Root is left behind before
-# the first byte is served, and the root filesystem can be read-only: see the README for the two
+# the first byte is served, and the root filesystem can be read-only: see docs/witness-spring-boot.md for the two
 # writable paths (/tmp, and the state volume below).
 RUN addgroup -S -g 1000 primos && adduser -S -u 1000 -G primos -H -D primos
 
@@ -90,7 +90,7 @@ EXPOSE 8080/tcp
 # A percentage rather than -Xmx: the container limit is the one number an operator sets, and a fixed
 # heap silently ignores it being raised. The tarball's launcher says -Xmx128m, which sizes a process
 # with no framework in it — sizing this container to that number is an OOM kill that looks like a
-# crash. The limit wants real headroom above the heap; the README says 512Mi and where it comes from.
+# crash. The limit wants real headroom above the heap; docs/witness-spring-boot.md says 512Mi and where it comes from.
 #
 # ExitOnOutOfMemoryError stays. A witness that cannot answer must die and be seen to die, rather
 # than hold its socket bound while it thrashes: a witness that is silently not answering looks
@@ -107,5 +107,5 @@ ENV JDK_JAVA_OPTIONS="-XX:MaxRAMPercentage=65.0 -XX:+ExitOnOutOfMemoryError"
 # Exec form, so java is PID 1 and receives SIGTERM itself: no init shim, and no shell to swallow the
 # signal. Boot's graceful shutdown then drives the server's stop(), which sends every served cluster
 # its Leaving datagram — so none of them waits out a probe timeout — and closes the state stores.
-# That takes longer than Docker's 10s default grace, which is why the README says --stop-timeout 30.
+# That takes longer than Docker's 10s default grace, which is why the documentation says --stop-timeout 30.
 ENTRYPOINT ["java", "-jar", "application.jar"]

@@ -30,11 +30,11 @@ import org.lolaf.primos.store.FileStateStore;
 import org.lolaf.primos.transport.UdpTransport;
 
 /**
- * The README's examples, compiled and run.
+ * The examples in README.md and docs/, compiled and run.
  *
  * <p>Documentation that does not compile is worse than none: it is read as authoritative and
- * costs an hour to disbelieve. Everything here is copied from README.md, so an API change that
- * makes the README wrong breaks the build instead of quietly misleading the next reader.
+ * costs an hour to disbelieve. Everything here is copied from the documentation, so an API change
+ * that makes it wrong breaks the build instead of quietly misleading the next reader.
  */
 class ReadmeExamplesTest {
 
@@ -70,7 +70,7 @@ class ReadmeExamplesTest {
             node.start();
             assertThat(node.role()).isIn(Role.FOLLOWER, Role.CANDIDATE, Role.LEADER);
 
-            // The fencing pattern from "Using it safely": role and term read together.
+            // The fencing pattern from docs/using-leadership-safely.md: role and term read together.
             RoleAndTerm current = node.roleAndTerm();
             assertThat(current.isLeader()).isEqualTo(current.role() == Role.LEADER);
             assertThat(current.term()).isNotNegative();
@@ -98,7 +98,7 @@ class ReadmeExamplesTest {
             assertThat(node.roleAndTerm().role()).isNotNull();
             assertThat(node.roleAndTerm().term()).isNotNegative();
 
-            // Every event the README's table names, so the table cannot drift from the interface.
+            // Every event docs/observability.md's table names, so the table cannot drift from the interface.
             PrimosStatsListener every = new PrimosStatsListener() {
             };
             every.onElectionWon(1, 1);
@@ -150,7 +150,7 @@ class ReadmeExamplesTest {
 
     @Test
     void build_rejects_exactly_what_the_readme_says_it_rejects() {
-        // Each of these is a line in the README's "Deriving your own" section. If a rule changes,
+        // Each of these is a line in docs/timings.md's "Deriving your own" section. If a rule changes,
         // the documentation is wrong and this fails rather than the reader finding out later.
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> Timings.builder()
                         .heartbeatInterval(java.time.Duration.ofMillis(100))
@@ -191,7 +191,7 @@ class ReadmeExamplesTest {
 
     @Test
     void a_wan_witness_in_a_lan_cluster_is_five_times_slower_to_agree_to_a_failover() {
-        // The README tells operators to use one profile cluster-wide. This is the number behind
+        // docs/timings.md tells operators to use one profile cluster-wide. This is the number behind
         // that: a node refuses a pre-vote while it has heard from a leader within
         // electionTimeoutMin, so the witness's own profile decides when it will agree to a
         // failover — which, for a two-node pair, is the vote everything is waiting on.

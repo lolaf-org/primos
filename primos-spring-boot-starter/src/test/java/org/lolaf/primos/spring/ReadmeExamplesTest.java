@@ -38,13 +38,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * Compiles and runs the code in this module's README.
+ * Compiles and runs the code in docs/spring-boot.md.
  *
  * <p>Same rule as {@code ReadmeExamplesTest} in the library: if the public API changes, this is
  * where the documentation breaks, and both get fixed together. Documentation that is never executed
  * is documentation that is eventually wrong.
  *
- * <p>The classes below are the README's examples, trimmed only of the surrounding prose — the
+ * <p>The classes below are that page's examples, trimmed only of the surrounding prose — the
  * shapes, the method calls and the annotations are as printed.
  */
 class ReadmeExamplesTest {
@@ -102,7 +102,7 @@ class ReadmeExamplesTest {
         });
     }
 
-    // ------------------------------------------------------------------ the README's examples
+    // ------------------------------------------------------------------ the documented examples
 
     @LeaderOnly
     static class OutboxPublisher implements SmartLifecycle {
@@ -189,7 +189,7 @@ class ReadmeExamplesTest {
         }
 
         private void forwardWorkTo(String host, int port) {
-            // the README's illustration; nothing to do here
+            // the documentation's illustration; nothing to do here
         }
 
         List<Long> terms() {

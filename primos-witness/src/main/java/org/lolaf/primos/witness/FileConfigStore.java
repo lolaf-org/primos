@@ -430,7 +430,7 @@ public final class FileConfigStore implements ConfigStore {
      * cannot: the socket is bound once, the state directory is opened once, and vote logging is
      * taken by the server when it starts. Publishing the new snapshot without saying so would leave
      * the file on disk disagreeing with the running process, with nothing anywhere to say which one
-     * was winning — and the witness README has promised this line since it was written.
+     * was winning — and the witness manual has promised this line since it was written.
      */
     private void reportRestartRequired(WitnessSettings previous, WitnessSettings candidate) {
         warnIfChanged("bind.host/bind.port", previous.bindAddress(), candidate.bindAddress());

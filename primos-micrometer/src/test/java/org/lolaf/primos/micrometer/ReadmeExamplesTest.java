@@ -38,9 +38,9 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The README's examples, compiled and run.
+ * The examples in docs/micrometer.md, compiled and run.
  *
- * <p>Same rule as the library's own: an API change that makes the README wrong breaks the build
+ * <p>Same rule as the library's own: an API change that makes the documentation wrong breaks the build
  * rather than quietly misleading the next reader.
  */
 class ReadmeExamplesTest {

@@ -62,26 +62,17 @@
     </fileSets>
 
     <!--
-        Two documents, because they answer different questions and neither is complete alone. This
-        module's README is what somebody who just unpacked this tarball wants — where to put it, the
-        options, the systemd unit. The manual is everything about the server that is true whichever
-        front door runs it: the safety rules, the keyring, config.source, hot reload, what to alert
-        on.
-
-        The manual lives in primos-witness rather than here, because copying it into each front door
-        is how two manuals drift apart. Both travel with the thing they document, so they are to
-        hand on a box with no browser and no route to a wiki. destName is why these are <file>
-        entries rather than a fileSet: a fileSet cannot rename, and two files called README.md
-        cannot share a directory.
+        The tarball page and the witness manual, renamed so they are to hand on a box with no
+        browser. destName is why these are <file> entries: a fileSet cannot rename.
     -->
     <files>
         <file>
-            <source>${project.basedir}/README.md</source>
+            <source>${project.basedir}/../docs/witness-cli.md</source>
             <outputDirectory></outputDirectory>
             <destName>README.md</destName>
         </file>
         <file>
-            <source>${project.basedir}/../primos-witness/README.md</source>
+            <source>${project.basedir}/../docs/witness.md</source>
             <outputDirectory></outputDirectory>
             <destName>MANUAL.md</destName>
         </file>

@@ -34,7 +34,7 @@ import java.lang.annotation.Target;
  * Carry the term into whatever external system the work touches and have that system reject
  * anything below the highest term it has seen. This annotation is the most likely thing in the
  * module to be mistaken for a solution to that, which is why the warning is here rather than only
- * in the README.
+ * in the documentation.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

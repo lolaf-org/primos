@@ -4,7 +4,7 @@
 #
 #   docker compose -f src/main/docker/docker-compose.yml up
 #
-# The image is built first — see the Dockerfile beside this file, or the README.
+# The image is built first — see the Dockerfile beside this file, or docs/witness-spring-boot.md.
 
 services:
   witness:

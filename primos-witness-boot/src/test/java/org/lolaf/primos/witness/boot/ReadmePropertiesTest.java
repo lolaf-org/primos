@@ -30,14 +30,14 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every {@code primos.witness.*} key the README names is a key that exists.
+ * Every {@code primos.witness.*} key {@code docs/witness-spring-boot.md} names is a key that exists.
  *
- * <p>The library holds its README's Java examples to a compiler; this module's examples are
+ * <p>The library holds its documented Java examples to a compiler; this module's examples are
  * properties, so this is the same rule with the tool that fits them. A renamed or deleted setting
  * breaks the build rather than quietly leaving the documentation wrong — which for an
  * operator-facing artifact is the kind of wrong that is only discovered at three in the morning.
  *
- * <p>Both sides are generated: the keys come out of the README, and the truth comes from the
+ * <p>Both sides are generated: the keys come out of that page, and the truth comes from the
  * {@code spring-configuration-metadata.json} the configuration processor writes from
  * {@link WitnessProperties}. Nothing here is a list somebody has to remember to update.
  */
@@ -56,7 +56,7 @@ class ReadmePropertiesTest {
 
     @Test
     void every_property_the_readme_names_exists() throws IOException {
-        Set<String> documented = keysIn(read(Paths.get("README.md")));
+        Set<String> documented = keysIn(read(Paths.get("../docs/witness-spring-boot.md")));
         Set<String> real = keysIn(read(Paths.get("target/classes/META-INF/spring-configuration-metadata.json")));
 
         assertThat(real)
@@ -64,7 +64,7 @@ class ReadmePropertiesTest {
                         + " pass by knowing nothing")
                 .isNotEmpty();
         assertThat(documented)
-                .as("the README names settings this application does not have")
+                .as("the documentation names settings this application does not have")
                 .isSubsetOf(real);
     }
 
