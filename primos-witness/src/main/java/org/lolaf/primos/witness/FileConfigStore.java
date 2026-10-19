@@ -558,7 +558,9 @@ public final class FileConfigStore implements ConfigStore {
 
         String state = properties.getProperty("state.directory");
         if (state != null && !state.trim().isEmpty()) {
-            builder.stateDirectory(directory.getFileSystem().getPath(state.trim()));
+            // Against the configuration directory, not the working directory: a witness started from
+            // another directory must not find an empty state directory and forget its votes.
+            builder.stateDirectory(directory.resolve(state.trim()).normalize());
         }
         String source = properties.getProperty("config.source", "file").trim();
         builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));

@@ -95,7 +95,7 @@ ConfigMap, since a ConfigMap key cannot contain `/`.
 |---|---|---|
 | `bind.host` | `0.0.0.0` | **no**: read and ignored until restart |
 | `bind.port` | `7420` | **no** |
-| `state.directory` | `<config>/state` | **no** |
+| `state.directory` | `<config>/state`; a relative path is resolved against the configuration directory | **no** |
 | `config.source` | `file` | yes |
 | `config.cluster.limit` | `64` | yes |
 | `secret.<name>.value` | none | yes |

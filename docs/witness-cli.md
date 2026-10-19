@@ -24,41 +24,62 @@ Both build the same witness from the same configuration directory, and neither h
 
 ## Installing
 
-Unpack the distribution wherever you keep such things:
+The tarball unpacks into a `primos-witness/` directory and runs from there: its configuration in `conf/`, its state in
+`data/`, both beside the launcher.
+
+```sh
+cd /opt
+tar xzf primos-witness-cli-<version>.tar.gz
+cp -r primos-witness/conf-sample primos-witness/conf
+chmod 0750 primos-witness/conf
+```
 
 ```
-primos-witness-cli-<version>/
+/opt/primos-witness/
 ├── bin/primos-witness
 ├── lib/*.jar
-├── conf-sample/                 # heavily commented; copy it, do not point at it
+├── conf-sample/                 # heavily commented; copy it to conf/, never edit it
 │   ├── witness.properties
 │   └── applications/example.properties
+├── conf/                        # yours: witness.properties, applications/, keys
+├── data/                        # the term and vote of every served cluster, created on first start
 ├── MANUAL.md                    # the witness manual
 ├── README.md                    # this page
 └── LICENSE.txt
 ```
 
-```sh
-install -d -m 0750 /etc/primos-witness/applications
-install -d -m 0750 /var/lib/primos-witness
-cp -r primos-witness-cli-*/conf-sample/* /etc/primos-witness/
-```
-
-`conf-sample/` is deliberately a *sample* rather than the live path, so that upgrading never overwrites
-`witness.properties`: an upgrade that replaced your secrets with placeholders would take out every cluster the witness
-serves.
+`data/` comes from `state.directory=../data` in the sample: a relative path is resolved against the configuration
+directory, so it does not depend on where the process is started from. **It must survive**: a witness that forgets a
+vote can grant a second one in the same term and elect two leaders. Put `/opt/primos-witness` on durable local
+storage, or set `state.directory` to an absolute path that is.
 
 Requires a JRE 11 or newer on `PATH`, or `JAVA_HOME` set.
+
+## Upgrading
+
+Unpack the new tarball over the same directory, after removing `lib/`:
+
+```sh
+cd /opt
+rm -rf primos-witness/lib
+tar xzf primos-witness-cli-<new-version>.tar.gz
+```
+
+`conf/` and `data/` are not in the tarball, so unpacking cannot replace your keys or forget a vote; only
+`conf-sample/`, `bin/`, `lib/` and the documents are replaced. `lib/` is removed first because the launcher loads every
+jar in it, and the old version's jars would otherwise sit beside the new ones.
 
 ## Running
 
 ```sh
-bin/primos-witness --config /etc/primos-witness
+bin/primos-witness
 ```
+
+Without `--config` it reads `conf/` beside `bin/`, and refuses to start if there is none.
 
 | option | default | notes |
 |---|---|---|
-| `--config <directory>` | `/etc/primos-witness` | must exist |
+| `--config <directory>` | `conf/` in the unpacked directory | must exist |
 | `--node-id <id>` | `1023` | 0 to 1023. **Fixed once deployed**; the [manual](witness.md#the-node-id-is-durable) says why |
 | `--bind <host:port>` | from configuration | overrides `bind.host`/`bind.port` |
 | `-h`, `--help` | | |
@@ -84,12 +105,12 @@ Wants=network-online.target
 Type=exec
 User=primos
 Group=primos
-ExecStart=/opt/primos-witness/bin/primos-witness --config /etc/primos-witness
+ExecStart=/opt/primos-witness/bin/primos-witness
 Restart=on-failure
 RestartSec=5s
 
 # The state directory must survive. Everything else may be locked down.
-ReadWritePaths=/var/lib/primos-witness
+ReadWritePaths=/opt/primos-witness/data
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
@@ -108,4 +129,4 @@ state stores before exiting. systemd's `TimeoutStopSec` defaults to 90s, which i
 ./mvnw -o -pl primos,primos-witness,primos-witness-cli package -DskipTests
 ```
 
-leaves `primos-witness-cli/target/primos-witness-cli-<version>-dist.tar.gz`, laid out as *Installing* above shows.
+leaves `primos-witness-cli/target/primos-witness-cli-<version>.tar.gz`, laid out as *Installing* above shows.

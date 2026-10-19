@@ -30,7 +30,7 @@ Where the code departs from figure 2 of the Raft paper, a comment at the site sa
 | `primos` | the library: API, role state machine, wire codec, transports, state store |
 | `primos-witness` | the witness itself and its configuration store, as a library with no `main` |
 | `primos-micrometer` | meters for a node and for a witness's served clusters; see [Micrometer](micrometer.md) |
-| `primos-witness-cli` | the command line and the `tar.gz`/`zip` distribution; see [Witness from the tarball](witness-cli.md) |
+| `primos-witness-cli` | the command line and the `tar.gz` distribution; see [Witness from the tarball](witness-cli.md) |
 | `primos-witness-boot` | the witness as a Spring Boot application, and the container image; see [Witness on Spring Boot](witness-spring-boot.md) |
 | `primos-spring-boot-starter` | Spring Boot auto-configuration and a leadership-gated lifecycle; see [Spring Boot](spring-boot.md) |
 

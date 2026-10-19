@@ -33,9 +33,20 @@ fi
 # datagrams a second; what matters is that it never pauses, not that it can grow.
 : "${PRIMOS_WITNESS_OPTS:=-Xms64m -Xmx128m -XX:+ExitOnOutOfMemoryError}"
 
-# The state directory is the one thing here that must survive. Losing it lets the witness grant a
-# second vote in a term it has already voted in, which elects two leaders — the exact failure it
-# was deployed to prevent.
+# Without --config the witness runs from this directory: conf/ beside bin/, and the state in data/
+# as the sample's state.directory says. Neither ships in the tarball, so an upgrade unpacked over
+# this directory cannot replace the keys or forget a vote.
+case " $* " in
+    *" --config "* | *" --config="* | *" -V "* | *" --version "* | *" -h "* | *" --help "*) ;;
+    *)
+        if [ ! -d "$home/conf" ]; then
+            echo "no configuration in $home/conf: copy $home/conf-sample to it and edit it, or pass --config <directory>" >&2
+            exit 2
+        fi
+        set -- --config "$home/conf" "$@"
+        ;;
+esac
+
 exec "$java" $PRIMOS_WITNESS_OPTS \
     -cp "$home/lib/*" \
     org.lolaf.primos.witness.cli.WitnessMain "$@"

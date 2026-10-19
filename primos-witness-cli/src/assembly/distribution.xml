@@ -23,9 +23,10 @@
 
     <formats>
         <format>tar.gz</format>
-        <format>zip</format>
     </formats>
     <includeBaseDirectory>true</includeBaseDirectory>
+    <!-- Unversioned, so an upgrade unpacks over the same directory and finds conf/ and data/ in place. -->
+    <baseDirectory>primos-witness</baseDirectory>
 
     <dependencySets>
         <dependencySet>

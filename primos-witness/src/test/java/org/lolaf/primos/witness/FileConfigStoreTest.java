@@ -77,6 +77,26 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_relative_state_directory_is_resolved_against_the_configuration_directory() throws IOException {
+        settings("state.directory=../data");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().stateDirectory())
+                    .isEqualTo(directory.getParent().resolve("data"));
+        }
+    }
+
+    @Test
+    void an_absolute_state_directory_is_taken_as_given() throws IOException {
+        Path elsewhere = directory.resolveSibling("elsewhere").toAbsolutePath();
+        settings("state.directory=" + elsewhere);
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().stateDirectory()).isEqualTo(elsewhere);
+        }
+    }
+
+    @Test
     void keys_are_read_from_the_witness_file_with_their_algorithms() throws IOException {
         settings(String.join("\n",
                 "secret.platform.value = shared-by-everything",

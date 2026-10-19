@@ -64,7 +64,9 @@
                             <descriptors>
                                 <descriptor>src/assembly/distribution.xml</descriptor>
                             </descriptors>
-                            <appendAssemblyId>true</appendAssemblyId>
+                            <appendAssemblyId>false</appendAssemblyId>
+                            <!-- Attached without a classifier it would replace the jar as the main artifact. -->
+                            <attach>false</attach>
                             <tarLongFileMode>posix</tarLongFileMode>
                         </configuration>
                     </execution>
