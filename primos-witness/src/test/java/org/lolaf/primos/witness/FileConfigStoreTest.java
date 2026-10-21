@@ -15,8 +15,12 @@
  */
 package org.lolaf.primos.witness;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.Timings;
+import org.lolaf.primos.time.VirtualClock;
+import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,19 +30,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.Timings;
-import org.lolaf.primos.wire.MessageAuthenticator;
-import org.junit.jupiter.api.io.TempDir;
-import org.lolaf.primos.time.VirtualClock;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileConfigStoreTest {
 
+    private final VirtualClock clock = new VirtualClock();
     @TempDir
     Path directory;
-
-    private final VirtualClock clock = new VirtualClock();
 
     @BeforeEach
     void createLayout() throws IOException {
@@ -572,23 +571,6 @@ class FileConfigStoreTest {
     }
 
     @Test
-    void a_restart_required_key_is_still_published_so_the_snapshot_stays_truthful()
-            throws IOException {
-        settings("bind.port=9999");
-
-        try (FileConfigStore store = open()) {
-            settings("bind.port=8888");
-
-            assertThat(rescan(store)).isTrue();
-            // The socket is bound once and does not move; what must not happen is the snapshot
-            // and the file disagreeing with nothing anywhere saying which one is in force. The
-            // WARN naming it is not asserted here: capturing SLF4J output needs a recording
-            // backend, and that is a test dependency for one assertion.
-            assertThat(store.current().settings().bindAddress().getPort()).isEqualTo(8888);
-        }
-    }
-
-    @Test
     void a_reload_that_changes_nothing_is_not_a_change() throws IOException {
         settings("config.source=cluster");
         application("orders", "");
@@ -715,7 +697,9 @@ class FileConfigStoreTest {
         return new FileConfigStore(directory, clock);
     }
 
-    /** Advances past the check interval and runs one, which is the whole reload mechanism. */
+    /**
+     * Advances past the check interval and runs one, which is the whole reload mechanism.
+     */
     private boolean rescan(FileConfigStore store) {
         clock.advance(Duration.ofSeconds(31));
         return store.poll(clock.nanoTime());

@@ -136,9 +136,6 @@ public class ClusterConfig {
     }
 
     /**
-     * Whether this node is itself the witness, and so must never campaign.
-     */
-    /**
      * Whether an owner outside this node applies what peers state, so a difference is not a fault.
      *
      * <p>See {@link ClusterConfig.ClusterConfigBuilder#followsStatedTimings()}. It suppresses the mismatch

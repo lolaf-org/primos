@@ -234,6 +234,7 @@ public class PropertiesConfigStore implements ConfigStore {
      */
     @Override
     public void addListener(ConfigChangeListener listener) {
+        // nothing to do
     }
 
     @Override
@@ -248,5 +249,6 @@ public class PropertiesConfigStore implements ConfigStore {
 
     @Override
     public void close() {
+        // nothing to do
     }
 }

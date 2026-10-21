@@ -16,11 +16,7 @@
 package org.lolaf.primos.witness.boot;
 
 import org.lolaf.primos.PrimosStatsListener;
-import org.lolaf.primos.wire.MessageAuthenticator;
-import org.lolaf.primos.wire.MessageDecoder;
-import org.lolaf.primos.wire.MessageEncoder;
-import org.lolaf.primos.wire.MessageHandler;
-import org.lolaf.primos.wire.WireFormat;
+import org.lolaf.primos.wire.*;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -81,7 +77,9 @@ final class WitnessTestClient implements AutoCloseable {
         return reply == null ? null : reply.granted;
     }
 
-    /** Waits for the witness to say it is going away, which is what a clean shutdown sends. */
+    /**
+     * Waits for the witness to say it is going away, which is what a clean shutdown sends.
+     */
     boolean awaitDeparture(Duration timeout) {
         return awaitReply(timeout, received -> received.leaving) != null;
     }
@@ -134,7 +132,9 @@ final class WitnessTestClient implements AutoCloseable {
         }
     }
 
-    /** Whatever the witness said. */
+    /**
+     * Whatever the witness said.
+     */
     static final class Reply implements MessageHandler {
 
         private boolean granted;
@@ -154,32 +154,39 @@ final class WitnessTestClient implements AutoCloseable {
 
         @Override
         public void onRequestVote(int senderId, long term, boolean preVote) {
+            // nothing to do
         }
 
         @Override
         public void onAppendEntries(int senderId, long term, long leaderVersion) {
+            // nothing to do
         }
 
         @Override
         public void onAppendEntriesReply(int senderId, long term, boolean success) {
+            // nothing to do
         }
 
         @Override
         public void onPing(int senderId, long term, long sequence) {
+            // nothing to do
         }
 
         @Override
         public void onPingReply(int senderId, long term, long sequence) {
+            // nothing to do
         }
 
         @Override
         public void onTimeoutNow(int senderId, long term) {
+            // nothing to do
         }
 
         @Override
         public void onNodeConfig(int senderId, long term, int heartbeatMillis,
-                                int electionMinMillis, int electionMaxMillis, int probeMillis,
-                                int failureThreshold) {
+                                 int electionMinMillis, int electionMaxMillis, int probeMillis,
+                                 int failureThreshold) {
+            // nothing to do
         }
     }
 }

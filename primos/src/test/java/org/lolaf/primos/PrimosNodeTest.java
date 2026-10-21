@@ -372,7 +372,7 @@ class PrimosNodeTest {
     @Test
     void every_peer_is_probed_once_a_cluster_is_running() {
         RecordingStats recorded = new RecordingStats();
-        PrimosNode one = start(builder(1, 2, 3).statsListener(recorded));
+        start(builder(1, 2, 3).statsListener(recorded));
         start(builder(2, 1, 3));
         start(builder(3, 1, 2));
 
@@ -490,7 +490,23 @@ class PrimosNodeTest {
                 .hasMessageContaining("has failed and cannot be restarted");
     }
 
-    /** Persists nothing and refuses, which drives the node into FAILED through its own loop. */
+    private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
+        PrimosNode node = builder.build();
+        node.start();
+        started.add(node);
+        return node;
+    }
+
+    private org.lolaf.primos.PrimosNodeBuilder builder(int id, int... peerIds) {
+        return PrimosNode.builder()
+                .clusterConfig(cluster(id, peerIds))
+                .store(MemoryStateStore::new)
+                .transport(() -> network.transportFor(id));
+    }
+
+    /**
+     * Persists nothing and refuses, which drives the node into FAILED through its own loop.
+     */
     private static final class FailingStore implements StateStore {
 
         @Override
@@ -510,29 +526,8 @@ class PrimosNodeTest {
 
         @Override
         public void close() {
+            // nothing to do
         }
-    }
-
-    private PrimosNode nodeSharing(int id, StateStore store) {
-        return PrimosNode.builder()
-                .clusterConfig(cluster(id))
-                .store(() -> store)
-                .transport(() -> network.transportFor(id))
-                .build();
-    }
-
-    private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
-        PrimosNode node = builder.build();
-        node.start();
-        started.add(node);
-        return node;
-    }
-
-    private org.lolaf.primos.PrimosNodeBuilder builder(int id, int... peerIds) {
-        return PrimosNode.builder()
-                .clusterConfig(cluster(id, peerIds))
-                .store(MemoryStateStore::new)
-                .transport(() -> network.transportFor(id));
     }
 
     /**

@@ -56,6 +56,23 @@ class MessageAuthenticatorTest {
                 java.nio.ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 3L, false);
     }
 
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    // ---------------------------------------------------------------- the algorithm
+
+    /**
+     * A real RequestVote tagged with one key, which is what a ring has to sort out.
+     */
+    private static ByteBuffer taggedWith(byte[] secret, String algorithm) {
+        MessageAuthenticator one = algorithm == null
+                ? MessageAuthenticator.hmacSha256(secret)
+                : MessageAuthenticator.hmac(algorithm, secret);
+        return new MessageEncoder("orders", 1, one)
+                .requestVote(ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
+    }
+
     @Test
     void disabled_adds_nothing_and_accepts_anything() {
         MessageAuthenticator authenticator = MessageAuthenticator.disabled();
@@ -64,8 +81,6 @@ class MessageAuthenticatorTest {
         assertThat(authenticator.tagBytes()).isZero();
         assertThat(authenticator.verify(ByteBuffer.allocate(52))).isTrue();
     }
-
-    // ---------------------------------------------------------------- the algorithm
 
     @Test
     void the_secret_never_appears_in_the_datagram_it_authenticates() {
@@ -161,6 +176,8 @@ class MessageAuthenticatorTest {
         }
     }
 
+    // --------------------------------------------------------- secret rotation
+
     @Test
     void a_datagram_shorter_than_a_tag_is_rejected_rather_than_read_off_the_end() {
         assertThat(MessageAuthenticator.hmacSha256(SECRET).verify(ByteBuffer.allocate(8)))
@@ -173,8 +190,6 @@ class MessageAuthenticatorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not be empty");
     }
-
-    // --------------------------------------------------------- secret rotation
 
     @Test
     void a_rotating_authenticator_accepts_both_the_current_and_the_previous_secret() {
@@ -229,56 +244,6 @@ class MessageAuthenticatorTest {
         assertThatThrownBy(() -> MessageAuthenticator.hmacSha256(secret("new"), new byte[0]))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not be empty");
-    }
-
-    /**
-     * A Mac with a tag far too short to be worth having, so the floor has something to refuse.
-     */
-    private static final class StubProvider extends java.security.Provider {
-
-        private static final String NAME = "primos-test-stub";
-        private static final String ALGORITHM = "HmacTruncated64";
-
-        private StubProvider() {
-            super(NAME, "1.0", "an eight-byte Mac, for testing the tag-length floor");
-            put("Mac." + ALGORITHM, ShortMac.class.getName());
-        }
-    }
-
-    /**
-     * Public and with a public constructor because the JCE instantiates it reflectively.
-     */
-    public static final class ShortMac extends javax.crypto.MacSpi {
-
-        public ShortMac() {
-        }
-
-        @Override
-        protected int engineGetMacLength() {
-            return 8;
-        }
-
-        @Override
-        protected void engineInit(java.security.Key key,
-                                  java.security.spec.AlgorithmParameterSpec params) {
-        }
-
-        @Override
-        protected void engineUpdate(byte input) {
-        }
-
-        @Override
-        protected void engineUpdate(byte[] input, int offset, int length) {
-        }
-
-        @Override
-        protected byte[] engineDoFinal() {
-            return new byte[8];
-        }
-
-        @Override
-        protected void engineReset() {
-        }
     }
 
     // ------------------------------------------------------------------ keyring
@@ -354,16 +319,54 @@ class MessageAuthenticatorTest {
                 .hasMessageContaining("at least one key");
     }
 
-    private static byte[] bytes(String value) {
-        return value.getBytes(StandardCharsets.UTF_8);
+    /**
+     * A Mac with a tag far too short to be worth having, so the floor has something to refuse.
+     */
+    private static final class StubProvider extends java.security.Provider {
+
+        private static final String NAME = "primos-test-stub";
+        private static final String ALGORITHM = "HmacTruncated64";
+
+        private StubProvider() {
+            super(NAME, "1.0", "an eight-byte Mac, for testing the tag-length floor");
+            put("Mac." + ALGORITHM, ShortMac.class.getName());
+        }
     }
 
-    /** A real RequestVote tagged with one key, which is what a ring has to sort out. */
-    private static ByteBuffer taggedWith(byte[] secret, String algorithm) {
-        MessageAuthenticator one = algorithm == null
-                ? MessageAuthenticator.hmacSha256(secret)
-                : MessageAuthenticator.hmac(algorithm, secret);
-        return new MessageEncoder("orders", 1, one)
-                .requestVote(ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
+    /**
+     * Public and with a public constructor because the JCE instantiates it reflectively.
+     */
+    public static final class ShortMac extends javax.crypto.MacSpi {
+
+        @Override
+        protected int engineGetMacLength() {
+            return 8;
+        }
+
+        @Override
+        protected void engineInit(java.security.Key key,
+                                  java.security.spec.AlgorithmParameterSpec params) {
+            // nothing to do
+        }
+
+        @Override
+        protected void engineUpdate(byte input) {
+            // nothing to do
+        }
+
+        @Override
+        protected void engineUpdate(byte[] input, int offset, int length) {
+            // nothing to do
+        }
+
+        @Override
+        protected byte[] engineDoFinal() {
+            return new byte[8];
+        }
+
+        @Override
+        protected void engineReset() {
+            // nothing to do
+        }
     }
 }

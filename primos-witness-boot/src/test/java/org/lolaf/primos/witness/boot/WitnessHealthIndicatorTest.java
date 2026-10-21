@@ -15,16 +15,6 @@
  */
 package org.lolaf.primos.witness.boot;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Duration;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +29,16 @@ import org.lolaf.primos.witness.StateStoreFactory;
 import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * What the health endpoint says, and the one thing it must never say.
@@ -165,7 +165,9 @@ class WitnessHealthIndicatorTest {
         return new WitnessHealthIndicator(server, lifecycle).health();
     }
 
-    /** The failure happens on the server's own thread, so the report of it arrives when it does. */
+    /**
+     * The failure happens on the server's own thread, so the report of it arrives when it does.
+     */
     private Health awaitQuarantineOf(String application) {
         long deadline = System.nanoTime() + PATIENCE.toNanos();
         Health health = health();
@@ -189,7 +191,9 @@ class WitnessHealthIndicatorTest {
         }
     }
 
-    /** Durable by its own account and unable to write: a disk that has gone bad. */
+    /**
+     * Durable by its own account and unable to write: a disk that has gone bad.
+     */
     private static final class UnwritableStateStore implements StateStore {
 
         @Override
@@ -209,6 +213,7 @@ class WitnessHealthIndicatorTest {
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 
@@ -238,6 +243,7 @@ class WitnessHealthIndicatorTest {
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 }

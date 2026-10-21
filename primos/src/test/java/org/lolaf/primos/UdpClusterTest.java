@@ -139,7 +139,7 @@ class UdpClusterTest {
     @Test
     void peers_become_reachable_over_a_real_network() {
         int[] ports = {Ports.free(), Ports.free(), Ports.free()};
-        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        start(1, ports, null, new MemoryStateStore(), ports[0]);
         start(2, ports, null, new MemoryStateStore(), ports[1]);
         start(3, ports, null, new MemoryStateStore(), ports[2]);
 
@@ -164,7 +164,7 @@ class UdpClusterTest {
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
         PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
-        for (PrimosNode node : new PrimosNode[] {one, two, three}) {
+        for (PrimosNode node : new PrimosNode[]{one, two, three}) {
             node.addListener(recorder);
         }
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
@@ -179,25 +179,6 @@ class UdpClusterTest {
         assertThat(told).containsExactlyInAnyOrder(expected + "/self", expected, expected);
     }
 
-    /** Records which peers a node reported down, since that is no longer readable from a snapshot. */
-    private static final class RecordingListener implements PrimosListener {
-
-        private final java.util.Set<Integer> down =
-                java.util.Collections.synchronizedSet(new java.util.HashSet<>());
-
-        @Override
-        public void onPeerDown(Peer peer, PeerDownReason reason) {
-            down.add(peer.id());
-        }
-
-        @Override
-        public void onPeerUp(Peer peer) {
-            down.remove(peer.id());
-        }
-    }
-
-    // -------------------------------------------------------------- helpers
-
     @Test
     void a_cluster_forms_with_authentication_enabled() {
         int[] ports = {Ports.free(), Ports.free(), Ports.free()};
@@ -211,6 +192,8 @@ class UdpClusterTest {
                 .as("an authenticated cluster on loopback drops nothing, for any reason")
                 .isZero();
     }
+
+    // -------------------------------------------------------------- helpers
 
     @Test
     void nodes_with_different_secrets_never_form_a_cluster() throws Exception {
@@ -331,5 +314,24 @@ class UdpClusterTest {
         await().atMost(2, TimeUnit.SECONDS).until(() -> onWatcher.down.contains(departing));
 
         assertThat(onWatcher.down).contains(departing);
+    }
+
+    /**
+     * Records which peers a node reported down, since that is no longer readable from a snapshot.
+     */
+    private static final class RecordingListener implements PrimosListener {
+
+        private final java.util.Set<Integer> down =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+        @Override
+        public void onPeerDown(Peer peer, PeerDownReason reason) {
+            down.add(peer.id());
+        }
+
+        @Override
+        public void onPeerUp(Peer peer) {
+            down.remove(peer.id());
+        }
     }
 }

@@ -16,19 +16,10 @@
 package org.lolaf.primos.transport;
 
 import lombok.Getter;
+import org.lolaf.primos.time.VirtualClock;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.Random;
-import java.util.Set;
-
-import org.lolaf.primos.time.VirtualClock;
+import java.util.*;
 
 /**
  * A network that misbehaves on purpose, reproducibly.
@@ -73,13 +64,21 @@ public final class SimulatedNetwork {
         this.random = new Random(seed);
     }
 
-    /** A transport for one node. Nodes need not be declared in advance. */
+    private static long link(int from, int to) {
+        return ((long) from << 32) | (to & 0xFFFFFFFFL);
+    }
+
+    /**
+     * A transport for one node. Nodes need not be declared in advance.
+     */
     public Transport transportFor(int nodeId) {
         mailboxes.computeIfAbsent(nodeId, id -> new PriorityQueue<>());
         return new SimulatedTransport(nodeId);
     }
 
-    /** Fraction of datagrams to discard, from 0.0 to 1.0. */
+    /**
+     * Fraction of datagrams to discard, from 0.0 to 1.0.
+     */
     public void lossProbability(double probability) {
         if (probability < 0 || probability > 1) {
             throw new IllegalArgumentException("probability must be within 0..1, was " + probability);
@@ -112,7 +111,9 @@ public final class SimulatedNetwork {
         }
     }
 
-    /** Cuts every link into and out of a node, the common "this box fell off the network" case. */
+    /**
+     * Cuts every link into and out of a node, the common "this box fell off the network" case.
+     */
     public void isolate(int nodeId) {
         for (int other : new ArrayList<>(mailboxes.keySet())) {
             if (other != nodeId) {
@@ -132,17 +133,23 @@ public final class SimulatedNetwork {
         severed.add(link(from, to));
     }
 
-    /** Restores one direction. */
+    /**
+     * Restores one direction.
+     */
     public void restore(int from, int to) {
         severed.remove(link(from, to));
     }
 
-    /** Restores every link. */
+    /**
+     * Restores every link.
+     */
     public void heal() {
         severed.clear();
     }
 
-    /** Whether a datagram sent now would be discarded by a partition. */
+    /**
+     * Whether a datagram sent now would be discarded by a partition.
+     */
     public boolean isSevered(int from, int to) {
         return severed.contains(link(from, to));
     }
@@ -190,7 +197,9 @@ public final class SimulatedNetwork {
         return discarded;
     }
 
-    /** How many datagrams are queued but not yet delivered. */
+    /**
+     * How many datagrams are queued but not yet delivered.
+     */
     public int inFlight() {
         int total = 0;
         for (PriorityQueue<InFlight> mailbox : mailboxes.values()) {
@@ -201,10 +210,6 @@ public final class SimulatedNetwork {
 
     public long dropped() {
         return droppedByLoss + droppedByPartition;
-    }
-
-    private static long link(int from, int to) {
-        return ((long) from << 32) | (to & 0xFFFFFFFFL);
     }
 
     /**
@@ -231,6 +236,7 @@ public final class SimulatedNetwork {
 
         long delay = minDelayNanos;
         if (maxDelayNanos > minDelayNanos) {
+            // do not change nextDouble to nextLong
             delay += (long) (random.nextDouble() * (maxDelayNanos - minDelayNanos));
         }
         PriorityQueue<InFlight> mailbox = mailboxes.computeIfAbsent(to, id -> new PriorityQueue<>());
@@ -254,7 +260,38 @@ public final class SimulatedNetwork {
         return due.size();
     }
 
-    /** One datagram waiting to be delivered. Ordered by due time, then by send order. */
+    @Override
+    public String toString() {
+        return "SimulatedNetwork(sent=" + sent + ", delivered=" + delivered
+                + ", dropped=" + dropped() + ", inFlight=" + inFlight()
+                + ", severed=" + severed.size() + " links)";
+    }
+
+    /**
+     * Convenience for the common two-group split.
+     */
+    public void partition(int[] sideA, int[] sideB) {
+        List<Integer> a = new ArrayList<>();
+        for (int id : sideA) {
+            a.add(id);
+        }
+        List<Integer> b = new ArrayList<>();
+        for (int id : sideB) {
+            b.add(id);
+        }
+        partition(a, b);
+    }
+
+    /**
+     * Every node currently known to the network.
+     */
+    public Set<Integer> nodes() {
+        return new HashSet<>(mailboxes.keySet());
+    }
+
+    /**
+     * One datagram waiting to be delivered. Ordered by due time, then by send order.
+     */
     private static final class InFlight implements Comparable<InFlight> {
 
         private final long dueNanos;
@@ -281,7 +318,9 @@ public final class SimulatedNetwork {
         }
     }
 
-    /** One node's view of the simulated network. */
+    /**
+     * One node's view of the simulated network.
+     */
     private final class SimulatedTransport implements Transport {
 
         private final int nodeId;
@@ -325,30 +364,5 @@ public final class SimulatedNetwork {
         public String toString() {
             return "SimulatedTransport(" + nodeId + ")";
         }
-    }
-
-    @Override
-    public String toString() {
-        return "SimulatedNetwork(sent=" + sent + ", delivered=" + delivered
-                + ", dropped=" + dropped() + ", inFlight=" + inFlight()
-                + ", severed=" + severed.size() + " links)";
-    }
-
-    /** Convenience for the common two-group split. */
-    public void partition(int[] sideA, int[] sideB) {
-        List<Integer> a = new ArrayList<>();
-        for (int id : sideA) {
-            a.add(id);
-        }
-        List<Integer> b = new ArrayList<>();
-        for (int id : sideB) {
-            b.add(id);
-        }
-        partition(a, b);
-    }
-
-    /** Every node currently known to the network. */
-    public Set<Integer> nodes() {
-        return new HashSet<>(mailboxes.keySet());
     }
 }

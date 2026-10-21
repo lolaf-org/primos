@@ -20,8 +20,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.Timings;
-import org.lolaf.primos.store.StateStore;
-import org.lolaf.primos.transport.Transport;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;

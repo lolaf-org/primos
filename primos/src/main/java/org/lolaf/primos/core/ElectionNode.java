@@ -85,27 +85,15 @@ public final class ElectionNode implements MessageHandler {
     private final long electionTimeoutMinNanos;
     private final long electionTimeoutSpreadNanos;
     private final PrimosListener listener;
-
-    /**
-     * Where the counters go. Never null; {@link PrimosStatsListener#NONE} when nobody asked.
-     */
     private final PrimosStatsListener stats;
-
-    /**
-     * When this node first wanted to lead, so a campaign can be timed end to end.
-     *
-     * <p>Set at the <em>pre-vote</em> rather than at the election, because the question being
-     * answered is how long the failover took, and a pre-vote that had to be retried is part of it.
-     */
-    private long campaignStartedNanos = NO_CONTACT;
-
-    /**
-     * When this node last had a leader, so an outage can be timed across the elections inside it.
-     */
-    private long leaderlessSinceNanos = NO_CONTACT;
     private final Set<Integer> votesGranted = new HashSet<>();
     private final Set<Integer> preVotesGranted = new HashSet<>();
     private final ByteBuffer sendBuffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+    // publishChange() runs on the caller's thread and everything else here on the node thread, so the
+    // term being led and the counter for it are only changed together under this lock.
+    private final Object publication = new Object();
+    private long campaignStartedNanos = NO_CONTACT;
+    private long leaderlessSinceNanos = NO_CONTACT;
     private TrackedPeer[] peers;
     private long[] confirmationScratch = new long[0];
     @Getter
@@ -119,9 +107,6 @@ public final class ElectionNode implements MessageHandler {
     private Leader leader;
     private long electionDeadlineNanos;
     private long heartbeatDeadlineNanos;
-    // publishChange() runs on the caller's thread and everything else here on the node thread, so the
-    // term being led and the counter for it are only changed together under this lock.
-    private final Object publication = new Object();
     private long publishingTerm = NOT_PUBLISHING;
     private volatile long publishedVersion;
     private long sentVersion;
@@ -131,7 +116,6 @@ public final class ElectionNode implements MessageHandler {
     private long probeDeadlineNanos;
     private long probeSequence;
     private long nodeConfigDeadlineNanos;
-    private long roleChangedAtNanos;
     private boolean preVoting;
     private long preVoteTerm;
     private boolean started;
@@ -242,6 +226,24 @@ public final class ElectionNode implements MessageHandler {
         return trackedPeer.lastHeardNanos >= 0 && now - trackedPeer.lastHeardNanos > silence;
     }
 
+    /**
+     * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
+     */
+    private static long nthLatest(long[] values, int count, int n) {
+        for (int i = 0; i < n; i++) {
+            int latest = i;
+            for (int j = i + 1; j < count; j++) {
+                if (values[j] > values[latest]) {
+                    latest = j;
+                }
+            }
+            long swap = values[i];
+            values[i] = values[latest];
+            values[latest] = swap;
+        }
+        return values[n - 1];
+    }
+
     private TrackedPeer trackedPeer(int id) {
         for (TrackedPeer peer : peers) {
             if (peer.peer.id() == id) {
@@ -314,7 +316,6 @@ public final class ElectionNode implements MessageHandler {
         currentTerm = state.currentTerm();
         votedFor = state.votedFor();
         role = Role.FOLLOWER;
-        roleChangedAtNanos = clock.nanoTime();
 
         if (config.isLearnedMembership()) {
             // There is no quorum summary to print: this witness does not know how many voters the
@@ -430,7 +431,6 @@ public final class ElectionNode implements MessageHandler {
         }
         Role previous = role;
         role = next;
-        roleChangedAtNanos = clock.nanoTime();
         // Before the listener, so a publishChange() made from the election callback counts.
         if (next == Role.LEADER || previous == Role.LEADER) {
             synchronized (publication) {
@@ -1207,24 +1207,6 @@ public final class ElectionNode implements MessageHandler {
         return confirmed == NO_CONTACT ? Long.MIN_VALUE : confirmed;
     }
 
-    /**
-     * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
-     */
-    private static long nthLatest(long[] values, int count, int n) {
-        for (int i = 0; i < n; i++) {
-            int latest = i;
-            for (int j = i + 1; j < count; j++) {
-                if (values[j] > values[latest]) {
-                    latest = j;
-                }
-            }
-            long swap = values[i];
-            values[i] = values[latest];
-            values[latest] = swap;
-        }
-        return values[n - 1];
-    }
-
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
         int inContact = 1;
@@ -1259,6 +1241,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void resetElectionTimer() {
+        // do not modify nextDouble() to nextLong()
         electionDeadlineNanos = clock.nanoTime() + electionTimeoutMinNanos + (long) (random.nextDouble() * electionTimeoutSpreadNanos);
     }
 

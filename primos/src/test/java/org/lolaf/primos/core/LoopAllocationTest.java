@@ -15,15 +15,6 @@
  */
 package org.lolaf.primos.core;
 
-import static org.assertj.core.api.Assumptions.assumeThat;
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.lang.management.ManagementFactory;
-import java.nio.ByteBuffer;
-import java.time.Duration;
-import java.util.List;
-import java.util.Random;
-
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
@@ -34,6 +25,15 @@ import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
 import org.lolaf.primos.wire.MessageEncoder;
 import org.lolaf.primos.wire.WireFormat;
+
+import java.lang.management.ManagementFactory;
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.List;
+import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 /**
  * The loop path must not allocate to say that nothing changed.
@@ -58,13 +58,53 @@ import org.lolaf.primos.wire.WireFormat;
  */
 class LoopAllocationTest {
 
-    /** Hoisted, so the harness allocates nothing inside the measured loop. */
+    /**
+     * Hoisted, so the harness allocates nothing inside the measured loop.
+     */
     private static final Duration STEP = Duration.ofSeconds(31);
 
     private static final int PEER_A = 201;
     private static final int PEER_B = 202;
 
     private final VirtualClock clock = new VirtualClock();
+
+    /**
+     * A datagram from an id this node does not know, refused at the sender check.
+     *
+     * <p>One drop per turn, which is the hardest this SPI is ever called: {@code onDatagramDropped}
+     * is the one callback a flood reaches, and it is why the interface takes an enum rather than an
+     * event object.
+     */
+    private static ByteBuffer fromAStranger() {
+        MessageEncoder encoder = new MessageEncoder("t", 999, MessageAuthenticator.disabled());
+        ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+        return copyOf(encoder.appendEntries(scratch, 1, 0));
+    }
+
+    private static ByteBuffer heartbeatFrom(int peerId) {
+        MessageEncoder encoder = new MessageEncoder("t", peerId, MessageAuthenticator.disabled());
+        ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+        return copyOf(encoder.appendEntries(scratch, 1, 0));
+    }
+
+    private static ByteBuffer copyOf(ByteBuffer encoded) {
+        ByteBuffer copy = ByteBuffer.allocate(encoded.remaining());
+        copy.put(encoded).flip();
+        return copy;
+    }
+
+    private static com.sun.management.ThreadMXBean threadMxBean() {
+        java.lang.management.ThreadMXBean bean = ManagementFactory.getThreadMXBean();
+        if (!(bean instanceof com.sun.management.ThreadMXBean)) {
+            return null;
+        }
+        com.sun.management.ThreadMXBean sun = (com.sun.management.ThreadMXBean) bean;
+        if (!sun.isThreadAllocatedMemorySupported()) {
+            return null;
+        }
+        sun.setThreadAllocatedMemoryEnabled(true);
+        return sun;
+    }
 
     /**
      * A follower hearing its leader: a heartbeat arrives, it replies, it probes its peers and
@@ -152,37 +192,6 @@ class LoopAllocationTest {
                 .isPositive();
     }
 
-    /** Increments a counter and does nothing else, which is all a metrics binder ever does. */
-    private static final class Counting implements org.lolaf.primos.PrimosStatsListener {
-
-        private long events;
-
-        @Override
-        public void onProbeRoundTrip(int peerId, long nanos) {
-            events++;
-        }
-
-        @Override
-        public void onDatagramDropped(org.lolaf.primos.DropReason reason) {
-            events++;
-        }
-
-        @Override
-        public void onElectionWon(long term, long campaignNanos) {
-            events++;
-        }
-
-        @Override
-        public void onElectionLost(long term, long campaignNanos) {
-            events++;
-        }
-
-        @Override
-        public void onLeaderKnown(long term, long leaderlessNanos) {
-            events++;
-        }
-    }
-
     /**
      * Bytes allocated per turn, after enough turns to load classes and let the call sites settle.
      */
@@ -246,45 +255,36 @@ class LoopAllocationTest {
     }
 
     /**
-     * A heartbeat this node will accept, decode and answer — which also resets its election timer,
-     * so it behaves as a follower of a live leader rather than campaigning every turn.
+     * Increments a counter and does nothing else, which is all a metrics binder ever does.
      */
-    /**
-     * A datagram from an id this node does not know, refused at the sender check.
-     *
-     * <p>One drop per turn, which is the hardest this SPI is ever called: {@code onDatagramDropped}
-     * is the one callback a flood reaches, and it is why the interface takes an enum rather than an
-     * event object.
-     */
-    private static ByteBuffer fromAStranger() {
-        MessageEncoder encoder = new MessageEncoder("t", 999, MessageAuthenticator.disabled());
-        ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        return copyOf(encoder.appendEntries(scratch, 1, 0));
-    }
+    private static final class Counting implements org.lolaf.primos.PrimosStatsListener {
 
-    private static ByteBuffer heartbeatFrom(int peerId) {
-        MessageEncoder encoder = new MessageEncoder("t", peerId, MessageAuthenticator.disabled());
-        ByteBuffer scratch = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        return copyOf(encoder.appendEntries(scratch, 1, 0));
-    }
+        private long events;
 
-    private static ByteBuffer copyOf(ByteBuffer encoded) {
-        ByteBuffer copy = ByteBuffer.allocate(encoded.remaining());
-        copy.put(encoded).flip();
-        return copy;
-    }
-
-    private static com.sun.management.ThreadMXBean threadMxBean() {
-        java.lang.management.ThreadMXBean bean = ManagementFactory.getThreadMXBean();
-        if (!(bean instanceof com.sun.management.ThreadMXBean)) {
-            return null;
+        @Override
+        public void onProbeRoundTrip(int peerId, long nanos) {
+            events++;
         }
-        com.sun.management.ThreadMXBean sun = (com.sun.management.ThreadMXBean) bean;
-        if (!sun.isThreadAllocatedMemorySupported()) {
-            return null;
+
+        @Override
+        public void onDatagramDropped(org.lolaf.primos.DropReason reason) {
+            events++;
         }
-        sun.setThreadAllocatedMemoryEnabled(true);
-        return sun;
+
+        @Override
+        public void onElectionWon(long term, long campaignNanos) {
+            events++;
+        }
+
+        @Override
+        public void onElectionLost(long term, long campaignNanos) {
+            events++;
+        }
+
+        @Override
+        public void onLeaderKnown(long term, long leaderlessNanos) {
+            events++;
+        }
     }
 
     /**
@@ -301,6 +301,7 @@ class LoopAllocationTest {
 
         @Override
         public void send(int peerId, ByteBuffer datagram) {
+            // nothing to do
         }
 
         @Override
@@ -320,10 +321,12 @@ class LoopAllocationTest {
 
         @Override
         public void wakeup() {
+            // nothing to do
         }
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 }

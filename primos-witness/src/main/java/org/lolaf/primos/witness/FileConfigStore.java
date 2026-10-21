@@ -19,22 +19,18 @@ import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.MonotonicClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.*;
-import java.util.Comparator;
-import java.util.Locale;
-import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.zip.CRC32;
 
@@ -233,50 +229,6 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     /**
-     * A secret given inline, as {@code env:NAME}, or as {@code file:path}.
-     *
-     * <p>The indirections exist so configuration can go into version control without the secret
-     * going with it.
-     */
-    /**
-     * Every {@code secret.<name>.value} in the file, with its algorithm and the names it claims.
-     *
-     * <p>Sorted by key name, so the ring's order does not depend on {@code Properties} hashing.
-     * Order decides nothing about correctness — a datagram is authentic if any candidate accepts
-     * it — but a configuration that reads differently on two runs is not one anybody can reason
-     * about.
-     */
-    private Keyring readKeyring(Properties properties) {
-        Set<String> names = new TreeSet<>();
-        for (String property : properties.stringPropertyNames()) {
-            if (!property.startsWith(KEY_PREFIX)) {
-                continue;
-            }
-            String rest = property.substring(KEY_PREFIX.length());
-            int dot = rest.indexOf('.');
-            if (dot <= 0) {
-                throw new IllegalArgumentException("'" + property + "' names no key: a secret is"
-                        + " configured as secret.<name>.value, optionally with"
-                        + " secret.<name>.algorithm and secret.<name>.applications");
-            }
-            names.add(rest.substring(0, dot));
-        }
-        List<WitnessKey> keys = new ArrayList<>(names.size());
-        for (String name : names) {
-            byte[] secret = secretValue(properties, KEY_PREFIX + name + ".value", directory);
-            if (secret == null) {
-                throw new IllegalArgumentException("key '" + name + "' has no "
-                        + KEY_PREFIX + name + ".value; a key without a secret cannot verify"
-                        + " anything and is more likely a typo than an intention");
-            }
-            keys.add(new WitnessKey(name, secret,
-                    properties.getProperty(KEY_PREFIX + name + ".algorithm"),
-                    patterns(name, properties.getProperty(KEY_PREFIX + name + ".applications"))));
-        }
-        return new Keyring(keys);
-    }
-
-    /**
      * The application patterns a key claims, validated as far as they can be before anything runs.
      *
      * <p>A bare {@code *} is treated as claiming nothing, which is the same thing as omitting the
@@ -346,6 +298,77 @@ public final class FileConfigStore implements ConfigStore {
             return Base64.getDecoder().decode(value.substring(7));
         }
         return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void absorb(CRC32 sum, Path file) {
+        sum.update(file.getFileName().toString().getBytes(StandardCharsets.UTF_8));
+        try {
+            // Read through the symlink, which is what makes a ConfigMap work: after a ..data swap
+            // the resolved file is a different inode, and its bytes are what this is asking about.
+            sum.update(Files.readAllBytes(file));
+        } catch (IOException e) {
+            // Absent or unreadable sums differently from present, which is the whole requirement.
+            sum.update('!');
+        }
+    }
+
+    /**
+     * Says so when an application file still carries key material, which no longer lives there.
+     *
+     * <p>Refused rather than ignored. Every other stale key in this estate is read and dropped with
+     * a line saying so, and this one is not, because the failure it would otherwise produce is the
+     * worst kind available here: an operator who believes a tenant has its own secret, and a
+     * witness verifying it with whatever the keyring happens to offer. A configuration that is
+     * wrong about who can speak for whom must not start.
+     */
+    private static void warnIfKeysHere(String name, Properties properties) {
+        for (String property : properties.stringPropertyNames()) {
+            if (property.equals("secret") || property.startsWith(KEY_PREFIX)) {
+                throw new IllegalArgumentException("application '" + name + "' sets '" + property
+                        + "', but keys live in witness.properties as secret.<name>.value, with an"
+                        + " optional secret.<name>.applications naming what each covers. Leaving"
+                        + " this here would mean believing this tenant has its own key when the"
+                        + " keyring decides otherwise.");
+            }
+        }
+    }
+
+    /**
+     * Every {@code secret.<name>.value} in the file, with its algorithm and the names it claims.
+     *
+     * <p>Sorted by key name, so the ring's order does not depend on {@code Properties} hashing.
+     * Order decides nothing about correctness — a datagram is authentic if any candidate accepts
+     * it — but a configuration that reads differently on two runs is not one anybody can reason
+     * about.
+     */
+    private Keyring readKeyring(Properties properties) {
+        Set<String> names = new TreeSet<>();
+        for (String property : properties.stringPropertyNames()) {
+            if (!property.startsWith(KEY_PREFIX)) {
+                continue;
+            }
+            String rest = property.substring(KEY_PREFIX.length());
+            int dot = rest.indexOf('.');
+            if (dot <= 0) {
+                throw new IllegalArgumentException("'" + property + "' names no key: a secret is"
+                        + " configured as secret.<name>.value, optionally with"
+                        + " secret.<name>.algorithm and secret.<name>.applications");
+            }
+            names.add(rest.substring(0, dot));
+        }
+        List<WitnessKey> keys = new ArrayList<>(names.size());
+        for (String name : names) {
+            byte[] secret = secretValue(properties, KEY_PREFIX + name + ".value", directory);
+            if (secret == null) {
+                throw new IllegalArgumentException("key '" + name + "' has no "
+                        + KEY_PREFIX + name + ".value; a key without a secret cannot verify"
+                        + " anything and is more likely a typo than an intention");
+            }
+            keys.add(new WitnessKey(name, secret,
+                    properties.getProperty(KEY_PREFIX + name + ".algorithm"),
+                    patterns(name, properties.getProperty(KEY_PREFIX + name + ".applications"))));
+        }
+        return new Keyring(keys);
     }
 
     @Override
@@ -514,18 +537,6 @@ public final class FileConfigStore implements ConfigStore {
         return sum.getValue();
     }
 
-    private static void absorb(CRC32 sum, Path file) {
-        sum.update(file.getFileName().toString().getBytes(StandardCharsets.UTF_8));
-        try {
-            // Read through the symlink, which is what makes a ConfigMap work: after a ..data swap
-            // the resolved file is a different inode, and its bytes are what this is asking about.
-            sum.update(Files.readAllBytes(file));
-        } catch (IOException e) {
-            // Absent or unreadable sums differently from present, which is the whole requirement.
-            sum.update('!');
-        }
-    }
-
     private ConfigSnapshot read() {
         WitnessSettings settings = readSettings();
         Map<String, ApplicationConfig> applications = new LinkedHashMap<>();
@@ -584,27 +595,6 @@ public final class FileConfigStore implements ConfigStore {
         Timings timings = timings(properties, settings.defaultTimings());
         warnIfTimingsIgnored(name, properties, settings);
         return new ApplicationConfig(name, timings, false);
-    }
-
-    /**
-     * Says so when an application file still carries key material, which no longer lives there.
-     *
-     * <p>Refused rather than ignored. Every other stale key in this estate is read and dropped with
-     * a line saying so, and this one is not, because the failure it would otherwise produce is the
-     * worst kind available here: an operator who believes a tenant has its own secret, and a
-     * witness verifying it with whatever the keyring happens to offer. A configuration that is
-     * wrong about who can speak for whom must not start.
-     */
-    private static void warnIfKeysHere(String name, Properties properties) {
-        for (String property : properties.stringPropertyNames()) {
-            if (property.equals("secret") || property.startsWith("secret.")) {
-                throw new IllegalArgumentException("application '" + name + "' sets '" + property
-                        + "', but keys live in witness.properties as secret.<name>.value, with an"
-                        + " optional secret.<name>.applications naming what each covers. Leaving"
-                        + " this here would mean believing this tenant has its own key when the"
-                        + " keyring decides otherwise.");
-            }
-        }
     }
 
     /**

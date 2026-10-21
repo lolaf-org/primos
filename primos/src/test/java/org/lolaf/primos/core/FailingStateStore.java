@@ -19,13 +19,21 @@ import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.store.StateStoreException;
 
-/** A store that works until it is told to break, standing in for a disk that has gone away. */
+/**
+ * A store that works until it is told to break, standing in for a disk that has gone away.
+ */
 final class FailingStateStore implements StateStore {
 
     private PersistentState state = PersistentState.fresh();
     private RuntimeException failure;
 
-    /** Every subsequent save throws this. */
+    static StateStoreException brokenDisk() {
+        return new StateStoreException("the disk went away");
+    }
+
+    /**
+     * Every subsequent save throws this.
+     */
     void breakWith(RuntimeException failure) {
         this.failure = failure;
     }
@@ -50,9 +58,6 @@ final class FailingStateStore implements StateStore {
 
     @Override
     public void close() {
-    }
-
-    static StateStoreException brokenDisk() {
-        return new StateStoreException("the disk went away");
+        // nothing to do
     }
 }

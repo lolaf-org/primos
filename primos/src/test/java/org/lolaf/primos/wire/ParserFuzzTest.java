@@ -15,14 +15,14 @@
  */
 package org.lolaf.primos.wire;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import org.junit.jupiter.api.Test;
+import org.lolaf.primos.RecordingStats;
 
 import java.nio.ByteBuffer;
 import java.util.Random;
 
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.RecordingStats;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Throws hostile bytes at the parser.
@@ -78,10 +78,10 @@ class ParserFuzzTest {
                 int index = random.nextInt(copy.length);
                 copy[index] = (byte) random.nextInt(256);
 
-                long dispatched = handler.received.size();
+                int dispatched = handler.received.size();
                 boolean accepted = decoder.decode(ByteBuffer.wrap(copy), handler);
 
-                assertThat(handler.received.size()).isEqualTo(dispatched + (accepted ? 1 : 0));
+                assertThat(handler.received).hasSize(dispatched + (accepted ? 1 : 0));
             }
         }).doesNotThrowAnyException();
     }

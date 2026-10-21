@@ -319,6 +319,7 @@ class WitnessObservabilityTest {
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 
@@ -348,6 +349,7 @@ class WitnessObservabilityTest {
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 }

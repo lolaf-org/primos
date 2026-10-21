@@ -16,12 +16,7 @@
 package org.lolaf.primos.core;
 
 import org.junit.jupiter.api.Test;
-import org.lolaf.primos.ClusterConfig;
-import org.lolaf.primos.Leader;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.RecordingStats;
-import org.lolaf.primos.Role;
+import org.lolaf.primos.*;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
@@ -58,6 +53,16 @@ class ElectionNodeTest {
             peers.add(Peer.application(id, "sim", 7000 + id));
         }
         return peers;
+    }
+
+    private static int countNodeConfigs(CapturedReply seen) {
+        int count = 0;
+        for (String message : seen.messages()) {
+            if (message.startsWith("nodeConfig(")) {
+                count++;
+            }
+        }
+        return count;
     }
 
     @Test
@@ -196,7 +201,7 @@ class ElectionNodeTest {
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         witness.start();
 
         // The witness server learns voters between turns of its own loop, so a heartbeat can
@@ -243,7 +248,7 @@ class ElectionNodeTest {
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         witness.start();
 
         clock.advance(Duration.ofMinutes(10));
@@ -261,6 +266,8 @@ class ElectionNodeTest {
                         + " election timer")
                 .isLessThan(Long.MAX_VALUE);
     }
+
+    // ------------------------------------------------------------------ pre-vote
 
     /**
      * Not a tidiness check, which is why it is worth a test and worth its place on the loop path.
@@ -284,7 +291,7 @@ class ElectionNodeTest {
                 .build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
 
         assertThatThrownBy(() -> node.runOnce(0))
                 .as("silently running on term 0 would be a node that had forgotten its vote")
@@ -296,8 +303,6 @@ class ElectionNodeTest {
                 .isZero();
     }
 
-    // ------------------------------------------------------------------ pre-vote
-
     @Test
     void a_witness_still_grants_votes() {
         ClusterConfig config = ClusterConfig.builder()
@@ -308,7 +313,7 @@ class ElectionNodeTest {
                 .build();
         ElectionNode witness = new ElectionNode(config, store, network.transportFor(99), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         witness.start();
 
         witness.onRequestVote(1, 3, false);
@@ -411,13 +416,15 @@ class ElectionNodeTest {
         assertThat(store.load().currentTerm()).isZero();
     }
 
+    // ------------------------------------------------------------------ timing advertisements
+
     @Test
     void a_single_node_cluster_skips_straight_through_its_own_pre_vote() {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t").nodeId(1).build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         node.start();
 
         clock.advance(Duration.ofSeconds(1));
@@ -426,8 +433,6 @@ class ElectionNodeTest {
         assertThat(node.role()).isEqualTo(Role.LEADER);
         assertThat(node.currentTerm()).isEqualTo(1);
     }
-
-    // ------------------------------------------------------------------ timing advertisements
 
     /**
      * A node of five that has timed out, won its pre-vote and is now genuinely campaigning, so
@@ -595,16 +600,6 @@ class ElectionNodeTest {
         return countNodeConfigs(seen);
     }
 
-    private static int countNodeConfigs(CapturedReply seen) {
-        int count = 0;
-        for (String message : seen.messages()) {
-            if (message.startsWith("nodeConfig(")) {
-                count++;
-            }
-        }
-        return count;
-    }
-
     /**
      * The pair to the tests above: a witness told to follow reports nothing, because there is
      * nothing to report — the difference it sees is the value it is about to be rebuilt with, so
@@ -729,10 +724,10 @@ class ElectionNodeTest {
             }
         }
 
-        assertThat(witness.trackedPeerIds().size())
+        assertThat(witness.trackedPeerIds())
                 .as("ageing bounds the set by legitimate traffic; this bounds it against a"
                         + " keyholder cycling sender ids faster than that")
-                .isLessThanOrEqualTo(256);
+                .hasSizeLessThanOrEqualTo(256);
         assertThat(witness.trackedPeerIds())
                 .as("and it is the quietest that went, so the newest arrivals are still tracked")
                 .contains(300);
@@ -747,7 +742,7 @@ class ElectionNodeTest {
                 .build();
         ElectionNode node = new ElectionNode(config, store, network.transportFor(1), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         node.start();
         return node;
     }
@@ -763,7 +758,7 @@ class ElectionNodeTest {
         }
         ElectionNode node = new ElectionNode(config.build(), store, network.transportFor(1), clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         node.start();
         return node;
     }
@@ -796,7 +791,7 @@ class ElectionNodeTest {
         Transport transport = network.transportFor(1);
         ElectionNode node = new ElectionNode(config, store, transport, clock,
                 new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-                }, recorded);
+        }, recorded);
         node.start();
         return node;
     }

@@ -15,7 +15,11 @@
  */
 package org.lolaf.primos.sim;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
+import org.lolaf.primos.Leader;
+import org.lolaf.primos.Peer;
+import org.lolaf.primos.PrimosListener;
+import org.lolaf.primos.Role;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,11 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.Leader;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.Role;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The two-node active/passive pair, which is what the witness exists for.
@@ -40,6 +40,10 @@ class WitnessTest {
 
     private static final int WITNESS = ElectionCluster.WITNESS_ID;
     private static final Duration SETTLE = Duration.ofSeconds(5);
+
+    private static Simulation simulation(long seed) {
+        return new Simulation(seed).checking(Invariants.all());
+    }
 
     @Test
     void a_pair_split_from_each_other_is_decided_by_whoever_reaches_the_witness() {
@@ -218,7 +222,7 @@ class WitnessTest {
         ElectionCluster cluster = ElectionCluster.of(simulation, 4, true);
         simulation.runUntil(cluster::hasSingleLeader, Duration.ofSeconds(15));
 
-        simulation.network().partition(new int[] {1, 2}, new int[] {3, 4, WITNESS});
+        simulation.network().partition(new int[]{1, 2}, new int[]{3, 4, WITNESS});
         simulation.run(Duration.ofSeconds(15));
 
         assertThat(cluster.leaderCount())
@@ -237,7 +241,7 @@ class WitnessTest {
             simulation.runUntil(cluster::hasSingleLeader, Duration.ofSeconds(20));
 
             for (int round = 0; round < 4; round++) {
-                int victim = 1 + (int) (simulation.random().nextDouble() * 3);
+                int victim = 1 + (simulation.random().nextInt() * 3);
                 simulation.network().isolate(victim == 3 ? WITNESS : victim);
                 simulation.run(Duration.ofSeconds(5));
                 simulation.network().heal();
@@ -268,9 +272,5 @@ class WitnessTest {
         assertThat(seen).extracting(Peer::id).contains(WITNESS);
         assertThat(seen).filteredOn(Peer::isWitness).extracting(Peer::id)
                 .containsExactly(WITNESS);
-    }
-
-    private static Simulation simulation(long seed) {
-        return new Simulation(seed).checking(Invariants.all());
     }
 }

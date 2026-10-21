@@ -94,6 +94,8 @@ public class LeaderLifecycleController implements PrimosListener, SmartLifecycle
         this.config = config;
         this.transitions = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "primos-leader-lifecycle");
+            t.setUncaughtExceptionHandler((thread, throwable) ->
+                    log.error("Uncaught exception occurred in thread {}", thread, throwable));
             t.setDaemon(true);
             return t;
         });

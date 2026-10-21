@@ -236,10 +236,12 @@ class FailedStateTest {
 
         @Override
         public void wakeup() {
+            // nothing to do
         }
 
         @Override
         public void close() {
+            // nothing to do
         }
     }
 }

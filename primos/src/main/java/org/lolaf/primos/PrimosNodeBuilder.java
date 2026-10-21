@@ -21,13 +21,14 @@ import org.lolaf.primos.time.MonotonicClock;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
-import java.util.function.Supplier;
 import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Builds a {@link PrimosNode}.
@@ -117,7 +118,7 @@ public final class PrimosNodeBuilder {
      * The source of election timeout randomness. Seed it to make a test reproducible.
      */
     @Setter
-    private Random random = new Random();
+    private Random random = new SecureRandom();
 
     /**
      * The shared cluster secret. With one set, every datagram carries an HMAC-SHA256 tag and

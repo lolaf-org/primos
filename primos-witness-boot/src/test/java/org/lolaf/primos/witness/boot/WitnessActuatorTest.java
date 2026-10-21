@@ -15,26 +15,24 @@
  */
 package org.lolaf.primos.witness.boot;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The endpoint as an operator meets it: over HTTP, from the packaged application.
@@ -77,13 +75,11 @@ class WitnessActuatorTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         String body = response.body();
-        assertThat(body).contains("\"status\":\"UP\"");
-        assertThat(body)
+        assertThat(body).contains("\"status\":\"UP\"")
                 .as("the detail is the whole value of this endpoint on a witness: which tenants it"
                         + " has, and which of them it has stopped answering for")
                 .contains("\"served\":[\"orders\"]")
-                .contains("\"quarantined\":[]");
-        assertThat(body)
+                .contains("\"quarantined\":[]")
                 .as("nothing but the witness itself may answer whether this witness is serving:"
                         + " Boot's disk-space contributor watches a directory this process does not"
                         + " care about, and a DOWN from it would get somebody to restart the one"

@@ -15,10 +15,11 @@
  */
 package org.lolaf.primos;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.store.FileStateStore;
+import org.lolaf.primos.transport.UdpTransport;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -29,10 +30,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.lolaf.primos.store.FileStateStore;
-import org.lolaf.primos.transport.UdpTransport;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /**
  * The examples in README.md and docs/, compiled and run.
@@ -47,30 +46,31 @@ class ReadmeExamplesTest {
     Path directory;
 
     @Test
-    void the_quick_start_builds_a_node() throws IOException {
+    void the_quick_start_builds_a_node() {
         byte[] secret = "a-shared-cluster-secret".getBytes(StandardCharsets.UTF_8);
         List<Peer> peers = Arrays.asList(
                 Peer.application(2, "127.0.0.1", 7421),
                 Peer.application(3, "127.0.0.1", 7422));
 
         try (PrimosNode node = PrimosNode.builder()
-                     .clusterConfig(ClusterConfig.builder()
-                             .applicationName("orders")
-                             .nodeId(1)
-                             .peers(peers)
-                             .build())
-                     .clusterSecret(secret)
-                     .store(() -> new FileStateStore(directory))
-                     .transport(UdpTransport.builder()
-                             .bindAddress(new InetSocketAddress("127.0.0.1", 0))
-                             .peers(peers)
-                             .addressLearning(true))
-                     .listener(new PrimosListener() {
-                         @Override
-                         public void onRoleChanged(Role previous, Role current, long term) {
-                         }
-                     })
-                     .build()) {
+                .clusterConfig(ClusterConfig.builder()
+                        .applicationName("orders")
+                        .nodeId(1)
+                        .peers(peers)
+                        .build())
+                .clusterSecret(secret)
+                .store(() -> new FileStateStore(directory))
+                .transport(UdpTransport.builder()
+                        .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                        .peers(peers)
+                        .addressLearning(true))
+                .listener(new PrimosListener() {
+                    @Override
+                    public void onRoleChanged(Role previous, Role current, long term) {
+                        // nothing to do
+                    }
+                })
+                .build()) {
 
             node.start();
             assertThat(node.role()).isIn(Role.FOLLOWER, Role.CANDIDATE, Role.LEADER);
@@ -83,20 +83,20 @@ class ReadmeExamplesTest {
     }
 
     @Test
-    void every_stats_event_the_readme_names_exists() throws IOException {
+    void every_stats_event_the_readme_names_exists() {
         RecordingStats recorded = new RecordingStats();
         try (PrimosNode node = PrimosNode.builder()
-                     .statsListener(recorded)
-                     .clusterConfig(ClusterConfig.builder()
-                             .applicationName("orders")
-                             .nodeId(1)
-                             .peer(Peer.application(2, "127.0.0.1", 7421))
-                             .build())
-                     .store(() -> new FileStateStore(directory))
-                     .transport(UdpTransport.builder()
-                             .bindAddress(new InetSocketAddress("127.0.0.1", 0))
-                             .peers(Arrays.asList(Peer.application(2, "127.0.0.1", 7421))))
-                     .build()) {
+                .statsListener(recorded)
+                .clusterConfig(ClusterConfig.builder()
+                        .applicationName("orders")
+                        .nodeId(1)
+                        .peer(Peer.application(2, "127.0.0.1", 7421))
+                        .build())
+                .store(() -> new FileStateStore(directory))
+                .transport(UdpTransport.builder()
+                        .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                        .peers(List.of(Peer.application(2, "127.0.0.1", 7421))))
+                .build()) {
 
             node.start();
 
@@ -220,12 +220,12 @@ class ReadmeExamplesTest {
     // ------------------------------------------------- docs/leader-data.md
 
     @Test
-    void the_leader_data_example_publishes_and_a_follower_applies_only_the_matching_term() throws IOException {
+    void the_leader_data_example_publishes_and_a_follower_applies_only_the_matching_term() {
         try (PrimosNode node = PrimosNode.builder()
-                     .clusterConfig(ClusterConfig.builder().applicationName("orders").nodeId(1).build())
-                     .store(() -> new FileStateStore(directory))
-                     .transport(UdpTransport.builder().bindAddress(new InetSocketAddress("127.0.0.1", 0)))
-                     .build()) {
+                .clusterConfig(ClusterConfig.builder().applicationName("orders").nodeId(1).build())
+                .store(() -> new FileStateStore(directory))
+                .transport(UdpTransport.builder().bindAddress(new InetSocketAddress("127.0.0.1", 0)))
+                .build()) {
             AssignmentPublisher publisher = new AssignmentPublisher();
             publisher.attachTo(node);
             node.start();

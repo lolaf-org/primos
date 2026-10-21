@@ -65,6 +65,8 @@ public class WitnessServerLifecycle implements SmartLifecycle {
             return;
         }
         Thread loop = new Thread(this::serve, "primos-witness");
+        loop.setUncaughtExceptionHandler((thread, throwable) ->
+                log.error("Uncaught exception occurred in thread {}", thread, throwable));
         thread = loop;
         loop.start();
     }

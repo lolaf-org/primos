@@ -15,17 +15,16 @@
  */
 package org.lolaf.primos.sim;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
+import org.lolaf.primos.Peer;
+import org.lolaf.primos.PeerDownReason;
+import org.lolaf.primos.RecordingStats;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PeerDownReason;
-import org.lolaf.primos.PeerType;
-import org.lolaf.primos.RecordingStats;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Who each node can actually reach, and what it tells the application about it.
@@ -37,6 +36,12 @@ import org.lolaf.primos.RecordingStats;
 class ReachabilityTest {
 
     private static final Duration SETTLE = Duration.ofSeconds(5);
+
+    private static RecordingListener listenOn(ElectionCluster cluster, int nodeId) {
+        RecordingListener listener = new RecordingListener();
+        cluster.node(nodeId).attach(listener);
+        return listener;
+    }
 
     @Test
     void every_peer_is_reported_up_once_it_answers() {
@@ -133,7 +138,7 @@ class ReachabilityTest {
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
         simulation.run(Duration.ofSeconds(5));
 
-        simulation.network().partition(new int[] {1}, new int[] {2, 3});
+        simulation.network().partition(new int[]{1}, new int[]{2, 3});
         simulation.run(Duration.ofSeconds(10));
 
         assertThat(cluster.node(1).election().isReachable(2)).isFalse();
@@ -226,13 +231,9 @@ class ReachabilityTest {
         assertThat(cluster.node(1).election().isReachable(3)).isFalse();
     }
 
-    private static RecordingListener listenOn(ElectionCluster cluster, int nodeId) {
-        RecordingListener listener = new RecordingListener();
-        cluster.node(nodeId).attach(listener);
-        return listener;
-    }
-
-    /** Records the peer events a node emits. */
+    /**
+     * Records the peer events a node emits.
+     */
     static final class RecordingListener implements org.lolaf.primos.PrimosListener {
 
         final List<Integer> up = new ArrayList<>();

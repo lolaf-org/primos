@@ -15,21 +15,27 @@
  */
 package org.lolaf.primos.store;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileStateStoreTest extends StateStoreContractTest {
 
     @TempDir
     Path directory;
+
+    private static void corruptOneByte(Path path, int index) throws IOException {
+        byte[] bytes = Files.readAllBytes(path);
+        bytes[index] ^= 0x01;
+        Files.write(path, bytes);
+    }
 
     /**
      * The contract store gets a directory to itself. The exclusive lock is per directory and
@@ -56,7 +62,7 @@ class FileStateStoreTest extends StateStoreContractTest {
     }
 
     @Test
-    void a_missing_file_is_a_node_that_has_never_run_not_an_error() throws IOException {
+    void a_missing_file_is_a_node_that_has_never_run_not_an_error() {
         try (StateStore store = new FileStateStore(directory.resolve("never-used"))) {
             assertThat(store.load()).isEqualTo(PersistentState.fresh());
         }
@@ -204,11 +210,5 @@ class FileStateStoreTest extends StateStoreContractTest {
 
     private Path statePath() {
         return caseDirectory().resolve("state");
-    }
-
-    private static void corruptOneByte(Path path, int index) throws IOException {
-        byte[] bytes = Files.readAllBytes(path);
-        bytes[index] ^= 0x01;
-        Files.write(path, bytes);
     }
 }

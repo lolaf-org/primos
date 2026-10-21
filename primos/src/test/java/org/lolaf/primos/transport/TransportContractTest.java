@@ -15,8 +15,9 @@
  */
 package org.lolaf.primos.transport;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -24,9 +25,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * The behaviour every {@link Transport} must have, real or simulated.
@@ -44,7 +44,19 @@ abstract class TransportContractTest {
     protected Transport a;
     protected Transport b;
 
-    /** Creates two transports that can reach each other, assigning {@link #a} and {@link #b}. */
+    protected static ByteBuffer wrap(String text) {
+        return ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    protected static String text(ByteBuffer datagram) {
+        byte[] bytes = new byte[datagram.remaining()];
+        datagram.duplicate().get(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Creates two transports that can reach each other, assigning {@link #a} and {@link #b}.
+     */
     protected abstract void createTransports();
 
     @BeforeEach
@@ -119,9 +131,11 @@ abstract class TransportContractTest {
             }
         }
 
-        assertThat(received).hasSize(50);
-        assertThat(received).contains("message-0", "message-49");
+        assertThat(received).hasSize(50)
+                .contains("message-0", "message-49");
     }
+
+    // ------------------------------------------------- saying what was dropped
 
     @Test
     void polling_an_idle_transport_delivers_nothing() {
@@ -137,8 +151,6 @@ abstract class TransportContractTest {
                 .as("UDP sends fail routinely; the algorithm's timers are the recovery mechanism")
                 .doesNotThrowAnyException();
     }
-
-    // ------------------------------------------------- saying what was dropped
 
     /**
      * A transport may drop anything, and must be able to say how much of what it dropped.
@@ -200,16 +212,6 @@ abstract class TransportContractTest {
     @Test
     void wakeup_is_safe_to_call_even_when_nothing_is_blocked() {
         assertThatCode(() -> a.wakeup()).doesNotThrowAnyException();
-    }
-
-    protected static ByteBuffer wrap(String text) {
-        return ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8));
-    }
-
-    protected static String text(ByteBuffer datagram) {
-        byte[] bytes = new byte[datagram.remaining()];
-        datagram.duplicate().get(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private String receiveOne(Transport transport) {
