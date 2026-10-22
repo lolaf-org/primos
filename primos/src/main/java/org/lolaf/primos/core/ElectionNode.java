@@ -722,7 +722,7 @@ public final class ElectionNode implements MessageHandler {
      */
     private long nextNodeConfigIntervalNanos() {
         for (TrackedPeer peer : peers) {
-            if (!peer.reachable) {
+            if (peer.reachability != Reachability.UP) {
                 return timings.probeInterval().toNanos();
             }
         }
@@ -1007,12 +1007,13 @@ public final class ElectionNode implements MessageHandler {
         trackedPeer.consecutiveMisses = timings.failureThreshold();
         departuresObserved++;
         stats.onDepartureObserved(senderId);
-        if (!trackedPeer.reachable) {
-            // Already down, or never yet seen up. Nothing changed, so nothing is reported — the
-            // same discipline the probe path follows, so one departure is never two events.
+        if (trackedPeer.reachability == Reachability.DOWN) {
+            // Already reported down: one departure is never two events, the same discipline the
+            // probe path follows. A peer never yet seen up is reported, or nobody would ever hear
+            // that it left.
             return;
         }
-        trackedPeer.reachable = false;
+        trackedPeer.reachability = Reachability.DOWN;
         log.info("cluster '{}': node {} {} {} said it is shutting down",
                 config.applicationName(), config.nodeId(), trackedPeer.peer.isWitness() ? "witness" : "peer", senderId);
         listener.onPeerDown(trackedPeer.peer, PeerDownReason.LEFT);
@@ -1094,8 +1095,8 @@ public final class ElectionNode implements MessageHandler {
         trackedPeer.lastProbeRoundTripNanos = now - trackedPeer.sentAtNanos;
         stats.onProbeRoundTrip(senderId, trackedPeer.lastProbeRoundTripNanos);
         trackedPeer.lastHeardNanos = now;
-        if (!trackedPeer.reachable) {
-            trackedPeer.reachable = true;
+        if (trackedPeer.reachability != Reachability.UP) {
+            trackedPeer.reachability = Reachability.UP;
             notifyPeerUp(trackedPeer.peer);
         }
     }
@@ -1105,8 +1106,9 @@ public final class ElectionNode implements MessageHandler {
         for (TrackedPeer trackedPeer : peers) {
             if (trackedPeer.awaitingReply) {
                 trackedPeer.consecutiveMisses++;
-                if (trackedPeer.reachable && trackedPeer.consecutiveMisses >= timings.failureThreshold()) {
-                    trackedPeer.reachable = false;
+                if (trackedPeer.reachability != Reachability.DOWN
+                        && trackedPeer.consecutiveMisses >= timings.failureThreshold()) {
+                    trackedPeer.reachability = Reachability.DOWN;
                     notifyPeerDown(trackedPeer.peer);
                 }
             }
@@ -1173,7 +1175,7 @@ public final class ElectionNode implements MessageHandler {
      */
     public boolean isReachable(int peerId) {
         TrackedPeer trackedPeer = trackedPeer(peerId);
-        return trackedPeer != null && trackedPeer.reachable;
+        return trackedPeer != null && trackedPeer.reachability == Reachability.UP;
     }
 
     /**
@@ -1271,6 +1273,14 @@ public final class ElectionNode implements MessageHandler {
         return "node " + config.nodeId() + " " + role + "/" + currentTerm;
     }
 
+    /**
+     * Unknown until a peer first answers or is given up on, so a peer that never comes up, or leaves before its first
+     * reply, is still reported down once.
+     */
+    private enum Reachability {
+        UNKNOWN, UP, DOWN
+    }
+
     private static final class TrackedPeer {
 
         private final Peer peer;
@@ -1279,7 +1289,7 @@ public final class ElectionNode implements MessageHandler {
         private long sentAtNanos;
         private boolean awaitingReply;
         private int consecutiveMisses;
-        private boolean reachable;
+        private Reachability reachability = Reachability.UNKNOWN;
         private long lastProbeRoundTripNanos = -1;
         private long lastHeardNanos = -1;
         private boolean timingsMatch = true;

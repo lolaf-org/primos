@@ -73,8 +73,10 @@ public interface PrimosListener {
 
     /**
      * A peer is no longer reachable, either because it said it was leaving or because it stopped
-     * answering probes; the reason says which. This says nothing about quorum, which is always
-     * computed from the configured voter set: a peer being down does not shrink the cluster.
+     * answering probes; the reason says which. A peer never yet seen up is reported too, so one that
+     * never starts, or leaves before its first reply, is not silently forgotten. This says nothing
+     * about quorum, which is always computed from the configured voter set: a peer being down does
+     * not shrink the cluster.
      *
      * <p>A witness going down deserves its own alert. Nothing visibly breaks, but the cluster has
      * quietly lost its ability to survive a partition.

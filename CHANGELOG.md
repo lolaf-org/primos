@@ -38,7 +38,7 @@ state.
 - **Fast planned failover.** A leader that stops hands leadership to a follower in about one round trip instead of an
   election timeout, and any node that stops tells its peers, so they report it down at once rather than after a probe
   timeout. `onPeerDown` says which it was: `LEFT` for a clean stop, `UNREACHABLE` for a peer that went silent and may
-  come back.
+  come back. A peer that never starts, or stops before it is first seen, is reported down too.
 - **Restartable nodes.** A stopped node can be started again and rejoins with the term and vote it left with.
 - **Leader data.** A leader calls `publishChange()` when data it owns changes, a shard assignment for example, and
   every node is told through `onLeaderVersion`, so each can fetch the data from the leader over its own channel. The

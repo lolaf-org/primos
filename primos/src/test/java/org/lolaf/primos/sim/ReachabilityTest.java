@@ -86,6 +86,35 @@ class ReachabilityTest {
     }
 
     @Test
+    void a_peer_that_never_starts_is_reported_down_once() {
+        Simulation simulation = new Simulation(14L).checking(Invariants.all());
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingListener events = listenOn(cluster, 1);
+        simulation.crash(3);
+
+        simulation.run(Duration.ofSeconds(60));
+
+        assertThat(cluster.node(1).election().isReachable(3)).isFalse();
+        assertThat(events.up).containsExactly(2);
+        assertThat(events.downWithReason)
+                .as("never seen up is not the same as never worth mentioning")
+                .containsExactly("3/UNREACHABLE");
+    }
+
+    @Test
+    void a_peer_that_leaves_before_it_is_first_seen_up_is_reported_as_having_left() {
+        Simulation simulation = new Simulation(15L).checking(Invariants.all());
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingListener events = listenOn(cluster, 1);
+
+        cluster.node(3).stopCleanly();
+        simulation.run(Duration.ofSeconds(10));
+
+        assertThat(events.up).doesNotContain(3);
+        assertThat(events.downWithReason).containsExactly("3/LEFT");
+    }
+
+    @Test
     void a_peer_that_crashes_is_reported_down_as_unreachable_never_as_having_left() {
         Simulation simulation = new Simulation(13L).checking(Invariants.all());
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
