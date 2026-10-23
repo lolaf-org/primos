@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    uses: lolaf-org/workflows/.github/workflows/maven-build.yml@v1.0.2
+    uses: lolaf-org/workflows/.github/workflows/maven-build.yml@v1.1.1
     with:
       # The lowest JDK that builds every module: the two Spring Boot modules compile for 17.
       java-version: '17'
