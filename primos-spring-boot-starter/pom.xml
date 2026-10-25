@@ -116,6 +116,33 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/WithoutActuatorHealthTest.java</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <!-- Actuator health is optional: the auto-configuration must load without it -->
+                    <execution>
+                        <id>without-actuator-health</id>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <excludes combine.self="override" />
+                            <includes>
+                                <include>**/WithoutActuatorHealthTest.java</include>
+                            </includes>
+                            <classpathDependencyExcludes>
+                                <classpathDependencyExclude>org.springframework.boot:spring-boot-health</classpathDependencyExclude>
+                            </classpathDependencyExcludes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

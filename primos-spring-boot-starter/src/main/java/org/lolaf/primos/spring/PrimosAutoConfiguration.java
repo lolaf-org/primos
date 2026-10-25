@@ -38,6 +38,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 import java.io.IOException;
@@ -218,13 +219,19 @@ public class PrimosAutoConfiguration {
     }
 
     /**
-     * The health indicator, only when the application actually has actuator health present.
+     * The health indicator, only when the application actually has actuator health present. A nested class, because
+     * Spring reads every method of a configuration class before any condition: a {@code @Bean} method returning a
+     * {@code HealthIndicator} here would fail the whole auto-configuration without actuator health.
      */
-    @Bean
+    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
-    @ConditionalOnMissingBean
-    public PrimosHealthIndicator primosHealthIndicator(PrimosNode node) {
-        return new PrimosHealthIndicator(node);
+    static class Health {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public PrimosHealthIndicator primosHealthIndicator(PrimosNode node) {
+            return new PrimosHealthIndicator(node);
+        }
     }
 
     private static Timings toTimings(PrimosProperties.TimingsProperties timings) {
