@@ -315,6 +315,24 @@ class UdpClusterTest {
     }
 
     @Test
+    void a_leader_that_withdraws_from_elections_hands_over_and_stays_out_across_a_restart() {
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
+        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
+        PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+        PrimosNode leader = leaderOf(one, two, three);
+
+        leader.setCandidate(false);
+
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1 && leader.role() == Role.FOLLOWER);
+        assertThat(leader.isCandidate()).isFalse();
+        leader.stop();
+        leader.start();
+        assertThat(leader.isCandidate()).as("kept across a stop and start").isFalse();
+    }
+
+    @Test
     void a_follower_stopped_cleanly_is_reported_down_without_waiting_for_probes() {
         int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);

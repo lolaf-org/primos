@@ -137,6 +137,22 @@ public interface PrimosNode extends AutoCloseable {
     boolean transferLeadership(int targetId);
 
     /**
+     * Takes this node out of elections, or puts it back: a non-candidate keeps voting but never
+     * campaigns, for maintenance or while the application is not fit to lead. A leader withdrawing
+     * hands leadership over, as {@link #transferLeadership()} does, and keeps leading until a
+     * successor takes it, so the cluster is never left without a leader by this call alone.
+     *
+     * <p>Kept across {@link #stop()} and {@link #start()}; a new node stands, as every node does by
+     * default. A cluster whose every node withdraws has no leader.
+     */
+    void setCandidate(boolean candidate);
+
+    /**
+     * Whether this node stands for election; always false for a witness.
+     */
+    boolean isCandidate();
+
+    /**
      * Registers a listener. Allowed after {@link #start()}, in which case it is immediately
      * delivered a synthetic event describing the current state, so a late listener cannot miss the
      * transition it was registered for.

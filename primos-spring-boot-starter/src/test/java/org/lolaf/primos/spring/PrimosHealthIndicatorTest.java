@@ -140,6 +140,15 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
+        public void setCandidate(boolean candidate) {
+        }
+
+        @Override
+        public boolean isCandidate() {
+            return true;
+        }
+
+        @Override
         public void addListener(PrimosListener listener) {
             // nothing to do
         }

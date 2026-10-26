@@ -70,6 +70,11 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private volatile long leadershipConfirmedNanos = Long.MIN_VALUE;
     private volatile boolean running;
     private volatile int transferRequest = NO_TRANSFER;
+    /**
+     * What the application asked, applied to the election by the node thread each turn and to
+     * every new election on start.
+     */
+    private volatile boolean candidate = true;
     private boolean transferServed;
     private boolean transferSent;
     private Thread thread;
@@ -231,6 +236,23 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
+    public void setCandidate(boolean candidate) {
+        this.candidate = candidate;
+        wakeUp();
+    }
+
+    private synchronized void wakeUp() {
+        if (running) {
+            transport.wakeup();
+        }
+    }
+
+    @Override
+    public boolean isCandidate() {
+        return candidate && !config.isWitness();
+    }
+
+    @Override
     public OptionalLong leadershipConfirmedNanos() {
         long confirmed = leadershipConfirmedNanos;
         return running && confirmed != Long.MIN_VALUE ? OptionalLong.of(confirmed) : OptionalLong.empty();
@@ -295,12 +317,14 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     private void loop() {
+        election.setCandidate(candidate);
         election.start();
         log.info("cluster '{}': node {} is rejoining the cluster", config.applicationName(), config.nodeId());
         while (running) {
             // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
             // the socket, so there is no polling interval to tune and no latency to trade away.
             election.runOnce(Long.MAX_VALUE);
+            election.setCandidate(candidate);
             serveTransfer();
             publish();
             if (election.isFailed()) {

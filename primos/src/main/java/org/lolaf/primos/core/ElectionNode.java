@@ -118,6 +118,14 @@ public final class ElectionNode implements MessageHandler {
     private long nodeConfigDeadlineNanos;
     private boolean preVoting;
     private long preVoteTerm;
+    /**
+     * Whether this node stands for election; a witness never does, whatever this says.
+     */
+    private boolean candidate = true;
+    /**
+     * When a leader that withdrew next tries to hand over, until a successor deposes it.
+     */
+    private long withdrawalHandOverNanos;
     private boolean started;
     /**
      * What killed the node, if anything has.
@@ -402,8 +410,8 @@ public final class ElectionNode implements MessageHandler {
     /**
      * When this node next has something to do.
      *
-     * <p>A witness returns {@link Long#MAX_VALUE}: it never campaigns, so it has no election timer
-     * and nothing to do until someone talks to it.
+     * <p>A witness, or a node that withdrew from elections, has no election timer: it never
+     * campaigns.
      */
     public long nextDeadlineNanos() {
         if (role == Role.FAILED) {
@@ -412,7 +420,7 @@ public final class ElectionNode implements MessageHandler {
         long deadline = Math.min(probeDeadlineNanos, nodeConfigDeadlineNanos);
         if (role == Role.LEADER) {
             deadline = Math.min(deadline, heartbeatDeadlineNanos);
-        } else if (!config.isWitness()) {
+        } else if (campaigns()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
         return deadline;
@@ -567,6 +575,9 @@ public final class ElectionNode implements MessageHandler {
                 relinquishLeadership();
                 return;
             }
+            if (!candidate && now >= withdrawalHandOverNanos) {
+                retryWithdrawalHandOver(now);
+            }
             if (now >= heartbeatDeadlineNanos) {
                 broadcastHeartbeat();
                 heartbeatDeadlineNanos = now + timings.heartbeatInterval().toNanos();
@@ -574,9 +585,51 @@ public final class ElectionNode implements MessageHandler {
             announcePublication();
             return;
         }
-        if (!config.isWitness() && now >= electionDeadlineNanos) {
+        if (campaigns() && now >= electionDeadlineNanos) {
             startPreVote();
         }
+    }
+
+    private boolean campaigns() {
+        return candidate && !config.isWitness();
+    }
+
+    public boolean isCandidate() {
+        return campaigns();
+    }
+
+    /**
+     * Takes this node out of elections, or puts it back. A non-candidate keeps voting, replying and
+     * probing, as a witness does, but never campaigns. A candidate withdrawing mid-campaign drops
+     * back to follower, so the votes still in flight cannot elect it; a leader hands leadership
+     * over, and keeps trying every election timeout until a successor deposes it rather than leave
+     * the cluster without one.
+     */
+    public void setCandidate(boolean candidate) {
+        if (this.candidate == candidate || config.isWitness()) {
+            return;
+        }
+        this.candidate = candidate;
+        if (candidate) {
+            // From now, not from whenever the timer was last set: an expired deadline would campaign at once.
+            resetElectionTimer();
+            log.info("cluster '{}': node {} stands for election again", config.applicationName(), config.nodeId());
+            return;
+        }
+        log.warn("cluster '{}': node {} withdrew from elections: it votes but will not lead, and a cluster"
+                + " whose every node withdraws has no leader", config.applicationName(), config.nodeId());
+        abandonPreVote();
+        if (role == Role.CANDIDATE) {
+            endCampaign(false);
+            setRole(Role.FOLLOWER);
+        } else if (role == Role.LEADER) {
+            retryWithdrawalHandOver(clock.nanoTime());
+        }
+    }
+
+    private void retryWithdrawalHandOver(long now) {
+        transferLeadership();
+        withdrawalHandOverNanos = now + timings.electionTimeoutMin().toNanos();
     }
 
     private void startPreVote() {
@@ -967,6 +1020,13 @@ public final class ElectionNode implements MessageHandler {
             // should never target one, and this is the second half of that guarantee — the half
             // that does not depend on the sender being a version that knows the rule.
             log.debug("cluster '{}': witness {} ignoring a handover from node {}",
+                    config.applicationName(), config.nodeId(), senderId);
+            return;
+        }
+        if (!candidate) {
+            // The same rule switched on at runtime. A leader that has not learned this node withdrew
+            // may still pick it, and only costs itself a retry.
+            log.debug("cluster '{}': node {} withdrew from elections, ignoring a handover from node {}",
                     config.applicationName(), config.nodeId(), senderId);
             return;
         }
