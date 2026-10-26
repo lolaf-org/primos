@@ -54,7 +54,9 @@ A snapshot cannot carry the three things worth having:
 | `onElectionWon` / `onElectionLost` | with how long the campaign took, timed from the pre-vote |
 | `onLeaderKnown` | with how long the cluster had none, across every election in the outage |
 | `onLeadershipRelinquished` | CheckQuorum stood this node down: it could not reach a majority |
-| `onHandoverSent` / `onHandoverAccepted` | leadership handed on at shutdown, and taken up |
+| `onHandoverSent` / `onHandoverAccepted` | leadership handed on at shutdown, and taken up (from a shutdown or a transfer) |
+| `onLeadershipTransferSent` | leadership handed on by a leader staying in the cluster, asked for or retried after withdrawing |
+| `onNoSuccessor` | a transfer found no follower standing for election |
 | `onDepartureObserved` | a peer said it was going |
 | `onProbeRoundTrip` | every sample, per peer |
 | `onDatagramDropped` | with the reason; see the [receive pipeline](protocol.md#the-receive-pipeline) |

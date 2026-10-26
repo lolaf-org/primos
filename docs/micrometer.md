@@ -70,6 +70,7 @@ Everything else on this page is diagnosis after that alert has fired.
 | `primos.role` | gauge | 1 for the role held, tagged `role` |
 | `primos.term` | gauge | the term this node is in, which is the fencing token |
 | `primos.node.running` | gauge | 1 while started: separates a node nobody started from a healthy follower |
+| `primos.candidate` | gauge | 1 while this node stands for election; summed across a cluster, 0 means nobody can take over |
 | `primos.voters` | gauge | voters in the configured cluster |
 | `primos.quorum.required` | gauge | votes needed to lead |
 | `primos.peer.up` | gauge | 1 while a peer answers probes |
@@ -84,7 +85,8 @@ they say how close the cluster is to having no leader at all.
 | `primos.campaign` | timer | how long a campaign took, tagged `outcome` = `won`/`lost` |
 | `primos.leaderless` | timer | how long this node had no leader, spanning the whole outage |
 | `primos.leadership.relinquished` | counter | stand-downs for want of contact with a majority |
-| `primos.handover` | counter | graceful handover, tagged `direction` = `sent`/`accepted` |
+| `primos.handover` | counter | leadership handed over, tagged `direction` = `sent` (shutting down), `transferred` (staying), `accepted` |
+| `primos.handover.no.successor` | counter | transfers that found no follower standing for election |
 | `primos.probe.rtt` | timer | every probe round trip, per peer |
 | `primos.datagrams.dropped` | counter | drops, tagged `reason` |
 | `primos.peer.down` | counter | times a peer stopped answering |

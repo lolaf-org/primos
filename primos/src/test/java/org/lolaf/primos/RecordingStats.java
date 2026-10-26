@@ -39,6 +39,8 @@ public final class RecordingStats implements PrimosStatsListener {
     public final AtomicLong leadersKnown = new AtomicLong();
     public final AtomicLong leadershipsRelinquished = new AtomicLong();
     public final AtomicLong handoversSent = new AtomicLong();
+    public final AtomicLong transfersSent = new AtomicLong();
+    public final AtomicLong noSuccessors = new AtomicLong();
     public final AtomicLong handoversAccepted = new AtomicLong();
     public final AtomicLong departuresObserved = new AtomicLong();
     public final AtomicLong timingMismatches = new AtomicLong();
@@ -91,6 +93,16 @@ public final class RecordingStats implements PrimosStatsListener {
     @Override
     public void onHandoverSent(int toPeerId) {
         handoversSent.incrementAndGet();
+    }
+
+    @Override
+    public void onLeadershipTransferSent(int toPeerId) {
+        transfersSent.incrementAndGet();
+    }
+
+    @Override
+    public void onNoSuccessor(long term) {
+        noSuccessors.incrementAndGet();
     }
 
     @Override

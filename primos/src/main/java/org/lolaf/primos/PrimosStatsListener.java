@@ -131,7 +131,22 @@ public interface PrimosStatsListener {
     }
 
     /**
-     * This node campaigned because a departing leader told it to.
+     * This node, leading, told a follower to campaign without leaving itself: a transfer the
+     * application asked for, or one retried by a leader that withdrew from elections.
+     */
+    default void onLeadershipTransferSent(int toPeerId) {
+    }
+
+    /**
+     * A transfer found no follower to hand leadership to: none heard from within an election
+     * timeout, or every one withdrew. A leader that withdrew keeps leading and retries, so a rising
+     * count is a cluster where nobody will take over.
+     */
+    default void onNoSuccessor(long term) {
+    }
+
+    /**
+     * This node campaigned because a leader told it to, departing or transferring.
      */
     default void onHandoverAccepted(long term) {
     }

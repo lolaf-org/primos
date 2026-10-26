@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 
@@ -167,6 +168,29 @@ class CandidacyTest {
         simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
 
         assertThat(leader.election().transferLeadership(withdrawn.id())).isFalse();
+    }
+
+    @Test
+    void a_withdrawn_leader_nobody_will_succeed_counts_each_attempt_as_finding_no_successor() {
+        Simulation simulation = simulation(11L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingStats[] recorded = new RecordingStats[4];
+        for (ElectionCluster.NodeUnderTest node : cluster.nodes()) {
+            recorded[node.id()] = new RecordingStats();
+            node.attach(recorded[node.id()]);
+        }
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        ElectionCluster.NodeUnderTest leader = cluster.leader().get();
+        for (ElectionCluster.NodeUnderTest follower : followers(cluster)) {
+            follower.election().setCandidate(false);
+        }
+        simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
+
+        leader.election().setCandidate(false);
+        simulation.run(TIMINGS.electionTimeoutMin().multipliedBy(3));
+
+        assertThat(recorded[leader.id()].noSuccessors.get()).as("the first attempt and its retries").isGreaterThanOrEqualTo(3);
+        assertThat(recorded[leader.id()].transfersSent.get()).as("nobody stands, so nothing is sent").isZero();
     }
 
     @Test

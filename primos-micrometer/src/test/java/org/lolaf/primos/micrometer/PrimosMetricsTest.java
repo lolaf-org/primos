@@ -73,12 +73,16 @@ class PrimosMetricsTest {
         assertThat(gauge("primos.role", "role", "follower")).isZero();
         assertThat(gauge("primos.term")).isGreaterThan(0.0);
         assertThat(gauge("primos.node.running")).isEqualTo(1.0);
+        assertThat(gauge("primos.candidate")).isEqualTo(1.0);
         assertThat(gauge("primos.voters")).isEqualTo(1.0);
         assertThat(gauge("primos.quorum.required")).isEqualTo(1.0);
 
         assertThat(timerCount("primos.campaign", "outcome", "won")).isEqualTo(1);
         assertThat(counter("primos.role.changes", "to", "leader")).isEqualTo(1.0);
         assertThat(counter("primos.leader.changes")).isGreaterThanOrEqualTo(1.0);
+
+        node.setCandidate(false);
+        assertThat(gauge("primos.candidate")).isZero();
     }
 
     /**
@@ -94,6 +98,8 @@ class PrimosMetricsTest {
         metrics.onLeaderKnown(5, 3_000_000);
         metrics.onLeadershipRelinquished(5);
         metrics.onHandoverSent(2);
+        metrics.onLeadershipTransferSent(2);
+        metrics.onNoSuccessor(6);
         metrics.onHandoverAccepted(6);
         metrics.onDepartureObserved(2);
         metrics.onProbeRoundTrip(2, 250_000);
@@ -109,7 +115,9 @@ class PrimosMetricsTest {
         assertThat(timerCount("primos.leaderless")).isEqualTo(1);
         assertThat(counter("primos.leadership.relinquished")).isEqualTo(1.0);
         assertThat(counter("primos.handover", "direction", "sent")).isEqualTo(1.0);
+        assertThat(counter("primos.handover", "direction", "transferred")).isEqualTo(1.0);
         assertThat(counter("primos.handover", "direction", "accepted")).isEqualTo(1.0);
+        assertThat(counter("primos.handover.no.successor")).isEqualTo(1.0);
         assertThat(counter("primos.departures.observed", "peer", "2")).isEqualTo(1.0);
         assertThat(timerCount("primos.probe.rtt", "peer", "2")).isEqualTo(1);
         assertThat(counter("primos.timing.mismatches", "peer", "2")).isEqualTo(1.0);

@@ -576,7 +576,7 @@ public final class ElectionNode implements MessageHandler {
                 return;
             }
             if (!candidate && now >= withdrawalHandOverNanos) {
-                retryWithdrawalHandOver(now);
+                withdrawalHandOver(now, true);
             }
             if (now >= heartbeatDeadlineNanos) {
                 broadcastHeartbeat();
@@ -623,12 +623,12 @@ public final class ElectionNode implements MessageHandler {
             endCampaign(false);
             setRole(Role.FOLLOWER);
         } else if (role == Role.LEADER) {
-            retryWithdrawalHandOver(clock.nanoTime());
+            withdrawalHandOver(clock.nanoTime(), false);
         }
     }
 
-    private void retryWithdrawalHandOver(long now) {
-        transferLeadership();
+    private void withdrawalHandOver(long now, boolean retry) {
+        transferToBest(retry);
         withdrawalHandOverNanos = now + timings.electionTimeoutMin().toNanos();
     }
 
@@ -1114,6 +1114,7 @@ public final class ElectionNode implements MessageHandler {
         }
         log.info("cluster '{}': node {} is stopping and handing leadership of term {} to node {}",
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
+        stats.onHandoverSent(target.id());
         sendTimeoutNow(target);
         return true;
     }
@@ -1127,17 +1128,36 @@ public final class ElectionNode implements MessageHandler {
      * @return whether a {@code TimeoutNow} was sent; the outcome is the role change that follows
      */
     public boolean transferLeadership() {
+        return transferToBest(false);
+    }
+
+    /**
+     * @param retry a withdrawn leader's retry, logged at DEBUG: it repeats every election timeout
+     *              while nobody will take over, and the first attempt was already logged
+     */
+    private boolean transferToBest(boolean retry) {
         if (role != Role.LEADER) {
             return false;
         }
         Peer target = handoverTarget();
         if (target == null) {
-            log.info("cluster '{}': node {} keeps leading term {}: no reachable follower to"
-                    + " transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
+            stats.onNoSuccessor(currentTerm);
+            if (retry) {
+                log.debug("cluster '{}': node {} keeps leading term {}: still no follower standing for"
+                        + " election to hand over to", config.applicationName(), config.nodeId(), currentTerm);
+            } else {
+                log.info("cluster '{}': node {} keeps leading term {}: no reachable follower standing for"
+                        + " election to transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
+            }
             return false;
         }
-        logTransfer(target);
-        sendTimeoutNow(target);
+        if (retry) {
+            log.debug("cluster '{}': node {} is again offering leadership of term {} to node {}",
+                    config.applicationName(), config.nodeId(), currentTerm, target.id());
+        } else {
+            logTransfer(target);
+        }
+        transferTo(target);
         return true;
     }
 
@@ -1160,7 +1180,7 @@ public final class ElectionNode implements MessageHandler {
             return false;
         }
         logTransfer(trackedPeer.peer);
-        sendTimeoutNow(trackedPeer.peer);
+        transferTo(trackedPeer.peer);
         return true;
     }
 
@@ -1169,8 +1189,12 @@ public final class ElectionNode implements MessageHandler {
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
     }
 
+    private void transferTo(Peer target) {
+        stats.onLeadershipTransferSent(target.id());
+        sendTimeoutNow(target);
+    }
+
     private void sendTimeoutNow(Peer target) {
-        stats.onHandoverSent(target.id());
         send(target.id(), encoder.timeoutNow(sendBuffer, currentTerm));
     }
 

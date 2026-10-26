@@ -99,6 +99,24 @@ final class GuardedStatsListener implements PrimosStatsListener {
     }
 
     @Override
+    public void onLeadershipTransferSent(int toPeerId) {
+        try {
+            sink.onLeadershipTransferSent(toPeerId);
+        } catch (RuntimeException e) {
+            failed("onLeadershipTransferSent", e);
+        }
+    }
+
+    @Override
+    public void onNoSuccessor(long term) {
+        try {
+            sink.onNoSuccessor(term);
+        } catch (RuntimeException e) {
+            failed("onNoSuccessor", e);
+        }
+    }
+
+    @Override
     public void onHandoverAccepted(long term) {
         try {
             sink.onHandoverAccepted(term);

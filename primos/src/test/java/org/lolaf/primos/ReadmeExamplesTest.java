@@ -111,6 +111,8 @@ class ReadmeExamplesTest {
             every.onLeaderKnown(1, 1);
             every.onLeadershipRelinquished(1);
             every.onHandoverSent(2);
+            every.onLeadershipTransferSent(2);
+            every.onNoSuccessor(1);
             every.onHandoverAccepted(1);
             every.onDepartureObserved(2);
             every.onProbeRoundTrip(2, 1);

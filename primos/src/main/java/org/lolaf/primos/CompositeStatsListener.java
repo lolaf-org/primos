@@ -66,6 +66,20 @@ final class CompositeStatsListener implements PrimosStatsListener {
     }
 
     @Override
+    public void onLeadershipTransferSent(int toPeerId) {
+        for (PrimosStatsListener sink : sinks) {
+            sink.onLeadershipTransferSent(toPeerId);
+        }
+    }
+
+    @Override
+    public void onNoSuccessor(long term) {
+        for (PrimosStatsListener sink : sinks) {
+            sink.onNoSuccessor(term);
+        }
+    }
+
+    @Override
     public void onHandoverAccepted(long term) {
         for (PrimosStatsListener sink : sinks) {
             sink.onHandoverAccepted(term);

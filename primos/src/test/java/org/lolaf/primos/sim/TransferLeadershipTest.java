@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 
@@ -36,6 +37,8 @@ class TransferLeadershipTest {
     void a_transfer_elects_a_successor_well_inside_an_election_timeout_and_the_old_leader_follows() {
         Simulation simulation = simulation(1L);
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        RecordingStats recorded = new RecordingStats();
+        cluster.nodes().forEach(node -> node.attach(recorded));
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest old = cluster.leader().get();
         long term = old.currentTerm();
@@ -49,6 +52,9 @@ class TransferLeadershipTest {
         assertThat(cluster.leader().get().currentTerm()).isEqualTo(term + 1);
         assertThat(old.isRunning()).as("a transfer is not a stop").isTrue();
         assertThat(old.role()).isEqualTo(Role.FOLLOWER);
+        assertThat(recorded.transfersSent.get()).isEqualTo(1);
+        assertThat(recorded.handoversSent.get()).as("counted apart from a shutdown's handover").isZero();
+        assertThat(recorded.handoversAccepted.get()).isEqualTo(1);
     }
 
     @Test

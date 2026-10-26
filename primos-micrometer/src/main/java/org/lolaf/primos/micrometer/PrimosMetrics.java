@@ -79,6 +79,8 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
     private static final String PEER = "peer";
     private static final String PEER_TYPE = "peer.type";
+    private static final String HANDOVER = "Leadership handed over: sent by a leader shutting down, transferred by"
+            + " one staying in the cluster, or accepted from either";
 
     private final MeterRegistry registry;
     private final Tags base;
@@ -104,7 +106,9 @@ public final class PrimosMetrics implements PrimosStatsListener {
     private final Timer leaderless;
     private final Counter relinquished;
     private final Counter handoverSent;
+    private final Counter handoverTransferred;
     private final Counter handoverAccepted;
+    private final Counter noSuccessor;
     private final Counter peersForgotten;
     private final Counter leaderChanges;
     private final Counter versionsPublished;
@@ -183,12 +187,11 @@ public final class PrimosMetrics implements PrimosStatsListener {
                 .tags(base).register(registry);
         this.relinquished = counter("primos.leadership.relinquished",
                 "Times this node stood itself down for want of contact with a majority", base);
-        this.handoverSent = counter("primos.handover",
-                "Leadership handed to a follower on shutdown, or taken from a departing leader",
-                base.and("direction", "sent"));
-        this.handoverAccepted = counter("primos.handover",
-                "Leadership handed to a follower on shutdown, or taken from a departing leader",
-                base.and("direction", "accepted"));
+        this.handoverSent = counter("primos.handover", HANDOVER, base.and("direction", "sent"));
+        this.handoverTransferred = counter("primos.handover", HANDOVER, base.and("direction", "transferred"));
+        this.handoverAccepted = counter("primos.handover", HANDOVER, base.and("direction", "accepted"));
+        this.noSuccessor = counter("primos.handover.no.successor",
+                "Transfers that found no follower standing for election to hand leadership to", base);
         this.peersForgotten = counter("primos.peers.forgotten",
                 "Learned voters dropped after going quiet. Always zero with a configured peer set", base);
         this.leaderChanges = counter("primos.leader.changes",
@@ -234,6 +237,9 @@ public final class PrimosMetrics implements PrimosStatsListener {
         gauge("primos.node.running", node, n -> n.isRunning() ? 1 : 0,
                 "1 while the node is started. Separates a node nobody started from a healthy follower",
                 base);
+        gauge("primos.candidate", node, n -> n.isCandidate() ? 1 : 0,
+                "1 while this node stands for election. Summed across a cluster: 0 means nobody can"
+                        + " take over from the leader", base);
 
         Quorum quorum = Quorum.of(node.config());
         if (quorum.isKnown()) {
@@ -274,6 +280,16 @@ public final class PrimosMetrics implements PrimosStatsListener {
     @Override
     public void onHandoverSent(int toPeerId) {
         handoverSent.increment();
+    }
+
+    @Override
+    public void onLeadershipTransferSent(int toPeerId) {
+        handoverTransferred.increment();
+    }
+
+    @Override
+    public void onNoSuccessor(long term) {
+        noSuccessor.increment();
     }
 
     @Override
