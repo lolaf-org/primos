@@ -40,8 +40,9 @@ final class RecordingHandler implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success) {
-        received.add("appendEntriesReply(" + senderId + "," + term + ",success=" + success + ")");
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
+        received.add("appendEntriesReply(" + senderId + "," + term + ",success=" + success
+                + (candidate ? "" : ",declines") + ")");
     }
 
     @Override

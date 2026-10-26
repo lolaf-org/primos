@@ -732,6 +732,8 @@ public final class ElectionNode implements MessageHandler {
         long now = clock.nanoTime();
         for (TrackedPeer trackedPeer : peers) {
             trackedPeer.lastRoundTripNanos = now;
+            // Learned again from this leadership's first replies, rather than kept from an older one.
+            trackedPeer.candidate = true;
         }
 
         log.info("cluster '{}': node {} became leader for term {}",
@@ -968,7 +970,7 @@ public final class ElectionNode implements MessageHandler {
     @Override
     public void onAppendEntries(int senderId, long term, long leaderVersion) {
         if (term < currentTerm) {
-            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false));
+            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, campaigns()));
             return;
         }
         if (term > currentTerm) {
@@ -982,12 +984,12 @@ public final class ElectionNode implements MessageHandler {
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
-        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true));
+        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, campaigns()));
         reportLeaderVersion(term, leaderVersion);
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success) {
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
         if (term > currentTerm) {
             stepDown(term);
             return;
@@ -998,6 +1000,7 @@ public final class ElectionNode implements MessageHandler {
             TrackedPeer trackedPeer = trackedPeer(senderId);
             if (trackedPeer != null) {
                 trackedPeer.lastRoundTripNanos = clock.nanoTime();
+                trackedPeer.candidate = candidate;
             }
         }
     }
@@ -1140,17 +1143,20 @@ public final class ElectionNode implements MessageHandler {
 
     /**
      * {@link #transferLeadership()} to a chosen follower, refused for this node, an unknown id, a
-     * witness, or a peer the probes have declared down.
+     * witness, a peer whose heartbeat reply said it withdrew, or one the probes have declared down.
      */
     public boolean transferLeadership(int targetId) {
         if (role != Role.LEADER) {
             return false;
         }
         TrackedPeer trackedPeer = trackedPeer(targetId);
-        if (trackedPeer == null || trackedPeer.peer.isWitness() || isDeclaredDown(trackedPeer)) {
+        String refusal = trackedPeer == null ? "not a peer"
+                : trackedPeer.peer.isWitness() ? "a witness, which never leads"
+                : !trackedPeer.candidate ? "withdrawn from elections"
+                : isDeclaredDown(trackedPeer) ? "down" : null;
+        if (refusal != null) {
             log.info("cluster '{}': node {} keeps leading term {}: node {} is {}", config.applicationName(),
-                    config.nodeId(), currentTerm, targetId, trackedPeer == null ? "not a peer"
-                            : trackedPeer.peer.isWitness() ? "a witness, which never leads" : "down");
+                    config.nodeId(), currentTerm, targetId, refusal);
             return false;
         }
         logTransfer(trackedPeer.peer);
@@ -1179,7 +1185,7 @@ public final class ElectionNode implements MessageHandler {
         long bestContactNanos = Long.MIN_VALUE;
 
         for (TrackedPeer trackedPeer : peers) {
-            if (trackedPeer.peer.isWitness() || isDeclaredDown(trackedPeer)) {
+            if (trackedPeer.peer.isWitness() || !trackedPeer.candidate || isDeclaredDown(trackedPeer)) {
                 continue;
             }
             long lastContact = trackedPeer.lastRoundTripNanos;
@@ -1410,6 +1416,10 @@ public final class ElectionNode implements MessageHandler {
         private long lastHeardNanos = -1;
         private boolean timingsMatch = true;
         private long lastRoundTripNanos = NO_CONTACT;
+        /**
+         * What its last heartbeat reply in this node's leadership said; standing until one says otherwise.
+         */
+        private boolean candidate = true;
 
         private TrackedPeer(Peer peer) {
             this.peer = peer;

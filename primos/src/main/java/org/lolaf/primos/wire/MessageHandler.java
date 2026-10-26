@@ -45,8 +45,10 @@ public interface MessageHandler {
 
     /**
      * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.
+     *
+     * @param candidate whether the sender stands for election
      */
-    void onAppendEntriesReply(int senderId, long term, boolean success);
+    void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate);
 
     /**
      * A reachability probe, to be answered with the same sequence number.

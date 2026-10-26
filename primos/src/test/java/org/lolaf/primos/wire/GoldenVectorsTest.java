@@ -54,6 +54,10 @@ class GoldenVectorsTest {
             "50524d53010400006f7264657273000000000000000000000000000000000000"
                     + "0000000000000000000000000000002a0000000301";
 
+    private static final String APPEND_ENTRIES_REPLY_DECLINING =
+            "50524d53010400026f7264657273000000000000000000000000000000000000"
+                    + "0000000000000000000000000000002a0000000301";
+
     private static final String PING =
             "50524d53010500006f7264657273000000000000000000000000000000000000"
                     + "0000000000000000000000000000002a000000030000000000000007";
@@ -122,8 +126,14 @@ class GoldenVectorsTest {
 
     @Test
     void append_entries_reply_appends_one_byte() {
-        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true)))
+        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, true)))
                 .isEqualTo(APPEND_ENTRIES_REPLY);
+    }
+
+    @Test
+    void a_reply_from_a_node_that_withdrew_sets_flag_bit_1_and_nothing_else() {
+        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, false)))
+                .isEqualTo(APPEND_ENTRIES_REPLY_DECLINING);
     }
 
     @Test

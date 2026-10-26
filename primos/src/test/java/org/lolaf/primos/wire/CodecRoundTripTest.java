@@ -73,7 +73,7 @@ class CodecRoundTripTest {
                 .isEqualTo("requestVoteReply(3,7,granted=false,preVote=true)");
         assertThat(decode(decoder, encoder.appendEntries(buffer, 7, 0)))
                 .isEqualTo("appendEntries(3,7,version=0)");
-        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true)))
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, true)))
                 .isEqualTo("appendEntriesReply(3,7,success=true)");
         assertThat(decode(decoder, encoder.ping(buffer, 7, 99)))
                 .isEqualTo("ping(3,7,seq=99)");
@@ -96,8 +96,10 @@ class CodecRoundTripTest {
         assertThat(decode(decoder, encoder.requestVote(buffer, 7, true)))
                 .isEqualTo("requestVote(3,7,preVote=true)");
         assertThat(decode(decoder, encoder.ping(buffer, 7, 99))).isEqualTo("ping(3,7,seq=99)");
-        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, false)))
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, false, true)))
                 .isEqualTo("appendEntriesReply(3,7,success=false)");
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, false)))
+                .isEqualTo("appendEntriesReply(3,7,success=true,declines)");
         assertThat(decode(decoder, encoder.timeoutNow(buffer, 7)))
                 .isEqualTo("timeoutNow(3,7)");
 

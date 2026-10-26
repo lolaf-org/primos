@@ -30,7 +30,8 @@ package org.lolaf.primos.wire;
  *      0     4  magic 'PRMS'
  *      4     1  version
  *      5     1  message type
- *      6     2  flags (bit 0 = pre-vote; the rest reserved, sent zero, ignored on receive)
+ *      6     2  flags (bit 0 = pre-vote, bit 1 = declines candidacy; the rest reserved, sent zero,
+ *                 ignored on receive)
  *      8    32  application name, UTF-8, zero-padded
  *     40     8  term
  *     48     4  senderId
@@ -98,6 +99,13 @@ public final class WireFormat {
      * Marks a {@code RequestVote} or its reply as a pre-vote, which mutates no persistent state.
      */
     public static final int FLAG_PRE_VOTE = 0x0001;
+
+    /**
+     * Set on an {@code AppendEntriesReply} by a node that withdrew from elections, so its leader
+     * never hands leadership to it. Set rather than cleared, so a sender that predates it reads as
+     * standing, which is what it does.
+     */
+    public static final int FLAG_DECLINES_CANDIDACY = 0x0002;
 
     private WireFormat() {
     }

@@ -244,7 +244,7 @@ public final class MessageDecoder {
                 break;
             case APPEND_ENTRIES_REPLY:
                 handler.onAppendEntriesReply(senderId, term,
-                        datagram.get(WireFormat.HEADER_BYTES) != 0);
+                        datagram.get(WireFormat.HEADER_BYTES) != 0, (flags & WireFormat.FLAG_DECLINES_CANDIDACY) == 0);
                 break;
             case PING:
                 handler.onPing(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES));

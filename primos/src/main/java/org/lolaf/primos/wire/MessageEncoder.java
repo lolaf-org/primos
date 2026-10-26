@@ -86,10 +86,10 @@ public final class MessageEncoder {
     }
 
     /**
-     * A heartbeat acknowledgement.
+     * A heartbeat acknowledgement, saying whether the sender stands for election.
      */
-    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success) {
-        header(out, MessageType.APPEND_ENTRIES_REPLY, 0, term);
+    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success, boolean candidate) {
+        header(out, MessageType.APPEND_ENTRIES_REPLY, candidate ? 0 : WireFormat.FLAG_DECLINES_CANDIDACY, term);
         out.put(success ? (byte) 1 : (byte) 0);
         return finish(out);
     }

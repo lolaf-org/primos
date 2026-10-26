@@ -131,8 +131,8 @@ public interface PrimosNode extends AutoCloseable {
     /**
      * {@link #transferLeadership()} to a chosen follower.
      *
-     * @return false also when {@code targetId} is this node, not a configured peer, a witness, or
-     * a peer the probes have declared down
+     * @return false also when {@code targetId} is this node, not a configured peer, a witness, a
+     * peer that withdrew from elections, or one the probes have declared down
      */
     boolean transferLeadership(int targetId);
 

@@ -117,6 +117,59 @@ class CandidacyTest {
     }
 
     @Test
+    void a_withdrawn_leader_hands_over_to_the_follower_that_still_stands() {
+        Simulation simulation = simulation(8L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 5, false);
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        ElectionCluster.NodeUnderTest old = cluster.leader().get();
+        ElectionCluster.NodeUnderTest[] followers = followers(cluster);
+        for (int i = 0; i < followers.length - 1; i++) {
+            followers[i].election().setCandidate(false);
+        }
+        ElectionCluster.NodeUnderTest standing = followers[followers.length - 1];
+        // Long enough for every follower's next heartbeat reply to have said so.
+        simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
+
+        old.election().setCandidate(false);
+
+        assertThat(simulation.runUntil(() -> cluster.hasSingleLeader() && cluster.leader().get().id() == standing.id(),
+                TIMINGS.electionTimeoutMin().dividedBy(2)))
+                .as("the leader knows who withdrew, so the first offer goes to the one that stands")
+                .isTrue();
+    }
+
+    @Test
+    void a_withdrawn_leader_hands_over_as_soon_as_a_follower_stands_again() {
+        Simulation simulation = simulation(9L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        ElectionCluster.NodeUnderTest old = cluster.leader().get();
+        ElectionCluster.NodeUnderTest[] followers = followers(cluster);
+        followers[0].election().setCandidate(false);
+        followers[1].election().setCandidate(false);
+        old.election().setCandidate(false);
+        simulation.run(Duration.ofSeconds(5));
+
+        followers[1].election().setCandidate(true);
+
+        assertThat(simulation.runUntil(() -> cluster.hasSingleLeader() && cluster.leader().get().id() == followers[1].id(),
+                SETTLE)).as("the withdrawn leader kept offering").isTrue();
+    }
+
+    @Test
+    void a_follower_that_withdrew_is_refused_as_a_chosen_target() {
+        Simulation simulation = simulation(10L);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        ElectionCluster.NodeUnderTest leader = cluster.leader().get();
+        ElectionCluster.NodeUnderTest withdrawn = followers(cluster)[0];
+        withdrawn.election().setCandidate(false);
+        simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
+
+        assertThat(leader.election().transferLeadership(withdrawn.id())).isFalse();
+    }
+
+    @Test
     void a_candidate_withdrawing_mid_campaign_does_not_lead() {
         Simulation simulation = simulation(6L);
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
