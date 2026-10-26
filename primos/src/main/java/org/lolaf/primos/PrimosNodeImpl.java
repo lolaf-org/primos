@@ -44,6 +44,9 @@ import java.util.function.Supplier;
 @Slf4j
 final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
+    private static final int NO_TRANSFER = Integer.MIN_VALUE;
+    private static final int ANY_FOLLOWER = Integer.MIN_VALUE + 1;
+
     private final ClusterConfig config;
     private final Supplier<StateStore> stores;
     private final Supplier<Transport> transports;
@@ -58,15 +61,17 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * generation, so a listener registered once keeps counting across a restart.
      */
     private final PrimosStatsListener stats;
+    private final Object transfer = new Object();
     private StateStore store;
     private Transport transport;
     private ElectionNode election;
-
     private volatile RoleAndTerm roleAndTerm;
     private volatile Leader leader;
     private volatile long leadershipConfirmedNanos = Long.MIN_VALUE;
     private volatile boolean running;
-
+    private volatile int transferRequest = NO_TRANSFER;
+    private boolean transferServed;
+    private boolean transferSent;
     private Thread thread;
 
     PrimosNodeImpl(ClusterConfig config,
@@ -169,6 +174,63 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
+    public boolean transferLeadership() {
+        return requestTransfer(ANY_FOLLOWER);
+    }
+
+    @Override
+    public boolean transferLeadership(int targetId) {
+        return requestTransfer(targetId);
+    }
+
+    /**
+     * Waits for the node thread to serve the request, bounded by the stop timeout in case the
+     * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
+     * the transport under it, and one caller at a time uses the single request slot.
+     */
+    private synchronized boolean requestTransfer(int target) {
+        synchronized (transfer) {
+            if (!running) {
+                return false;
+            }
+            transferServed = false;
+            transferRequest = target;
+            transport.wakeup();
+            long deadline = clock.nanoTime() + stopTimeoutNanos;
+            try {
+                while (!transferServed && running) {
+                    long remaining = deadline - clock.nanoTime();
+                    if (remaining <= 0) {
+                        break;
+                    }
+                    TimeUnit.NANOSECONDS.timedWait(transfer, remaining);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                transferRequest = NO_TRANSFER;
+            }
+            return transferServed && transferSent;
+        }
+    }
+
+    private void serveTransfer() {
+        if (transferRequest == NO_TRANSFER) {
+            return;
+        }
+        synchronized (transfer) {
+            int target = transferRequest;
+            if (target == NO_TRANSFER) {
+                return;
+            }
+            transferRequest = NO_TRANSFER;
+            transferSent = target == ANY_FOLLOWER ? election.transferLeadership() : election.transferLeadership(target);
+            transferServed = true;
+            transfer.notifyAll();
+        }
+    }
+
+    @Override
     public OptionalLong leadershipConfirmedNanos() {
         long confirmed = leadershipConfirmedNanos;
         return running && confirmed != Long.MIN_VALUE ? OptionalLong.of(confirmed) : OptionalLong.empty();
@@ -239,6 +301,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
             // the socket, so there is no polling interval to tune and no latency to trade away.
             election.runOnce(Long.MAX_VALUE);
+            serveTransfer();
             publish();
             if (election.isFailed()) {
                 running = false;

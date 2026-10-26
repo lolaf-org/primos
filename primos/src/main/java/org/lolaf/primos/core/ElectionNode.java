@@ -1049,11 +1049,67 @@ public final class ElectionNode implements MessageHandler {
                     currentTerm);
             return false;
         }
-        stats.onHandoverSent(target.id());
         log.info("cluster '{}': node {} is stopping and handing leadership of term {} to node {}",
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
-        send(target.id(), encoder.timeoutNow(sendBuffer, currentTerm));
+        sendTimeoutNow(target);
         return true;
+    }
+
+    /**
+     * Hands leadership to the follower a stop would, and stays in the cluster as a follower.
+     *
+     * <p>This node keeps leading until the successor's {@code RequestVote} reaches it, so a
+     * transfer whose {@code TimeoutNow} is lost, or whose target never campaigns, changes nothing.
+     *
+     * @return whether a {@code TimeoutNow} was sent; the outcome is the role change that follows
+     */
+    public boolean transferLeadership() {
+        if (role != Role.LEADER) {
+            return false;
+        }
+        Peer target = handoverTarget();
+        if (target == null) {
+            log.info("cluster '{}': node {} keeps leading term {}: no reachable follower to"
+                    + " transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
+            return false;
+        }
+        logTransfer(target);
+        sendTimeoutNow(target);
+        return true;
+    }
+
+    /**
+     * {@link #transferLeadership()} to a chosen follower, refused for this node, an unknown id, a
+     * witness, or a peer the probes have declared down.
+     */
+    public boolean transferLeadership(int targetId) {
+        if (role != Role.LEADER) {
+            return false;
+        }
+        TrackedPeer trackedPeer = trackedPeer(targetId);
+        if (trackedPeer == null || trackedPeer.peer.isWitness() || isDeclaredDown(trackedPeer)) {
+            log.info("cluster '{}': node {} keeps leading term {}: node {} is {}", config.applicationName(),
+                    config.nodeId(), currentTerm, targetId, trackedPeer == null ? "not a peer"
+                            : trackedPeer.peer.isWitness() ? "a witness, which never leads" : "down");
+            return false;
+        }
+        logTransfer(trackedPeer.peer);
+        sendTimeoutNow(trackedPeer.peer);
+        return true;
+    }
+
+    private void logTransfer(Peer target) {
+        log.info("cluster '{}': node {} is transferring leadership of term {} to node {}",
+                config.applicationName(), config.nodeId(), currentTerm, target.id());
+    }
+
+    private void sendTimeoutNow(Peer target) {
+        stats.onHandoverSent(target.id());
+        send(target.id(), encoder.timeoutNow(sendBuffer, currentTerm));
+    }
+
+    private boolean isDeclaredDown(TrackedPeer trackedPeer) {
+        return trackedPeer.consecutiveMisses >= timings.failureThreshold();
     }
 
     private Peer handoverTarget() {
@@ -1063,7 +1119,7 @@ public final class ElectionNode implements MessageHandler {
         long bestContactNanos = Long.MIN_VALUE;
 
         for (TrackedPeer trackedPeer : peers) {
-            if (trackedPeer.peer.isWitness() || trackedPeer.consecutiveMisses >= timings.failureThreshold()) {
+            if (trackedPeer.peer.isWitness() || isDeclaredDown(trackedPeer)) {
                 continue;
             }
             long lastContact = trackedPeer.lastRoundTripNanos;

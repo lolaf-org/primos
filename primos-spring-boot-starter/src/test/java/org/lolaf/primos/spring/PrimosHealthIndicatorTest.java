@@ -130,6 +130,16 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
+        public boolean transferLeadership() {
+            return false;
+        }
+
+        @Override
+        public boolean transferLeadership(int targetId) {
+            return false;
+        }
+
+        @Override
         public void addListener(PrimosListener listener) {
             // nothing to do
         }

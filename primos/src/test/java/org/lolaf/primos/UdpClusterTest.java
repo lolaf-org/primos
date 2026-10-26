@@ -294,6 +294,27 @@ class UdpClusterTest {
     }
 
     @Test
+    void a_leader_transfers_leadership_from_an_application_thread_and_stays_in_the_cluster() {
+        int[] ports = {Ports.free(), Ports.free(), Ports.free()};
+        PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);
+        PrimosNode two = start(2, ports, null, new MemoryStateStore(), ports[1]);
+        PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
+        PrimosNode leader = leaderOf(one, two, three);
+        PrimosNode chosen = leader == one ? two : one;
+
+        // Called here, served by the node thread, which alone touches the election: the wiring under test.
+        assertThat(leader.transferLeadership(chosen.config().nodeId())).isTrue();
+
+        await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1 && chosen.role() == Role.LEADER);
+        assertThat(leader.isRunning()).isTrue();
+        assertThat(leader.role()).isEqualTo(Role.FOLLOWER);
+        assertThat(leader.transferLeadership()).as("no longer leading").isFalse();
+        leader.stop();
+        assertThat(leader.transferLeadership()).as("not running").isFalse();
+    }
+
+    @Test
     void a_follower_stopped_cleanly_is_reported_down_without_waiting_for_probes() {
         int[] ports = {Ports.free(), Ports.free(), Ports.free()};
         PrimosNode one = start(1, ports, null, new MemoryStateStore(), ports[0]);

@@ -115,6 +115,28 @@ public interface PrimosNode extends AutoCloseable {
     OptionalLong leadershipConfirmedNanos();
 
     /**
+     * Hands leadership to the follower this node most recently heard from, and stays in the
+     * cluster as a follower: a planned switchover, where {@link #stop()} would leave.
+     *
+     * <p>Best-effort, like the handover on {@link #stop()}. This node keeps leading until its
+     * successor campaigns, so a transfer that does not happen changes nothing. The outcome is the
+     * {@link PrimosListener#onRoleChanged} that follows, which the caller waits for with its own
+     * deadline.
+     *
+     * @return whether the successor was told to campaign; false when this node is not leading,
+     * not running, or has no follower it heard from within an election timeout
+     */
+    boolean transferLeadership();
+
+    /**
+     * {@link #transferLeadership()} to a chosen follower.
+     *
+     * @return false also when {@code targetId} is this node, not a configured peer, a witness, or
+     * a peer the probes have declared down
+     */
+    boolean transferLeadership(int targetId);
+
+    /**
      * Registers a listener. Allowed after {@link #start()}, in which case it is immediately
      * delivered a synthetic event describing the current state, so a late listener cannot miss the
      * transition it was registered for.
