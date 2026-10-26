@@ -34,7 +34,7 @@ Every message starts with the same 52 bytes. Integers are big-endian (network by
 | 0 | 4 | magic | ASCII `PRMS` |
 | 4 | 1 | version | `1`. An unknown version is dropped, never guessed |
 | 5 | 1 | message type | see the table below. Never `0`, so a zeroed buffer is not a message |
-| 6 | 2 | flags | bit 0: pre-vote. Other bits are reserved, sent as zero and ignored on receive |
+| 6 | 2 | flags | bit 0: pre-vote. Bit 1: declines candidacy, on `AppendEntriesReply`. Other bits are reserved, sent as zero and ignored on receive |
 | 8 | 32 | application name | UTF-8, zero-padded. 1 to 32 bytes of printable ASCII, no spaces |
 | 40 | 8 | term | signed 64-bit, the sender's current term (with one exception, below) |
 | 48 | 4 | sender id | signed 32-bit, the sender's node id |
@@ -58,7 +58,7 @@ leader; here that field simply is the sender, already in the header.
 | `0x04` | `AppendEntriesReply` | 1 | 53 | acknowledge the heartbeat |
 | `0x05` | `Ping` | 8 | 60 | reachability probe |
 | `0x06` | `PingReply` | 8 | 60 | probe answer |
-| `0x07` | `TimeoutNow` | 0 | 52 | a departing leader telling one follower to campaign now |
+| `0x07` | `TimeoutNow` | 0 | 52 | a departing or transferring leader telling one follower to campaign now |
 | `0x08` | `Leaving` | 0 | 52 | a node announcing its own shutdown |
 | `0x09` | `NodeConfig` | 20 | 72 | a node stating the intervals it runs |
 
@@ -116,6 +116,9 @@ The term is the responder's current term. A reply to a heartbeat in the leader's
 that proves a round trip to that peer, and CheckQuorum decides from those round trips whether the leader may keep
 leading.
 
+**Flag bit 1** is set by a node that withdrew from elections, so the leader never hands leadership to it. It is set
+rather than cleared, so a node that predates it reads as standing.
+
 ### `Ping` (`0x05`) and `PingReply` (`0x06`)
 
 | offset | size | field |
@@ -131,9 +134,11 @@ is alive, not that it accepts this node as leader.
 
 ### `TimeoutNow` (`0x07`)
 
-No payload. Sent by a leader that is stopping, to the follower it most recently completed a round trip with, telling it
-to campaign immediately instead of waiting out an election timeout (Raft thesis §3.10). The term is the leader's, so a
-follower that has already moved past it ignores the instruction. A witness always refuses it, whatever the sender.
+No payload. Sent by a leader that is stopping, or transferring leadership while it stays, to the follower it most
+recently completed a round trip with or the one it was asked to pick, telling it to campaign immediately instead of
+waiting out an election timeout (Raft thesis §3.10). The term is the leader's, so a follower that has already moved past
+it ignores the instruction. A witness always refuses it, whatever the sender, and so does a node that withdrew from
+elections.
 
 ### `Leaving` (`0x08`)
 

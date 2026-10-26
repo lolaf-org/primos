@@ -52,7 +52,8 @@ public class PrimosHealthIndicator implements HealthIndicator {
                 .withDetail("role", current.role().name())
                 .withDetail("term", current.term())
                 .withDetail("leader", node.leader().map(leader -> leader.isSelf()
-                        ? "self" : String.valueOf(leader.id())).orElse("none"));
+                        ? "self" : String.valueOf(leader.id())).orElse("none"))
+                .withDetail("candidate", node.isCandidate());
         if (current.role() == Role.FAILED) {
             health.withDetail("reason", "the node thread died and this node will never lead again;"
                     + " restart the process rather than waiting for it to recover");

@@ -46,7 +46,8 @@ class PrimosHealthIndicatorTest {
                 .isEqualTo(Status.UP);
         assertThat(health.getDetails()).containsEntry("role", "FOLLOWER")
                 .containsEntry("term", 7L)
-                .containsEntry("state", "running");
+                .containsEntry("state", "running")
+                .containsEntry("candidate", true);
     }
 
     @Test

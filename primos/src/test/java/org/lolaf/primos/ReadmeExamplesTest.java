@@ -83,6 +83,33 @@ class ReadmeExamplesTest {
     }
 
     @Test
+    void the_leadership_control_examples_compile_and_answer_on_a_node_that_does_not_lead() {
+        try (PrimosNode node = PrimosNode.builder()
+                .clusterConfig(ClusterConfig.builder()
+                        .applicationName("orders")
+                        .nodeId(1)
+                        .peer(Peer.application(2, "127.0.0.1", 7421))
+                        .build())
+                .store(() -> new FileStateStore(directory))
+                .transport(UdpTransport.builder()
+                        .bindAddress(new InetSocketAddress("127.0.0.1", 0))
+                        .peers(List.of(Peer.application(2, "127.0.0.1", 7421))))
+                .build()) {
+            node.start();
+
+            // docs/leadership-control.md
+            if (node.transferLeadership()) {
+                // told a follower to campaign; wait for onRoleChanged with a deadline of your own
+            }
+            node.setCandidate(false); // votes, never campaigns
+            node.setCandidate(true);  // stands again, after a full election timeout
+
+            assertThat(node.transferLeadership()).as("its only peer never answers, so it never leads").isFalse();
+            assertThat(node.isCandidate()).isTrue();
+        }
+    }
+
+    @Test
     void every_stats_event_the_readme_names_exists() {
         RecordingStats recorded = new RecordingStats();
         try (PrimosNode node = PrimosNode.builder()

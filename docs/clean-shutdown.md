@@ -37,5 +37,8 @@ Both messages go out during `stop()`. Whatever supervises the process should sen
 following up with `SIGKILL`: systemd's `TimeoutStopSec`, Docker's `--stop-timeout` and Kubernetes'
 `terminationGracePeriodSeconds` all default to enough.
 
+To move leadership without stopping the leader, or keep a node from leading at all, see
+[Planned switchover and maintenance](leadership-control.md).
+
 [Observability](observability.md) has the two counters that show this working: `onHandoverSent` against the deploys
 that stopped a leader, and `onDepartureObserved` against the peer-down events.
