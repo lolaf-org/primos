@@ -159,7 +159,7 @@ class ElectionNodeTest {
         node.onRequestVote(2, 5, false);
         assertThat(node.votedFor()).isEqualTo(2);
 
-        node.onAppendEntries(3, 6, 0);
+        node.onAppendEntries(3, 6, 0, 0);
 
         assertThat(node.currentTerm()).isEqualTo(6);
         assertThat(node.votedFor()).isEqualTo(PersistentState.NO_VOTE);
@@ -207,7 +207,7 @@ class ElectionNodeTest {
         // The witness server learns voters between turns of its own loop, so a heartbeat can
         // arrive before learnPeer has been called for its sender. Every other node answers only
         // configured senders, so this is the one place the peer can be missing.
-        witness.onAppendEntries(7, 1, 0);
+        witness.onAppendEntries(7, 1, 0, 0);
 
         Leader leader = witness.leaderOptional().orElseThrow(AssertionError::new);
         assertThat(leader.id()).isEqualTo(7);
@@ -221,7 +221,7 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
         node.onRequestVote(2, 7, false);
 
-        node.onAppendEntries(3, 4, 0);
+        node.onAppendEntries(3, 4, 0, 0);
 
         assertThat(node.currentTerm()).isEqualTo(7);
         assertThat(node.leaderOptional()).isEmpty();
@@ -232,7 +232,7 @@ class ElectionNodeTest {
         ElectionNode node = campaigningNodeOfFive();
         long term = node.currentTerm();
 
-        node.onAppendEntries(4, term, 0);
+        node.onAppendEntries(4, term, 0, 0);
 
         assertThat(node.role()).isEqualTo(Role.FOLLOWER);
         assertThat(node.leaderOptional()).map(Leader::id).hasValue(4);
@@ -325,7 +325,7 @@ class ElectionNodeTest {
     @Test
     void a_pre_vote_is_refused_while_a_leader_is_being_heard_from() {
         ElectionNode node = startedNode();
-        node.onAppendEntries(2, 1, 0);
+        node.onAppendEntries(2, 1, 0, 0);
 
         node.onRequestVote(3, 99, true);
 
@@ -339,12 +339,25 @@ class ElectionNodeTest {
     @Test
     void a_pre_vote_is_granted_once_no_leader_has_been_heard_from_for_an_election_timeout() {
         ElectionNode node = startedNode();
-        node.onAppendEntries(2, 1, 0);
+        node.onAppendEntries(2, 1, 0, 0);
         clock.advance(Duration.ofSeconds(1));
 
         node.onRequestVote(3, 2, true);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted()).isTrue();
+    }
+
+    @Test
+    void a_pre_vote_is_refused_for_an_election_timeout_after_granting_a_vote() {
+        ElectionNode node = startedNode();
+        clock.advance(Duration.ofSeconds(1));
+        node.onRequestVote(2, 1, false);
+
+        node.onRequestVote(3, 2, true);
+
+        assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted())
+                .as("node 2 may lead from its election on, and its lease counts on this refusal")
+                .isFalse();
     }
 
     @Test

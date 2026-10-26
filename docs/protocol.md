@@ -54,8 +54,8 @@ leader; here that field simply is the sender, already in the header.
 |-----:|---------|--------:|----------------:|---------|
 | `0x01` | `RequestVote` | 0 | 52 | ask for a vote, or with the pre-vote flag, whether one would be given |
 | `0x02` | `RequestVoteReply` | 1 | 53 | grant or refuse it |
-| `0x03` | `AppendEntries` | 8 | 60 | the leader's heartbeat, with the version it last published |
-| `0x04` | `AppendEntriesReply` | 1 | 53 | acknowledge the heartbeat |
+| `0x03` | `AppendEntries` | 16 | 68 | the leader's heartbeat, with the version it last published |
+| `0x04` | `AppendEntriesReply` | 9 | 61 | acknowledge the heartbeat |
 | `0x05` | `Ping` | 8 | 60 | reachability probe |
 | `0x06` | `PingReply` | 8 | 60 | probe answer |
 | `0x07` | `TimeoutNow` | 0 | 52 | a departing or transferring leader telling one follower to campaign now |
@@ -97,6 +97,7 @@ duplicated datagram is never a second vote.
 | offset | size | field |
 |-------:|-----:|-------|
 | 52 | 8 | leader version: the version the leader last published in this term, `0` before any |
+| 60 | 8 | sent at: when the leader sent it, on its own monotonic clock; opaque to the receiver, which echoes it |
 
 It never carries entries, because there is no log: it is the heartbeat by which a leader asserts its term. A receiver
 whose term is not ahead becomes a follower of the sender and resets its election timer.
@@ -111,10 +112,13 @@ The election never reads it.
 | offset | size | field |
 |-------:|-----:|-------|
 | 52 | 1 | success: `1` if the heartbeat was accepted, `0` if its term was stale |
+| 53 | 8 | sent at: echoed from the heartbeat it answers |
 
 The term is the responder's current term. A reply to a heartbeat in the leader's current term is the **only** thing
 that proves a round trip to that peer, and CheckQuorum decides from those round trips whether the leader may keep
-leading.
+leading. The leader counts each from the echoed send instant, not from the reply's arrival: the peer reset its own
+election clock on receiving the heartbeat, which may be well before the reply arrives, and a lease counted from the
+arrival could outlast it.
 
 **Flag bit 1** is set by a node that withdrew from elections, so the leader never hands leadership to it. It is set
 rather than cleared, so a node that predates it reads as standing.

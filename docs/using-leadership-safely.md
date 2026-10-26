@@ -26,6 +26,14 @@ Terms only ever increase, and at most one node leads in any term, so the term is
 The same holds for the [Spring Boot starter](spring-boot.md#using-it-safely): `@LeaderOnly` makes leadership
 convenient, not safe, because a bean's `stop()` cannot be fenced either.
 
+## A lease, when there is no token to carry
+
+When the external system cannot check a term, the best left is to stop before a successor can start.
+`leadershipConfirmedNanos()` is when the latest heartbeat a quorum answered was sent; no successor is elected before
+`electionTimeoutMin` after it. End your lease earlier, by a margin covering clock drift and the time your own stop
+takes, and check it when it ends, not on your next poll. Handing leadership over (`stop()`, `transferLeadership()`,
+`setCandidate(false)`) lets the successor campaign at once: stop the guarded work before.
+
 ## Do not block the node thread
 
 Listener callbacks arrive on the node thread, the same thread that sends heartbeats and answers votes. Hand real work to

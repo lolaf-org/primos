@@ -158,12 +158,12 @@ final class WitnessTestClient implements AutoCloseable {
         }
 
         @Override
-        public void onAppendEntries(int senderId, long term, long leaderVersion) {
+        public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
             // nothing to do
         }
 
         @Override
-        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
+        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
             // nothing to do
         }
 

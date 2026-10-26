@@ -85,7 +85,7 @@ final class WitnessClient implements AutoCloseable {
      * Tells the witness this node is leading, which is what stops it granting pre-votes.
      */
     void heartbeat(WitnessServer server, long term) {
-        exchange(server, encoder.appendEntries(send, term, 0));
+        exchange(server, encoder.appendEntries(send, term, 0, 0));
     }
 
     /**
@@ -217,12 +217,12 @@ final class WitnessClient implements AutoCloseable {
         }
 
         @Override
-        public void onAppendEntries(int senderId, long term, long leaderVersion) {
+        public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
             // nothing to do
         }
 
         @Override
-        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
+        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
             this.answered = true;
         }
 

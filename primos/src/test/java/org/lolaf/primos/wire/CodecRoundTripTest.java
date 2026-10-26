@@ -44,13 +44,24 @@ class CodecRoundTripTest {
     void the_leader_version_survives_a_round_trip_at_full_width() {
         MessageEncoder encoder = encoder(MessageAuthenticator.disabled());
 
-        assertThat(decode(decoder(MessageAuthenticator.disabled()), encoder.appendEntries(buffer, 7, Long.MAX_VALUE)))
+        assertThat(decode(decoder(MessageAuthenticator.disabled()), encoder.appendEntries(buffer, 7, Long.MAX_VALUE, 0)))
                 .isEqualTo("appendEntries(3,7,version=" + Long.MAX_VALUE + ")");
     }
 
     @Test
+    void the_send_instant_survives_a_heartbeat_and_its_reply_at_full_width() {
+        MessageEncoder encoder = encoder(MessageAuthenticator.disabled());
+        MessageDecoder decoder = decoder(MessageAuthenticator.disabled());
+
+        assertThat(decode(decoder, encoder.appendEntries(buffer, 7, 0, Long.MIN_VALUE)))
+                .isEqualTo("appendEntries(3,7,version=0,sent=" + Long.MIN_VALUE + ")");
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, true, Long.MAX_VALUE)))
+                .isEqualTo("appendEntriesReply(3,7,success=true,sent=" + Long.MAX_VALUE + ")");
+    }
+
+    @Test
     void a_heartbeat_without_its_leader_version_is_rejected() {
-        ByteBuffer datagram = encoder(MessageAuthenticator.disabled()).appendEntries(buffer, 7, 0);
+        ByteBuffer datagram = encoder(MessageAuthenticator.disabled()).appendEntries(buffer, 7, 0, 0);
         datagram.limit(WireFormat.HEADER_BYTES);
 
         assertThat(decoder(MessageAuthenticator.disabled()).decode(datagram, handler)).isFalse();
@@ -71,9 +82,9 @@ class CodecRoundTripTest {
                 .isEqualTo("requestVoteReply(3,7,granted=true,preVote=false)");
         assertThat(decode(decoder, encoder.requestVoteReply(buffer, 7, false, true)))
                 .isEqualTo("requestVoteReply(3,7,granted=false,preVote=true)");
-        assertThat(decode(decoder, encoder.appendEntries(buffer, 7, 0)))
+        assertThat(decode(decoder, encoder.appendEntries(buffer, 7, 0, 0)))
                 .isEqualTo("appendEntries(3,7,version=0)");
-        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, true)))
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, true, 0)))
                 .isEqualTo("appendEntriesReply(3,7,success=true)");
         assertThat(decode(decoder, encoder.ping(buffer, 7, 99)))
                 .isEqualTo("ping(3,7,seq=99)");
@@ -96,9 +107,9 @@ class CodecRoundTripTest {
         assertThat(decode(decoder, encoder.requestVote(buffer, 7, true)))
                 .isEqualTo("requestVote(3,7,preVote=true)");
         assertThat(decode(decoder, encoder.ping(buffer, 7, 99))).isEqualTo("ping(3,7,seq=99)");
-        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, false, true)))
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, false, true, 0)))
                 .isEqualTo("appendEntriesReply(3,7,success=false)");
-        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, false)))
+        assertThat(decode(decoder, encoder.appendEntriesReply(buffer, 7, true, false, 0)))
                 .isEqualTo("appendEntriesReply(3,7,success=true,declines)");
         assertThat(decode(decoder, encoder.timeoutNow(buffer, 7)))
                 .isEqualTo("timeoutNow(3,7)");
@@ -130,7 +141,7 @@ class CodecRoundTripTest {
         MessageDecoder decoder = new MessageDecoder(APP, MessageAuthenticator.disabled(),
                 id -> id == 1023, drops);
 
-        assertThat(decode(decoder, encoder.appendEntries(buffer, 5, 0)))
+        assertThat(decode(decoder, encoder.appendEntries(buffer, 5, 0, 0)))
                 .isEqualTo("appendEntries(1023,5,version=0)");
     }
 
@@ -140,7 +151,7 @@ class CodecRoundTripTest {
         MessageDecoder decoder = new MessageDecoder("a", MessageAuthenticator.disabled(),
                 id -> true, drops);
 
-        assertThat(decode(decoder, encoder.appendEntries(buffer, 1, 0))).isEqualTo("appendEntries(3,1,version=0)");
+        assertThat(decode(decoder, encoder.appendEntries(buffer, 1, 0, 0))).isEqualTo("appendEntries(3,1,version=0)");
     }
 
     @Test
@@ -150,7 +161,7 @@ class CodecRoundTripTest {
         MessageDecoder decoder = new MessageDecoder(name, MessageAuthenticator.disabled(),
                 id -> true, drops);
 
-        assertThat(decode(decoder, encoder.appendEntries(buffer, 1, 0))).isEqualTo("appendEntries(3,1,version=0)");
+        assertThat(decode(decoder, encoder.appendEntries(buffer, 1, 0, 0))).isEqualTo("appendEntries(3,1,version=0)");
     }
 
     private String decode(MessageDecoder decoder, ByteBuffer datagram) {

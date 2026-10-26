@@ -77,20 +77,24 @@ public final class MessageEncoder {
     }
 
     /**
-     * The heartbeat, carrying the version the leader last published in this term; 0 before any.
+     * The heartbeat, carrying the version the leader last published in this term (0 before any) and the instant
+     * it is sent, on the leader's own clock.
      */
-    public ByteBuffer appendEntries(ByteBuffer out, long term, long leaderVersion) {
+    public ByteBuffer appendEntries(ByteBuffer out, long term, long leaderVersion, long sentNanos) {
         header(out, MessageType.APPEND_ENTRIES, 0, term);
         out.putLong(leaderVersion);
+        out.putLong(sentNanos);
         return finish(out);
     }
 
     /**
-     * A heartbeat acknowledgement, saying whether the sender stands for election.
+     * A heartbeat acknowledgement, saying whether the sender stands for election, and echoing the heartbeat's send
+     * instant.
      */
-    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success, boolean candidate) {
+    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success, boolean candidate, long sentNanos) {
         header(out, MessageType.APPEND_ENTRIES_REPLY, candidate ? 0 : WireFormat.FLAG_DECLINES_CANDIDACY, term);
         out.put(success ? (byte) 1 : (byte) 0);
+        out.putLong(sentNanos);
         return finish(out);
     }
 

@@ -108,9 +108,10 @@ public interface PrimosNode extends AutoCloseable {
     Optional<PublishedVersion> publishChange();
 
     /**
-     * While this node leads, the instant, on {@link System#nanoTime()}'s base, by which a quorum of voters had last
-     * answered it; empty otherwise. A lease that ends a fixed time after this cannot outlive this node's leadership,
-     * because a successor is elected only once a quorum has heard nothing from it for an election timeout.
+     * While this node leads, when the latest heartbeat a quorum of voters has answered was sent, on
+     * {@link System#nanoTime()}'s base; empty otherwise. No successor is elected before {@code electionTimeoutMin}
+     * after it, on the voters' clocks, so a lease ending sooner, by a margin for clock drift, cannot outlive this
+     * leadership. This node stands down when that timeout runs out.
      */
     OptionalLong leadershipConfirmedNanos();
 

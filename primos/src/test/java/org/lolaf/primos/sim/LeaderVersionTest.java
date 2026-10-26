@@ -278,7 +278,7 @@ class LeaderVersionTest {
 
     private void heartbeat(ElectionNode follower, long term, long version) {
         ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        network.transportFor(2).send(1, leaderEncoder.appendEntries(buffer, term, version));
+        network.transportFor(2).send(1, leaderEncoder.appendEntries(buffer, term, version, 0));
         clock.advanceTo(Math.max(clock.nanoTime(), network.nextDeliveryNanos(1)));
         follower.runOnce(0L);
     }

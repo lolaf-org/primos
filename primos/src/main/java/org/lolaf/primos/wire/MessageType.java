@@ -21,7 +21,7 @@ import lombok.Getter;
  * The nine messages, and the fixed size of each.
  *
  * <p>The term and the sender live in the header, so {@code REQUEST_VOTE} carries no payload at all
- * and {@code APPEND_ENTRIES} only the leader's version. That is also why there is no
+ * and {@code APPEND_ENTRIES} only the leader's version and send instant. That is also why there is no
  * {@code candidateId} or {@code leaderId} field: in both cases that field simply is the sender.
  */
 public enum MessageType {
@@ -38,14 +38,15 @@ public enum MessageType {
 
     /**
      * The heartbeat. It never carries entries, because there is no log, only the {@code u64} version
-     * the leader last published in this term, so a follower learns of a change within one heartbeat.
+     * the leader last published in this term, so a follower learns of a change within one heartbeat,
+     * and the instant the leader sent it, for the reply to echo.
      */
-    APPEND_ENTRIES(0x03, 8),
+    APPEND_ENTRIES(0x03, 16),
 
     /**
-     * Acknowledging a heartbeat, and carrying the responder's term.
+     * Acknowledging a heartbeat, carrying the responder's term and echoing the heartbeat's send instant.
      */
-    APPEND_ENTRIES_REPLY(0x04, 1),
+    APPEND_ENTRIES_REPLY(0x04, 9),
 
     /**
      * A reachability probe, carrying a sequence number.

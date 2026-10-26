@@ -79,7 +79,7 @@ class ReceivePipelineTest {
 
     @Test
     void step_3_traffic_that_is_not_primos_at_all() {
-        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0);
+        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0, 0);
         datagram.put(0, (byte) 'X');
 
         assertDropped(datagram, DropReason.BAD_MAGIC);
@@ -87,7 +87,7 @@ class ReceivePipelineTest {
 
     @Test
     void step_3_a_version_this_build_does_not_implement_is_never_guessed_at() {
-        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0);
+        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0, 0);
         datagram.put(WireFormat.OFFSET_VERSION, (byte) 99);
 
         assertDropped(datagram, DropReason.UNKNOWN_VERSION);
@@ -98,7 +98,7 @@ class ReceivePipelineTest {
         MessageEncoder neighbour = new MessageEncoder("tset-app", SENDER,
                 MessageAuthenticator.disabled());
 
-        assertDropped(neighbour.appendEntries(buffer, 1, 0), DropReason.WRONG_APPLICATION);
+        assertDropped(neighbour.appendEntries(buffer, 1, 0, 0), DropReason.WRONG_APPLICATION);
     }
 
     @Test
@@ -106,7 +106,7 @@ class ReceivePipelineTest {
         MessageEncoder neighbour = new MessageEncoder("test-ap", SENDER,
                 MessageAuthenticator.disabled());
 
-        assertDropped(neighbour.appendEntries(buffer, 1, 0), DropReason.WRONG_APPLICATION);
+        assertDropped(neighbour.appendEntries(buffer, 1, 0, 0), DropReason.WRONG_APPLICATION);
     }
 
     @Test
@@ -114,12 +114,12 @@ class ReceivePipelineTest {
         MessageEncoder neighbour = new MessageEncoder("test-application", SENDER,
                 MessageAuthenticator.disabled());
 
-        assertDropped(neighbour.appendEntries(buffer, 1, 0), DropReason.WRONG_APPLICATION);
+        assertDropped(neighbour.appendEntries(buffer, 1, 0, 0), DropReason.WRONG_APPLICATION);
     }
 
     @Test
     void step_5_an_unknown_type_code() {
-        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0);
+        ByteBuffer datagram = encoder.appendEntries(buffer, 1, 0, 0);
         datagram.put(WireFormat.OFFSET_TYPE, (byte) 0x7F);
 
         assertDropped(datagram, DropReason.UNKNOWN_TYPE);
@@ -136,7 +136,7 @@ class ReceivePipelineTest {
     @Test
     void step_5_a_padded_datagram_is_rejected_as_firmly_as_a_truncated_one() {
         ByteBuffer datagram = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
-        encoder.appendEntries(datagram, 1, 0);
+        encoder.appendEntries(datagram, 1, 0, 0);
         datagram.limit(datagram.limit() + 4);
 
         assertDropped(datagram, DropReason.UNKNOWN_TYPE);
@@ -146,7 +146,7 @@ class ReceivePipelineTest {
     void step_6_a_sender_that_is_not_a_configured_peer() {
         MessageEncoder stranger = new MessageEncoder(APP, 999, MessageAuthenticator.disabled());
 
-        assertDropped(stranger.appendEntries(buffer, 1, 0), DropReason.UNKNOWN_PEER);
+        assertDropped(stranger.appendEntries(buffer, 1, 0, 0), DropReason.UNKNOWN_PEER);
     }
 
     @Test
@@ -155,7 +155,7 @@ class ReceivePipelineTest {
                 id -> true, drops);
         MessageEncoder stranger = new MessageEncoder(APP, 999, MessageAuthenticator.disabled());
 
-        assertThat(permissive.decode(stranger.appendEntries(buffer, 1, 0), handler)).isTrue();
+        assertThat(permissive.decode(stranger.appendEntries(buffer, 1, 0, 0), handler)).isTrue();
         assertThat(handler.only()).isEqualTo("appendEntries(999,1,version=0)");
     }
 
@@ -166,7 +166,7 @@ class ReceivePipelineTest {
         MessageEncoder forger = new MessageEncoder("ordres", 999,
                 MessageAuthenticator.hmacSha256("a-different-secret".getBytes()));
 
-        assertThat(verifying.decode(forger.appendEntries(buffer, 1, 0), handler)).isFalse();
+        assertThat(verifying.decode(forger.appendEntries(buffer, 1, 0, 0), handler)).isFalse();
 
         assertThat(drops.drops(DropReason.BAD_TAG)).isEqualTo(1);
         assertThat(drops.drops(DropReason.WRONG_APPLICATION)).isZero();
@@ -176,7 +176,7 @@ class ReceivePipelineTest {
     @Test
     void the_counters_are_per_reason_and_the_total_adds_up() {
         assertDropped(ByteBuffer.allocate(4), DropReason.MALFORMED);
-        ByteBuffer badMagic = encoder.appendEntries(buffer, 1, 0);
+        ByteBuffer badMagic = encoder.appendEntries(buffer, 1, 0, 0);
         badMagic.put(0, (byte) 'X');
         assertDropped(badMagic, DropReason.BAD_MAGIC);
 

@@ -39,16 +39,18 @@ public interface MessageHandler {
     void onRequestVoteReply(int senderId, long term, boolean granted, boolean preVote);
 
     /**
-     * A heartbeat from a leader, with the version it last published in this term.
+     * A heartbeat from a leader, with the version it last published in this term and the instant it was sent, on
+     * the leader's clock, for the reply to echo.
      */
-    void onAppendEntries(int senderId, long term, long leaderVersion);
+    void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos);
 
     /**
      * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.
      *
      * @param candidate whether the sender stands for election
+     * @param sentNanos when the answered heartbeat was sent, on this node's clock
      */
-    void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate);
+    void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos);
 
     /**
      * A reachability probe, to be answered with the same sequence number.

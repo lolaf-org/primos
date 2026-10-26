@@ -81,12 +81,12 @@ final class CapturedReply implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntries(int senderId, long term, long leaderVersion) {
+    public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
         messages.add("appendEntries/" + term);
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
         messages.add("appendEntriesReply/" + term + "/" + success);
     }
 

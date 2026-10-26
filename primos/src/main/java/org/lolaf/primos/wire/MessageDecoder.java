@@ -240,11 +240,13 @@ public final class MessageDecoder {
                         datagram.get(WireFormat.HEADER_BYTES) != 0, preVote);
                 break;
             case APPEND_ENTRIES:
-                handler.onAppendEntries(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES));
+                handler.onAppendEntries(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES),
+                        datagram.getLong(WireFormat.HEADER_BYTES + 8));
                 break;
             case APPEND_ENTRIES_REPLY:
                 handler.onAppendEntriesReply(senderId, term,
-                        datagram.get(WireFormat.HEADER_BYTES) != 0, (flags & WireFormat.FLAG_DECLINES_CANDIDACY) == 0);
+                        datagram.get(WireFormat.HEADER_BYTES) != 0, (flags & WireFormat.FLAG_DECLINES_CANDIDACY) == 0,
+                        datagram.getLong(WireFormat.HEADER_BYTES + 1));
                 break;
             case PING:
                 handler.onPing(senderId, term, datagram.getLong(WireFormat.HEADER_BYTES));

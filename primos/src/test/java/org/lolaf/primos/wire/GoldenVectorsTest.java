@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * a mystery when two versions of primos meet on a network.
  *
  * <p>All of them encode application {@code orders}, sender {@code 3}, term {@code 42} and, where
- * there is one, sequence {@code 7}.
+ * there is one, sequence {@code 7} and heartbeat send instant {@code 9}.
  */
 class GoldenVectorsTest {
 
@@ -48,15 +48,15 @@ class GoldenVectorsTest {
 
     private static final String APPEND_ENTRIES =
             "50524d53010300006f7264657273000000000000000000000000000000000000"
-                    + "0000000000000000000000000000002a000000030000000000000007";
+                    + "0000000000000000000000000000002a0000000300000000000000070000000000000009";
 
     private static final String APPEND_ENTRIES_REPLY =
             "50524d53010400006f7264657273000000000000000000000000000000000000"
-                    + "0000000000000000000000000000002a0000000301";
+                    + "0000000000000000000000000000002a00000003010000000000000009";
 
     private static final String APPEND_ENTRIES_REPLY_DECLINING =
             "50524d53010400026f7264657273000000000000000000000000000000000000"
-                    + "0000000000000000000000000000002a0000000301";
+                    + "0000000000000000000000000000002a00000003010000000000000009";
 
     private static final String PING =
             "50524d53010500006f7264657273000000000000000000000000000000000000"
@@ -120,19 +120,19 @@ class GoldenVectorsTest {
     }
 
     @Test
-    void append_entries_carries_a_big_endian_leader_version_and_never_entries() {
-        assertThat(hex(encoder.appendEntries(buffer, 42, 7))).isEqualTo(APPEND_ENTRIES);
+    void append_entries_carries_a_big_endian_leader_version_and_send_instant_and_never_entries() {
+        assertThat(hex(encoder.appendEntries(buffer, 42, 7, 9))).isEqualTo(APPEND_ENTRIES);
     }
 
     @Test
-    void append_entries_reply_appends_one_byte() {
-        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, true)))
+    void append_entries_reply_appends_one_byte_and_the_echoed_send_instant() {
+        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, true, 9)))
                 .isEqualTo(APPEND_ENTRIES_REPLY);
     }
 
     @Test
     void a_reply_from_a_node_that_withdrew_sets_flag_bit_1_and_nothing_else() {
-        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, false)))
+        assertThat(hex(encoder.appendEntriesReply(buffer, 42, true, false, 9)))
                 .isEqualTo(APPEND_ENTRIES_REPLY_DECLINING);
     }
 
@@ -154,7 +154,7 @@ class GoldenVectorsTest {
 
     @Test
     void the_application_name_is_zero_padded_to_a_fixed_width_field() {
-        String encoded = hex(encoder.appendEntries(buffer, 42, 0));
+        String encoded = hex(encoder.appendEntries(buffer, 42, 0, 0));
         String field = encoded.substring(WireFormat.OFFSET_APPLICATION * 2,
                 (WireFormat.OFFSET_APPLICATION + WireFormat.APPLICATION_BYTES) * 2);
 
@@ -166,8 +166,8 @@ class GoldenVectorsTest {
     void every_message_is_the_size_the_specification_says() {
         assertThat(MessageType.REQUEST_VOTE.messageBytes()).isEqualTo(52);
         assertThat(MessageType.REQUEST_VOTE_REPLY.messageBytes()).isEqualTo(53);
-        assertThat(MessageType.APPEND_ENTRIES.messageBytes()).isEqualTo(60);
-        assertThat(MessageType.APPEND_ENTRIES_REPLY.messageBytes()).isEqualTo(53);
+        assertThat(MessageType.APPEND_ENTRIES.messageBytes()).isEqualTo(68);
+        assertThat(MessageType.APPEND_ENTRIES_REPLY.messageBytes()).isEqualTo(61);
         assertThat(MessageType.PING.messageBytes()).isEqualTo(60);
         assertThat(MessageType.PING_REPLY.messageBytes()).isEqualTo(60);
         assertThat(MessageType.TIMEOUT_NOW.messageBytes()).isEqualTo(52);

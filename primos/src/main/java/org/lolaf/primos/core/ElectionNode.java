@@ -93,6 +93,7 @@ public final class ElectionNode implements MessageHandler {
     // term being led and the counter for it are only changed together under this lock.
     private final Object publication = new Object();
     private long campaignStartedNanos = NO_CONTACT;
+    private long electionStartedNanos;
     private long leaderlessSinceNanos = NO_CONTACT;
     private TrackedPeer[] peers;
     private long[] confirmationScratch = new long[0];
@@ -419,7 +420,7 @@ public final class ElectionNode implements MessageHandler {
         }
         long deadline = Math.min(probeDeadlineNanos, nodeConfigDeadlineNanos);
         if (role == Role.LEADER) {
-            deadline = Math.min(deadline, heartbeatDeadlineNanos);
+            deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, leaseEndNanos()));
         } else if (campaigns()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
@@ -701,6 +702,7 @@ public final class ElectionNode implements MessageHandler {
         currentTerm++;
         votedFor = config.nodeId();
         persist();
+        electionStartedNanos = clock.nanoTime();
 
         setRole(Role.CANDIDATE);
         setLeader(-1);
@@ -727,11 +729,11 @@ public final class ElectionNode implements MessageHandler {
         setLeader(config.nodeId());
         endCampaign(true);
 
-        // Start the contact clock now, or a new leader would step down before its first heartbeat
-        // had a chance to be answered.
-        long now = clock.nanoTime();
+        // Start the contact clock, or a new leader would step down before its first heartbeat had a
+        // chance to be answered. From the vote requests, not the win: a voter's stickiness counts from
+        // when it granted, which is no earlier.
         for (TrackedPeer trackedPeer : peers) {
-            trackedPeer.lastRoundTripNanos = now;
+            trackedPeer.lastRoundTripNanos = electionStartedNanos;
             // Learned again from this leadership's first replies, rather than kept from an older one.
             trackedPeer.candidate = true;
         }
@@ -767,7 +769,7 @@ public final class ElectionNode implements MessageHandler {
         long version = publishedVersion;
         sentVersion = version;
         for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, version));
+            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, version, clock.nanoTime()));
         }
     }
 
@@ -831,6 +833,10 @@ public final class ElectionNode implements MessageHandler {
             votedFor = senderId;
             persist();
             resetElectionTimer();
+        }
+        if (granted) {
+            // The candidate may lead from now, and its lease counts on this node refusing a third one a pre-vote.
+            lastLeaderContactNanos = clock.nanoTime();
         }
         if (granted) {
             logVote("cluster '{}': node {} granted its vote in term {} to node {}",
@@ -968,9 +974,9 @@ public final class ElectionNode implements MessageHandler {
     }
 
     @Override
-    public void onAppendEntries(int senderId, long term, long leaderVersion) {
+    public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
         if (term < currentTerm) {
-            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, campaigns()));
+            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, campaigns(), sentNanos));
             return;
         }
         if (term > currentTerm) {
@@ -984,22 +990,25 @@ public final class ElectionNode implements MessageHandler {
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
-        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, campaigns()));
+        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, campaigns(), sentNanos));
         reportLeaderVersion(term, leaderVersion);
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate) {
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
         if (term > currentTerm) {
             stepDown(term);
             return;
         }
         // This is the only thing that proves a round trip: the peer received a heartbeat this node
-        // sent, and answered it. See hasQuorumContact.
+        // sent, and answered it. It counts from the send, which is before the peer reset its own
+        // election clock. See hasQuorumContact.
         if (role == Role.LEADER && term == currentTerm) {
             TrackedPeer trackedPeer = trackedPeer(senderId);
             if (trackedPeer != null) {
-                trackedPeer.lastRoundTripNanos = clock.nanoTime();
+                if (sentNanos <= clock.nanoTime()) {
+                    trackedPeer.lastRoundTripNanos = Math.max(trackedPeer.lastRoundTripNanos, sentNanos);
+                }
                 trackedPeer.candidate = candidate;
             }
         }
@@ -1325,13 +1334,13 @@ public final class ElectionNode implements MessageHandler {
     }
 
     /**
-     * While leading, the instant by which a quorum, this node included, had last answered its heartbeats, on the
-     * clock's base; {@code Long.MIN_VALUE} otherwise. A lease built on it cannot outlive this leadership: a node votes
-     * for a successor only after hearing no leader for {@code electionTimeoutMin}, so a quorum's last answer here
-     * comes at least that long before any successor's election.
+     * While leading, when the latest heartbeat a quorum, this node included, has answered was sent, on the clock's
+     * base; {@code Long.MIN_VALUE} otherwise. No successor is elected before {@code electionTimeoutMin} after it, on
+     * the voters' clocks: a voter receives that heartbeat after it was sent, and refuses a pre-vote for that long
+     * after.
      *
-     * <p>Right after an election it reads as the election itself, which {@code becomeLeader} stamps on every peer:
-     * winning was a quorum of round trips. Allocation-free, because it is read every turn.
+     * <p>Right after an election it reads as the election's start, which {@code becomeLeader} stamps on every peer,
+     * since a vote counts as leader contact too. Allocation-free, because it is read every turn.
      */
     public long leadershipConfirmedNanos() {
         if (role != Role.LEADER) {
@@ -1355,12 +1364,16 @@ public final class ElectionNode implements MessageHandler {
         return confirmed == NO_CONTACT ? Long.MIN_VALUE : confirmed;
     }
 
+    private long leaseEndNanos() {
+        return leadershipConfirmedNanos() + electionTimeoutMinNanos;
+    }
+
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
         int inContact = 1;
         for (TrackedPeer trackedPeer : peers) {
             long lastHeard = trackedPeer.lastRoundTripNanos;
-            if (lastHeard != NO_CONTACT && now - lastHeard <= window) {
+            if (lastHeard != NO_CONTACT && now - lastHeard < window) {
                 inContact++;
             }
         }

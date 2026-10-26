@@ -95,6 +95,71 @@ class LeadershipConfirmationTest {
         }
     }
 
+    @Test
+    void the_lease_counts_from_the_heartbeat_s_send_not_from_its_reply() {
+        Simulation simulation = simulation(4L);
+        long oneWay = Duration.ofMillis(20).toNanos();
+        simulation.network().delayRange(oneWay, oneWay);
+        ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+        simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+        ElectionCluster.NodeUnderTest leader = cluster.leader().get();
+        long[] youngest = {Long.MAX_VALUE};
+        simulation.checking(new Invariant() {
+            @Override
+            public String name() {
+                return "records the youngest confirmation";
+            }
+
+            @Override
+            public void check(Simulation current) {
+                long confirmed = leader.election().leadershipConfirmedNanos();
+                if (confirmed != Long.MIN_VALUE) {
+                    youngest[0] = Math.min(youngest[0], current.clock().nanoTime() - confirmed);
+                }
+            }
+        });
+
+        simulation.run(Duration.ofSeconds(2));
+
+        assertThat(youngest[0])
+                .as("a voter reset its election clock a one-way trip after the send, before the reply came back")
+                .isGreaterThanOrEqualTo(2 * oneWay);
+    }
+
+    @Test
+    void a_cut_off_leader_stands_down_the_instant_its_lease_ends() {
+        for (long seed = 1; seed <= 20; seed++) {
+            Simulation simulation = simulation(seed);
+            simulation.network().delayRange(Duration.ofMillis(1).toNanos(), Duration.ofMillis(10).toNanos());
+            ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+            simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+            ElectionCluster.NodeUnderTest old = cluster.leader().get();
+            long[] lastConfirmed = {Long.MIN_VALUE};
+            long[] stoodDown = {Long.MIN_VALUE};
+            simulation.checking(new Invariant() {
+                @Override
+                public String name() {
+                    return "records when the old leader stood down";
+                }
+
+                @Override
+                public void check(Simulation current) {
+                    lastConfirmed[0] = Math.max(lastConfirmed[0], old.election().leadershipConfirmedNanos());
+                    if (stoodDown[0] == Long.MIN_VALUE && old.role() != Role.LEADER) {
+                        stoodDown[0] = current.clock().nanoTime();
+                    }
+                }
+            });
+
+            simulation.network().isolate(old.id());
+            simulation.runUntil(() -> stoodDown[0] != Long.MIN_VALUE, SETTLE);
+
+            assertThat(stoodDown[0])
+                    .as("seed %s: on the lease's last instant, not on the next heartbeat tick", seed)
+                    .isEqualTo(lastConfirmed[0] + TIMINGS.electionTimeoutMin().toNanos());
+        }
+    }
+
     private static Simulation simulation(long seed) {
         return new Simulation(seed).checking(Invariants.all());
     }
