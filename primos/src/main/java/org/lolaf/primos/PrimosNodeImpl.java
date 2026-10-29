@@ -297,6 +297,11 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
     @Override
     public void onLeaderChanged(Optional<Leader> next, long term) {
+        RoleAndTerm current = roleAndTerm;
+        if (current.term() != term) {
+            // a follower's term moves to its leader's with no role change to carry it
+            roleAndTerm = new RoleAndTerm(current.role(), term);
+        }
         leader = next.orElse(null);
         dispatcher.onLeaderChanged(next, term);
     }

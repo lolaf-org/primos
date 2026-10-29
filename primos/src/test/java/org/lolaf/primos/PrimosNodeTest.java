@@ -230,6 +230,35 @@ class PrimosNodeTest {
         assertThat(selves).isEqualTo(1);
     }
 
+    /**
+     * A node joining a cluster that already has a leader stays a follower while its term moves up to the leader's,
+     * so no role change carries the new term. It used to keep reporting term 0 beside a known leader.
+     */
+    @Test
+    void a_follower_learning_a_leader_reports_the_leaders_term() {
+        PrimosNode one = start(builder(1, 2, 3));
+        PrimosNode two = start(builder(2, 1, 3));
+        await().atMost(10, TimeUnit.SECONDS).until(() -> leaderCount(one, two) == 1);
+        List<String> reported = new CopyOnWriteArrayList<>();
+        AtomicReference<PrimosNode> three = new AtomicReference<>();
+        three.set(builder(3, 1, 2).listener(new PrimosListener() {
+            @Override
+            public void onLeaderChanged(Optional<Leader> leader, long term) {
+                if (leader.isPresent()) {
+                    reported.add("leader's term " + term + ", roleAndTerm " + three.get().roleAndTerm().term());
+                }
+            }
+        }).build());
+        three.get().start();
+        started.add(three.get());
+
+        await().atMost(10, TimeUnit.SECONDS).until(() -> !reported.isEmpty());
+
+        long term = three.get().roleAndTerm().term();
+        assertThat(term).isPositive();
+        assertThat(reported.get(0)).isEqualTo("leader's term " + term + ", roleAndTerm " + term);
+    }
+
     @Test
     void role_is_answerable_from_any_thread() throws Exception {
         PrimosNode node = start(builder(1));
