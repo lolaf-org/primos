@@ -131,6 +131,14 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             throw e;
         }
         election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
+        try {
+            election.setCandidate(candidate);
+            // Here rather than on the node thread, so a state file it cannot read fails this call.
+            election.start();
+        } catch (RuntimeException e) {
+            closeQuietly();
+            throw e;
+        }
         running = true;
         thread = new Thread(this::loop, "primos-" + config.applicationName() + "-" + config.nodeId());
         thread.setDaemon(true);
@@ -322,19 +330,22 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     private void loop() {
-        election.setCandidate(candidate);
-        election.start();
         log.info("cluster '{}': node {} is rejoining the cluster", config.applicationName(), config.nodeId());
-        while (running) {
-            // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
-            // the socket, so there is no polling interval to tune and no latency to trade away.
-            election.runOnce(Long.MAX_VALUE);
-            election.setCandidate(candidate);
-            serveTransfer();
-            publish();
-            if (election.isFailed()) {
-                running = false;
+        try {
+            while (running) {
+                // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
+                // the socket, so there is no polling interval to tune and no latency to trade away.
+                election.runOnce(Long.MAX_VALUE);
+                election.setCandidate(candidate);
+                serveTransfer();
+                publish();
+                if (election.isFailed()) {
+                    running = false;
+                }
             }
+        } catch (Error fatal) {
+            running = false;
+            throw fatal;
         }
         announceShutdown();
         publish();

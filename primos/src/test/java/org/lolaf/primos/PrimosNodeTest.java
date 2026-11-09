@@ -17,10 +17,19 @@ package org.lolaf.primos;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.store.FileStateStore;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.store.StateStore;
+import org.lolaf.primos.store.StateStoreException;
+import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.LoopbackNetwork;
+import org.lolaf.primos.transport.Transport;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +59,9 @@ class PrimosNodeTest {
     private final LoopbackNetwork network = new LoopbackNetwork();
     private final List<PrimosNode> started = new ArrayList<>();
     private ExecutorService executor;
+
+    @TempDir
+    Path stateDirectory;
 
     private static ClusterConfig cluster(int id, int... peerIds) {
         List<Peer> peers = new ArrayList<>();
@@ -519,6 +531,90 @@ class PrimosNodeTest {
                 .hasMessageContaining("has failed and cannot be restarted");
     }
 
+    // -------------------------------------------------------- failing to start
+
+    @Test
+    void a_corrupt_state_file_fails_start_and_the_node_says_it_is_not_running() throws IOException {
+        Files.write(stateDirectory.resolve("state"), new byte[] {1, 2, 3});
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = fileBackedNode(transport);
+
+        assertThatThrownBy(node::start).isInstanceOf(StateStoreException.class);
+
+        assertThat(node.isRunning()).as("nothing is voting, so nothing may claim to be").isFalse();
+        assertThat(node.role().isLeader()).isFalse();
+        assertThat(transport.closed).as("a socket left bound blocks the retry").isTrue();
+    }
+
+    @Test
+    void a_repaired_state_file_lets_the_same_node_start_with_its_term() throws IOException {
+        Files.write(stateDirectory.resolve("state"), new byte[] {1, 2, 3});
+        PrimosNode node = fileBackedNode(network.transportFor(1));
+        assertThatThrownBy(node::start).isInstanceOf(StateStoreException.class);
+
+        try (FileStateStore repair = new FileStateStore(stateDirectory)) {
+            repair.save(7, -1);
+        }
+
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+        assertThat(node.roleAndTerm().term()).isGreaterThan(7);
+    }
+
+    @Test
+    void a_valid_state_file_starts_normally() {
+        try (FileStateStore seeded = new FileStateStore(stateDirectory)) {
+            seeded.save(7, -1);
+        }
+        PrimosNode node = fileBackedNode(network.transportFor(1));
+
+        node.start();
+        started.add(node);
+
+        assertThat(node.isRunning()).isTrue();
+    }
+
+    @Test
+    void any_exception_from_loading_fails_start_too() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(() -> new FailingStore() {
+                    @Override
+                    public org.lolaf.primos.store.PersistentState load() {
+                        throw new IllegalArgumentException("not a storage exception at all");
+                    }
+                })
+                .transport(() -> transport)
+                .build();
+
+        assertThatThrownBy(node::start).isInstanceOf(IllegalArgumentException.class);
+        assertThat(node.isRunning()).isFalse();
+        assertThat(transport.closed).isTrue();
+    }
+
+    @Test
+    void an_error_escaping_the_loop_leaves_the_node_not_running() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = fileBackedNode(transport);
+        node.start();
+        started.add(node);
+
+        transport.failNextPoll = new StackOverflowError("a deliberately fatal poll");
+
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.FAILED);
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(node.isRunning()).isFalse());
+    }
+
+    private PrimosNode fileBackedNode(Transport transport) {
+        return PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(() -> new FileStateStore(stateDirectory))
+                .transport(() -> transport)
+                .build();
+    }
+
     private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
         PrimosNode node = builder.build();
         node.start();
@@ -536,7 +632,7 @@ class PrimosNodeTest {
     /**
      * Persists nothing and refuses, which drives the node into FAILED through its own loop.
      */
-    private static final class FailingStore implements StateStore {
+    private static class FailingStore implements StateStore {
 
         @Override
         public org.lolaf.primos.store.PersistentState load() {
@@ -556,6 +652,47 @@ class PrimosNodeTest {
         @Override
         public void close() {
             // nothing to do
+        }
+    }
+
+    private static final class TrackingTransport implements Transport {
+
+        private final Transport delegate;
+        private volatile boolean closed;
+        private volatile Error failNextPoll;
+
+        private TrackingTransport(Transport delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void send(int peerId, ByteBuffer datagram) {
+            delegate.send(peerId, datagram);
+        }
+
+        @Override
+        public int poll(long timeoutNanos, DatagramHandler handler) {
+            Error failure = failNextPoll;
+            if (failure != null) {
+                throw failure;
+            }
+            return delegate.poll(Math.min(timeoutNanos, TimeUnit.MILLISECONDS.toNanos(5)), handler);
+        }
+
+        @Override
+        public long sendsDropped() {
+            return delegate.sendsDropped();
+        }
+
+        @Override
+        public void wakeup() {
+            delegate.wakeup();
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+            delegate.close();
         }
     }
 

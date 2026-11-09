@@ -57,6 +57,9 @@ public interface PrimosNode extends AutoCloseable {
      * <p>A node that was stopped starts again, rejoining the cluster with the term and vote it left
      * with. A node that reached {@link Role#FAILED} does not: it stopped because something it
      * depends on is broken, so restart the process.
+     *
+     * @throws org.lolaf.primos.store.StateStoreException if the persisted term and vote cannot be read. The node is
+     *         left stopped and may be started again once the state is repaired.
      */
     void start();
 
