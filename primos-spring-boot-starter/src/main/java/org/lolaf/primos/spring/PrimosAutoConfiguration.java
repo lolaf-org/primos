@@ -38,7 +38,6 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
@@ -57,30 +56,17 @@ import java.util.function.Supplier;
 public class PrimosAutoConfiguration {
 
     private static Timings toTimings(PrimosProperties.TimingsProperties timings) {
-        List<String> explicit = timings.explicitKeys();
-        if (timings.profile() != null && !explicit.isEmpty()) {
-            throw new IllegalStateException("primos.timings.profile is set to '"
-                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is "
-                    + String.join(", ", explicit) + ". Choose one: a profile is a set of intervals"
-                    + " picked to hold together, so overriding part of one leaves a custom set"
-                    + " whose author has not seen the other values. Either drop the profile and"
-                    + " name every interval you want, or drop the individual keys.");
-        }
-        if (timings.profile() != null) {
-            return timings.profile() == PrimosProperties.Profile.WAN ? Timings.wan() : Timings.lan();
-        }
-        if (explicit.isEmpty()) {
-            return Timings.lan();
-        }
-        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
-                "primos.timings.election-timeout-min", "primos.timings.election-timeout-max");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(timings.heartbeatInterval())
-                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
-                .probeIntervalIfSet(timings.probeInterval())
-                .advertisementIntervalIfSet(timings.advertisementInterval())
-                .failureThresholdIfSet(timings.failureThreshold())
-                .build();
+        String prefix = "primos.timings";
+        return Timings.resolve(prefix + ".profile", timings.profile() == null ? null : timings.profile().name(),
+                timings.explicitKeys(prefix), Timings.lan(),
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                        .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                                prefix + ".election-timeout-min", prefix + ".election-timeout-max")
+                        .probeIntervalIfSet(timings.probeInterval())
+                        .advertisementIntervalIfSet(timings.advertisementInterval())
+                        .failureThresholdIfSet(timings.failureThreshold())
+                        .build());
     }
 
     private static byte[] secretBytes(PrimosProperties properties) {

@@ -136,8 +136,7 @@ public record PrimosProperties(
             Integer failureThreshold) {
 
         /**
-         * The {@code primos.timings.*} keys that were actually set, spelled as an operator wrote
-         * them.
+         * The keys under {@code prefix} that were actually set, spelled as an operator wrote them.
          *
          * <p>Names rather than a yes-or-no answer, because the caller needs both: whether any were
          * set, and <em>which</em>, so that refusing a profile beside them can quote them back. In a
@@ -147,14 +146,14 @@ public record PrimosProperties(
          *
          * <p>Package-private: this exists for {@link PrimosAutoConfiguration}, not for callers.
          */
-        List<String> explicitKeys() {
-            List<String> keys = new ArrayList<>(5);
-            addIfSet(keys, "heartbeat-interval", heartbeatInterval);
-            addIfSet(keys, "election-timeout-min", electionTimeoutMin);
-            addIfSet(keys, "election-timeout-max", electionTimeoutMax);
-            addIfSet(keys, "probe-interval", probeInterval);
-            addIfSet(keys, "advertisement-interval", advertisementInterval);
-            addIfSet(keys, "failure-threshold", failureThreshold);
+        List<String> explicitKeys(String prefix) {
+            List<String> keys = new ArrayList<>(6);
+            addIfSet(keys, prefix + ".heartbeat-interval", heartbeatInterval);
+            addIfSet(keys, prefix + ".election-timeout-min", electionTimeoutMin);
+            addIfSet(keys, prefix + ".election-timeout-max", electionTimeoutMax);
+            addIfSet(keys, prefix + ".probe-interval", probeInterval);
+            addIfSet(keys, prefix + ".advertisement-interval", advertisementInterval);
+            addIfSet(keys, prefix + ".failure-threshold", failureThreshold);
             return keys;
         }
 

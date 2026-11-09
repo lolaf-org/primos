@@ -130,30 +130,16 @@ public class PropertiesConfigStore implements ConfigStore {
         if (timings == null) {
             return fallback;
         }
-        List<String> explicit = timings.explicitKeys();
-        if (timings.profile() != null && !explicit.isEmpty()) {
-            throw new IllegalStateException(prefix + ".profile is set to '"
-                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is " + prefix
-                    + "." + String.join(", " + prefix + ".", explicit) + ". Choose one: a profile is"
-                    + " a set of intervals picked to hold together, so overriding part of one leaves"
-                    + " a custom set whose author has not seen the other values. Either drop the"
-                    + " profile and name every interval you want, or drop the individual keys.");
-        }
-        if (timings.profile() != null) {
-            return timings.profile() == WitnessProperties.Profile.WAN ? Timings.wan() : Timings.lan();
-        }
-        if (explicit.isEmpty()) {
-            return fallback;
-        }
-        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
-                prefix + ".election-timeout-min", prefix + ".election-timeout-max");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(timings.heartbeatInterval())
-                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
-                .probeIntervalIfSet(timings.probeInterval())
-                .advertisementIntervalIfSet(timings.advertisementInterval())
-                .failureThresholdIfSet(timings.failureThreshold())
-                .build();
+        return Timings.resolve(prefix + ".profile", timings.profile() == null ? null : timings.profile().name(),
+                timings.explicitKeys(prefix), fallback,
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                        .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                                prefix + ".election-timeout-min", prefix + ".election-timeout-max")
+                        .probeIntervalIfSet(timings.probeInterval())
+                        .advertisementIntervalIfSet(timings.advertisementInterval())
+                        .failureThresholdIfSet(timings.failureThreshold())
+                        .build());
     }
 
     private static Keyring keyring(WitnessProperties properties) {

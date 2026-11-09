@@ -119,49 +119,22 @@ public final class FileConfigStore implements ConfigStore {
      * with {@link Properties} and nothing else, and a duration parser is not worth writing twice.
      */
     private static Timings timings(Properties properties, Timings fallback) {
-        String profile = properties.getProperty("timings.profile");
-        List<String> explicit = new ArrayList<>(5);
+        List<String> explicit = new ArrayList<>(6);
         Duration heartbeat = optionalMillis(properties, "timings.heartbeat.millis", explicit);
         Duration electionMin = optionalMillis(properties, "timings.election.min.millis", explicit);
         Duration electionMax = optionalMillis(properties, "timings.election.max.millis", explicit);
         Duration probe = optionalMillis(properties, "timings.probe.millis", explicit);
         Duration advertisement = optionalMillis(properties, "timings.advertisement.millis", explicit);
         Integer failureThreshold = optionalInt(properties, "timings.failure.threshold", explicit);
-
-        if (profile != null && !profile.trim().isEmpty() && !explicit.isEmpty()) {
-            throw new IllegalArgumentException("timings.profile is set to '" + profile.trim()
-                    + "' and so is " + String.join(", ", explicit) + ". Choose one: a profile is a"
-                    + " set of intervals picked to hold together, so overriding part of one leaves"
-                    + " a custom set whose author has not seen the other values. Either drop"
-                    + " timings.profile and name every interval, or drop the individual keys.");
-        }
-        if (profile != null && !profile.trim().isEmpty()) {
-            return timingsProfile(profile);
-        }
-        if (explicit.isEmpty()) {
-            return fallback;
-        }
-        Timings.requireElectionBoundsTogether(electionMin, electionMax,
-                "timings.election.min.millis", "timings.election.max.millis");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(heartbeat)
-                .electionTimeoutIfSet(electionMin, electionMax)
-                .probeIntervalIfSet(probe)
-                .advertisementIntervalIfSet(advertisement)
-                .failureThresholdIfSet(failureThreshold)
-                .build();
-    }
-
-    private static Timings timingsProfile(String profile) {
-        String name = profile.trim().toLowerCase(Locale.ROOT);
-        if ("lan".equals(name)) {
-            return Timings.lan();
-        }
-        if ("wan".equals(name)) {
-            return Timings.wan();
-        }
-        throw new IllegalArgumentException(
-                "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
+        return Timings.resolve("timings.profile", properties.getProperty("timings.profile"), explicit, fallback,
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(heartbeat)
+                        .electionTimeoutIfSet(electionMin, electionMax,
+                                "timings.election.min.millis", "timings.election.max.millis")
+                        .probeIntervalIfSet(probe)
+                        .advertisementIntervalIfSet(advertisement)
+                        .failureThresholdIfSet(failureThreshold)
+                        .build());
     }
 
     /**
