@@ -185,8 +185,8 @@ public final class UdpTransport implements Transport {
     public void send(int peerId, ByteBuffer datagram) {
         // Every path out of here that does not put bytes on the wire is counted, because the SPI
         // promises a failed send is counted and logged rather than propagated, and a send that
-        // returns without doing either is indistinguishable from a working one. Logging is at
-        // debug throughout: heartbeats are every 50ms per peer, so a visible level would turn a
+        // returns without doing either is indistinguishable from a working one. A failed send is
+        // logged at debug: heartbeats are every 50ms per peer, so a visible level would turn a
         // broken peer into a second outage.
         if (closed) {
             sendsWhileClosed++;
@@ -205,13 +205,21 @@ public final class UdpTransport implements Transport {
             // Always from the bound socket, never a transient one, so a peer sees this node's
             // listening endpoint as the source. That is what makes address learning correct and
             // keeps a NAT pinhole usable in both directions.
-            channel.send(datagram, target);
+            int bytes = datagram.remaining();
+            if (channel.send(datagram, target) < bytes) {
+                sendFailures++;
+                if (log.isDebugEnabled()) {
+                    log.debug("cluster '{}': no room in the socket to send to peer {} at {}", clusterName, peerId, target);
+                }
+            }
         } catch (IOException | RuntimeException e) {
             // Sends fail routinely on UDP, and an ICMP port-unreachable can surface here long
             // after the fact. The algorithm's timers are the retry mechanism, so this must never
             // become a node failure.
             sendFailures++;
-            log.warn("cluster '{}': send to peer {} at {} failed", clusterName, peerId, target, e);
+            if (log.isDebugEnabled()) {
+                log.debug("cluster '{}': send to peer {} at {} failed: {}", clusterName, peerId, target, e.toString());
+            }
         }
     }
 

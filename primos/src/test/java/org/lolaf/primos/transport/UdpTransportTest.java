@@ -18,11 +18,13 @@ package org.lolaf.primos.transport;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.wire.WireFormat;
+import org.mockito.MockedStatic;
 
 import java.io.IOException;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
@@ -31,6 +33,10 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /**
  * The same contract as every other transport, over a real socket.
@@ -60,6 +66,31 @@ class UdpTransportTest extends TransportContractTest {
     @Test
     void it_binds_where_it_was_told_to() {
         assertThat(((UdpTransport) a).boundAddress().getPort()).isEqualTo(portA);
+    }
+
+    @Test
+    void a_send_the_socket_had_no_room_for_is_counted() throws IOException {
+        assertThat(sendsDroppedWhenChannelAccepts(0)).isEqualTo(1);
+    }
+
+    @Test
+    void a_send_the_socket_took_whole_is_not_counted() throws IOException {
+        assertThat(sendsDroppedWhenChannelAccepts(WireFormat.HEADER_BYTES)).isZero();
+    }
+
+    private long sendsDroppedWhenChannelAccepts(int bytes) throws IOException {
+        DatagramChannel channel = mock(DatagramChannel.class);
+        when(channel.send(any(), any())).thenReturn(bytes);
+        try (MockedStatic<DatagramChannel> open = mockStatic(DatagramChannel.class)) {
+            open.when(DatagramChannel::open).thenReturn(channel);
+            try (UdpTransport transport = UdpTransport.builder()
+                    .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                    .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, 7000)))
+                    .build()) {
+                transport.send(NODE_B, datagram());
+                return transport.sendsDropped();
+            }
+        }
     }
 
     @Test

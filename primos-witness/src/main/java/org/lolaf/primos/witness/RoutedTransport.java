@@ -148,7 +148,13 @@ final class RoutedTransport implements Transport {
             return;
         }
         try {
-            channel.send(datagram, target);
+            int bytes = datagram.remaining();
+            if (channel.send(datagram, target) < bytes) {
+                sendFailures++;
+                if (log.isDebugEnabled()) {
+                    log.debug("cluster '{}': no room in the socket to reply to node {} at {}", application, peerId, target);
+                }
+            }
         } catch (IOException | RuntimeException e) {
             // Routine on UDP, and an ICMP port-unreachable can surface here long after the fact.
             // The algorithm's timers are the retry mechanism, so this must never become a failure,
