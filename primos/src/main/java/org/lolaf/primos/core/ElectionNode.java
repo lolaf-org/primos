@@ -394,8 +394,6 @@ public final class ElectionNode implements MessageHandler {
         setRole(Role.FAILED);
         setLeader(-1);
         failureCause = cause;
-        abandonPreVote();
-        votesGranted.clear();
 
         log.error("cluster '{}': node {} has failed while {} in term {} and will not lead again."
                         + " Restart the process; this node cannot recover in place.",
@@ -493,7 +491,6 @@ public final class ElectionNode implements MessageHandler {
         long version = publishedVersion;
         if (version != sentVersion) {
             broadcastHeartbeat();
-            heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
         }
         reportLeaderVersion(currentTerm, version);
     }
@@ -595,7 +592,6 @@ public final class ElectionNode implements MessageHandler {
             }
             if (now >= heartbeatDeadlineNanos) {
                 broadcastHeartbeat();
-                heartbeatDeadlineNanos = now + timings.heartbeatInterval().toNanos();
             }
             announcePublication();
             return;
@@ -767,7 +763,6 @@ public final class ElectionNode implements MessageHandler {
                 config.applicationName(), config.nodeId(), currentTerm);
 
         broadcastHeartbeat();
-        heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
     private void stepDown(long term) {
@@ -781,7 +776,6 @@ public final class ElectionNode implements MessageHandler {
         Role previous = role;
         setRole(Role.FOLLOWER);
         setLeader(-1);
-        votesGranted.clear();
         resetElectionTimer();
 
         if (previous != Role.FOLLOWER) {
@@ -796,6 +790,7 @@ public final class ElectionNode implements MessageHandler {
         for (TrackedPeer peer : peers) {
             send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, version, clock.nanoTime()));
         }
+        heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
     /**
@@ -1032,7 +1027,6 @@ public final class ElectionNode implements MessageHandler {
         endCampaign(false);
         setRole(Role.FOLLOWER);
         setLeader(senderId);
-        votesGranted.clear();
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
@@ -1324,18 +1318,7 @@ public final class ElectionNode implements MessageHandler {
             return;
         }
         long silence = timings.probeInterval().toNanos() * FORGET_AFTER_PROBES;
-        int surviving = 0;
-        for (TrackedPeer trackedPeer : peers) {
-            if (!isSilentTooLong(trackedPeer, now, silence)) {
-                surviving++;
-            }
-        }
-        if (surviving == peers.length) {
-            // The steady state, and it allocates nothing: a scan and no array.
-            return;
-        }
-        TrackedPeer[] kept = new TrackedPeer[surviving];
-        int at = 0;
+        int kept = 0;
         for (TrackedPeer trackedPeer : peers) {
             if (isSilentTooLong(trackedPeer, now, silence)) {
                 log.info("cluster '{}': witness {} has not heard from voter {} for {}s and has"
@@ -1346,10 +1329,12 @@ public final class ElectionNode implements MessageHandler {
                 peersForgotten++;
                 stats.onPeerForgotten(trackedPeer.peer.id());
             } else {
-                kept[at++] = trackedPeer;
+                peers[kept++] = trackedPeer;
             }
         }
-        peers = kept;
+        if (kept < peers.length) {
+            peers = Arrays.copyOf(peers, kept);
+        }
     }
 
     private void notifyPeerUp(Peer peer) {
@@ -1413,7 +1398,6 @@ public final class ElectionNode implements MessageHandler {
 
         setRole(Role.FOLLOWER);
         setLeader(-1);
-        votesGranted.clear();
         resetElectionTimer();
     }
 
