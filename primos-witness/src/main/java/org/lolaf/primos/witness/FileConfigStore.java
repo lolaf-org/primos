@@ -168,6 +168,15 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
+    private static Duration rescanInterval(Properties properties) {
+        int seconds = intValue(properties, "reload.rescan.seconds", 5);
+        if (seconds < 1) {
+            throw new IllegalArgumentException("reload.rescan.seconds must be at least 1, but was " + seconds
+                    + ": the check runs on the witness's own loop, which would then do nothing else");
+        }
+        return Duration.ofSeconds(seconds);
+    }
+
     private static List<String> splitPatterns(String raw) {
         return raw == null ? Collections.emptyList() : Arrays.asList(raw.split(","));
     }
@@ -460,7 +469,7 @@ public final class FileConfigStore implements ConfigStore {
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
         warnAboutReadableSecrets(properties);
-        builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 5)));
+        builder.rescanInterval(rescanInterval(properties));
         builder.defaultTimings(timings(properties, Timings.lan()));
         builder.voteLogging(trueUnlessFalse(properties, "vote.logging"));
         return builder.build();

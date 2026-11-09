@@ -276,6 +276,25 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_rescan_interval_below_a_second_is_refused_by_name() throws IOException {
+        settings("reload.rescan.seconds=0");
+
+        assertThatThrownBy(this::open)
+                .as("the check runs on the witness's own loop, which would then do nothing else")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reload.rescan.seconds");
+    }
+
+    @Test
+    void a_rescan_interval_of_one_second_is_accepted() throws IOException {
+        settings("reload.rescan.seconds=1");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().rescanInterval()).isEqualTo(Duration.ofSeconds(1));
+        }
+    }
+
+    @Test
     void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
         settings("secret.orders.value = base64:");
 
