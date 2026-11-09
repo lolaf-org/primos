@@ -24,9 +24,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 import java.net.InetSocketAddress;
@@ -148,20 +148,6 @@ public class WitnessAutoConfiguration {
         return new WitnessServerLifecycle(server, stopTimeout);
     }
 
-    /**
-     * The health endpoint's view of this witness.
-     *
-     * <p>Contributed only when the application actually has actuator health on its classpath, so
-     * the module still works in a deployment that has stripped it.
-     */
-    @Bean
-    @ConditionalOnClass(HealthIndicator.class)
-    @ConditionalOnMissingBean
-    public WitnessHealthIndicator witnessHealthIndicator(WitnessServer server,
-                                                         WitnessServerLifecycle lifecycle) {
-        return new WitnessHealthIndicator(server, lifecycle);
-    }
-
     private static InetSocketAddress bindAddress(WitnessProperties.BindProperties bind, InetSocketAddress configured) {
         // Either half may be given alone; the other comes from the file rather than from a default invented here.
         int port = bind.port() != null ? bind.port() : configured.getPort();
@@ -171,5 +157,21 @@ public class WitnessAutoConfiguration {
         return bind.host().isEmpty()
                 ? new InetSocketAddress(port)
                 : new InetSocketAddress(bind.host(), port);
+    }
+
+    /**
+     * The health endpoint's view of this witness, only where actuator health is on the classpath. A nested class,
+     * because Spring reads every method of a configuration class before any condition: a {@code @Bean} method
+     * returning a {@code HealthIndicator} on the outer class would fail the whole auto-configuration without it.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
+    static class Health {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public WitnessHealthIndicator witnessHealthIndicator(WitnessServer server, WitnessServerLifecycle lifecycle) {
+            return new WitnessHealthIndicator(server, lifecycle);
+        }
     }
 }
