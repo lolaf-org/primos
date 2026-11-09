@@ -651,6 +651,11 @@ public final class WitnessServer implements AutoCloseable {
     private void applyConfiguration() {
         ConfigSnapshot snapshot = configStore.current();
         unopened.clear();
+        boolean follows = follows();
+        if (!follows) {
+            // First, so a rebuild below for any other reason already runs on the files' intervals.
+            served.values().forEach(tenant -> tenant.adoptedTimings = null);
+        }
 
         for (ApplicationConfig applicationConfig : snapshot.applications().values()) {
             Served current = served.get(applicationConfig.name());
@@ -661,7 +666,8 @@ public final class WitnessServer implements AutoCloseable {
             }
         }
         for (Served tenant : new ArrayList<>(served.values())) {
-            if (snapshot.serves(tenant.name) || tenant.config.isAutoRegistered()) {
+            boolean heldByCluster = tenant.config.isAutoRegistered() && snapshot.settings().configSource().isCluster();
+            if (snapshot.serves(tenant.name) || heldByCluster) {
                 continue;
             }
             // Its state stays on disk, deliberately. A cluster that comes back later still needs
@@ -671,7 +677,8 @@ public final class WitnessServer implements AutoCloseable {
             tenant.close();
         }
         for (Served tenant : served.values()) {
-            if (!tenant.keys.equals(keysFor(tenant.name))) {
+            boolean sourceChanged = tenant.node.config().isFollowingStatedTimings() != follows;
+            if (sourceChanged || !tenant.keys.equals(keysFor(tenant.name))) {
                 rebuild(tenant, tenant.config);
             }
         }

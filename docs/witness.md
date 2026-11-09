@@ -281,6 +281,9 @@ Serves exactly the applications configured in `applications/`, and drops everyth
 unseen name. Nothing arriving over the network changes any configuration here. This is the mode for a deployment whose
 operator has a hard constraint against automatic change.
 
+Switching a running witness from `cluster` to `file` takes effect on the next reload: applications no file names stop
+being served, with their state left on disk, and the rest go back to the intervals the files give them.
+
 ### `cluster`
 
 Serves any application name it hears, creating state for it. Less operational burden, a legitimate choice, and the way

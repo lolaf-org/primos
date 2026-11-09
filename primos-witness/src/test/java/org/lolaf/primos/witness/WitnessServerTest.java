@@ -348,6 +348,58 @@ class WitnessServerTest {
     }
 
     @Test
+    void switching_to_file_stops_serving_what_only_a_cluster_asked_for() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server);
+        }
+        assertThat(server.servedApplications()).containsExactly("orders");
+
+        settings("config.source=file\nsecret.shared.value=" + SECRET);
+        reloadConfiguration();
+
+        assertThat(server.servedApplications()).isEmpty();
+    }
+
+    @Test
+    void an_unrelated_reload_keeps_what_a_cluster_asked_for() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server);
+        }
+
+        settings("config.source=cluster\nconfig.cluster.limit=10\nsecret.shared.value=" + SECRET);
+        reloadConfiguration();
+
+        assertThat(server.servedApplications()).containsExactly("orders");
+    }
+
+    @Test
+    void switching_to_file_puts_a_configured_application_back_on_the_files_intervals() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        application("orders");
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server, 200, 1500, 3000, 2000, 4);
+            assertThat(orders.awaitNodeConfig(server).heartbeatMillis).isEqualTo(200);
+
+            settings(String.join("\n", "config.source=file", "secret.shared.value=" + SECRET,
+                    "timings.heartbeat.millis=20",
+                    "timings.election.min.millis=100",
+                    "timings.election.max.millis=200",
+                    "timings.probe.millis=100",
+                    "timings.advertisement.millis=100",
+                    "timings.failure.threshold=3"));
+            reloadConfiguration();
+            orders.discardReceived();
+
+            assertThat(orders.awaitNodeConfig(server).heartbeatMillis).isEqualTo(20);
+        }
+    }
+
+    @Test
     void two_clusters_stating_different_intervals_each_get_their_own() {
         settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
