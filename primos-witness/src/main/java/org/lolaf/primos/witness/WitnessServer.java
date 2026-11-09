@@ -286,7 +286,7 @@ public final class WitnessServer implements AutoCloseable {
         awaitReadable(wait);
         drainSocket();
 
-        for (Served tenant : new ArrayList<>(served.values())) {
+        for (Served tenant : served.values()) {
             if (tenant.failed) {
                 continue;
             }
@@ -429,7 +429,7 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void drainSocket() {
-        for (int read = 0; !closed && read < MAX_DATAGRAMS_PER_TURN; read++) {
+        for (int read = 0; read < MAX_DATAGRAMS_PER_TURN; read++) {
             receiveBuffer.clear();
             SocketAddress source;
             try {
@@ -665,7 +665,7 @@ public final class WitnessServer implements AutoCloseable {
                 rebuild(current, applicationConfig);
             }
         }
-        for (Served tenant : new ArrayList<>(served.values())) {
+        for (Served tenant : served.values()) {
             boolean heldByCluster = tenant.config.isAutoRegistered() && snapshot.settings().configSource().isCluster();
             if (snapshot.serves(tenant.name) || heldByCluster) {
                 continue;
@@ -708,7 +708,7 @@ public final class WitnessServer implements AutoCloseable {
             store.load();
             Served opened = new Served(applicationConfig, transport, store, statsListenerFor(application));
             opened.keys = keysFor(application);
-            opened.node = newNode(applicationConfig, opened.transport, store, null, opened.stats);
+            opened.node = newNode(opened);
             opened.node.start();
             served.put(application, opened);
             return opened;
@@ -753,7 +753,7 @@ public final class WitnessServer implements AutoCloseable {
         tenant.keys = keysFor(updated.name());
         ElectionNode replacement;
         try {
-            replacement = newNode(updated, tenant.transport, tenant.store, tenant.adoptedTimings, tenant.stats);
+            replacement = newNode(tenant);
             replacement.start();
         } catch (RuntimeException e) {
             // Not left on the old node: after a rotation that one still honours the key just removed.
@@ -850,20 +850,19 @@ public final class WitnessServer implements AutoCloseable {
         return new RoutedTransport(application, channel, selector);
     }
 
-    private ElectionNode newNode(ApplicationConfig applicationConfig, RoutedTransport transport,
-                                 StateStore store, Timings adopted, PrimosStatsListener stats) {
+    private ElectionNode newNode(Served tenant) {
         ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
-                .applicationName(applicationConfig.name())
+                .applicationName(tenant.name)
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
-                .timings(timings(applicationConfig, adopted))
+                .timings(timings(tenant.config, tenant.adoptedTimings))
                 .voteLogging(voteLogging);
         if (follows()) {
             config.followsStatedTimings();
         }
-        return new ElectionNode(config.build(), store, transport, clock, random,
-                authenticatorFor(applicationConfig.name()), NO_EVENTS, stats);
+        return new ElectionNode(config.build(), tenant.store, tenant.transport, clock, random,
+                authenticatorFor(tenant.name), NO_EVENTS, tenant.stats);
     }
 
     /**
