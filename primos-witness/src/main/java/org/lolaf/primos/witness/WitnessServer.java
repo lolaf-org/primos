@@ -186,6 +186,9 @@ public final class WitnessServer implements AutoCloseable {
     private WitnessSettings admissionSettings;
     private final Map<String, MessageAuthenticator> admissionRings = new HashMap<>();
 
+    /** Tenants whose node could not be created. Concurrent because a health endpoint reads it from another thread. */
+    private final Set<String> unopened = ConcurrentHashMap.newKeySet();
+
     private WitnessServer(Builder builder) {
         this.configStore = Objects.requireNonNull(builder.configStore, "configStore");
         this.clock = builder.clock;
@@ -279,6 +282,9 @@ public final class WitnessServer implements AutoCloseable {
         drainSocket();
 
         for (Served application : new ArrayList<>(served.values())) {
+            if (application.failed) {
+                continue;
+            }
             application.node.runOnce(0L);
             for (Peer peer : application.transport.drainLearned()) {
                 application.node.learnPeer(peer);
@@ -337,7 +343,7 @@ public final class WitnessServer implements AutoCloseable {
      * since that rebuilds its node.
      */
     public Set<String> quarantinedApplications() {
-        Set<String> quarantined = new TreeSet<>();
+        Set<String> quarantined = new TreeSet<>(unopened);
         for (Served application : served.values()) {
             if (application.failed) {
                 quarantined.add(application.name);
@@ -396,7 +402,9 @@ public final class WitnessServer implements AutoCloseable {
     private long nextDeadlineNanos(long now) {
         long deadline = configStore.nextCheckNanos(now);
         for (Served application : served.values()) {
-            deadline = Math.min(deadline, application.node.nextDeadlineNanos());
+            if (!application.failed) {
+                deadline = Math.min(deadline, application.node.nextDeadlineNanos());
+            }
         }
         return deadline;
     }
@@ -537,8 +545,10 @@ public final class WitnessServer implements AutoCloseable {
         }
 
         String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
-        log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
-                + " config.source=cluster is serving it anyway.", application, source);
+        if (!unopened.contains(application)) {
+            log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
+                    + " config.source=cluster is serving it anyway.", application, source);
+        }
         if (nearMiss != null) {
             log.warn("application '{}' is one or two characters from '{}', which this witness"
                             + " already serves. If that is a typo, the two clusters cannot see each"
@@ -547,10 +557,13 @@ public final class WitnessServer implements AutoCloseable {
                             + " configurations before trusting this.",
                     application, nearMiss);
         }
-        autoRegistrations++;
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
-        return open(new ApplicationConfig(application, settings.defaultTimings(), true));
+        Served opened = openIsolated(new ApplicationConfig(application, settings.defaultTimings(), true));
+        if (opened != null) {
+            autoRegistrations++;
+        }
+        return opened;
     }
 
     /**
@@ -621,11 +634,12 @@ public final class WitnessServer implements AutoCloseable {
 
     private void applyConfiguration() {
         ConfigSnapshot snapshot = configStore.current();
+        unopened.clear();
 
         for (ApplicationConfig application : snapshot.applications().values()) {
             Served current = served.get(application.name());
             if (current == null) {
-                open(application);
+                openIsolated(application);
             } else if (!current.config.equals(application)) {
                 rebuild(current, application);
             }
@@ -657,21 +671,47 @@ public final class WitnessServer implements AutoCloseable {
                     + "' cannot be a directory name, and each application's state is a directory");
         }
         StateStore store = stateStores.open(application.name());
-        if (!store.isDurable()) {
+        RoutedTransport transport = newTransport(application.name());
+        try {
+            if (!store.isDurable()) {
+                throw new IllegalStateException("application '" + application.name() + "' was given a"
+                        + " state store that does not survive a crash. A witness that forgets a vote"
+                        + " can grant a second one in the same term and elect two leaders, which is"
+                        + " precisely the failure it was deployed to prevent, so this is refused"
+                        + " rather than warned about.");
+            }
+            // Before the stats factory: a tenant being retried must not bind its meters again each time.
+            store.load();
+            Served opened = new Served(application, transport, store, statsListenerFor(application.name()));
+            opened.keys = keysFor(application.name());
+            opened.node = newNode(application, opened.transport, store, null, opened.stats);
+            opened.node.start();
+            served.put(application.name(), opened);
+            return opened;
+        } catch (RuntimeException e) {
+            transport.close();
             store.close();
-            throw new IllegalStateException("application '" + application.name() + "' was given a"
-                    + " state store that does not survive a crash. A witness that forgets a vote"
-                    + " can grant a second one in the same term and elect two leaders, which is"
-                    + " precisely the failure it was deployed to prevent, so this is refused"
-                    + " rather than warned about.");
+            throw e;
         }
-        Served opened = new Served(application, newTransport(application.name()), store,
-                statsListenerFor(application.name()));
-        opened.keys = keysFor(application.name());
-        opened.node = newNode(application, opened.transport, store, null, opened.stats);
-        served.put(application.name(), opened);
-        opened.node.start();
-        return opened;
+    }
+
+    /**
+     * {@link #open} for a server already running, where one tenant's broken storage must not end the loop.
+     *
+     * @return null if it could not be opened; a reload or its next announcement tries again
+     */
+    private Served openIsolated(ApplicationConfig application) {
+        try {
+            Served opened = open(application);
+            unopened.remove(application.name());
+            return opened;
+        } catch (RuntimeException e) {
+            if (unopened.size() < MAX_REMEMBERED_NAMES && unopened.add(application.name())) {
+                log.error("application '{}' could not be opened and is not being served. Every other application is"
+                        + " unaffected.", application.name(), e);
+            }
+            return null;
+        }
     }
 
     /**
@@ -688,11 +728,21 @@ public final class WitnessServer implements AutoCloseable {
             log.info("application '{}' was reconfigured", updated.name());
         }
         application.config = updated;
-        application.failed = false;
         application.keys = keysFor(updated.name());
-        application.node = newNode(updated, application.transport, application.store,
-                application.adoptedTimings, application.stats);
-        application.node.start();
+        ElectionNode replacement;
+        try {
+            replacement = newNode(updated, application.transport, application.store,
+                    application.adoptedTimings, application.stats);
+            replacement.start();
+        } catch (RuntimeException e) {
+            // Not left on the old node: after a rotation that one still honours the key just removed.
+            application.failed = true;
+            log.error("application '{}' could not be reconfigured and is no longer being served. Every other"
+                    + " application is unaffected.", updated.name(), e);
+            return;
+        }
+        application.node = replacement;
+        application.failed = false;
         for (Map.Entry<Integer, InetSocketAddress> known : application.transport.endpoints()) {
             application.node.learnPeer(Peer.application(known.getKey(),
                     known.getValue().getHostString(), known.getValue().getPort()));

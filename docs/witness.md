@@ -369,7 +369,8 @@ With metrics, the counters worth alerting on are in [Micrometer](micrometer.md#a
 
 ### One application failing does not stop the witness
 
-If an application's state store fails (a full or broken disk), that application is **quarantined**: it stops being
+If an application's state store fails (a full or broken disk), including while it is being opened or reconfigured,
+that application is **quarantined**: it stops being
 served, and every other tenant keeps working. One team's storage problem must not be every team's failover outage.
 
 The clusters relying on that application's witness are back to the fault tolerance they have without one. Fix the

@@ -157,6 +157,18 @@ final class WitnessClient implements AutoCloseable {
         return null;
     }
 
+    /** Forgets everything already received, so what arrives next is known to have been sent from now on. */
+    void discardReceived() {
+        try {
+            receive.clear();
+            while (channel.receive(receive) != null) {
+                receive.clear();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private void write(ByteBuffer datagram) {
         try {
             channel.send(datagram, witness);
