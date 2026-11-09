@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.StateStore;
@@ -43,8 +44,7 @@ import java.util.function.Supplier;
 @Slf4j
 final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
-    private static final int NO_TRANSFER = Integer.MIN_VALUE;
-    private static final int ANY_FOLLOWER = Integer.MIN_VALUE + 1;
+    private static final int ANY_FOLLOWER = Integer.MIN_VALUE;
 
     private final ClusterConfig config;
     private final Supplier<StateStore> stores;
@@ -60,7 +60,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * generation, so a listener registered once keeps counting across a restart.
      */
     private final PrimosStatsListener stats;
-    private final Object transfer = new Object();
     /**
      * Null when the application supplied its own, which this node then knows nothing about.
      */
@@ -72,14 +71,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private volatile Leader leader;
     private volatile long leadershipConfirmedNanos = Long.MIN_VALUE;
     private volatile boolean running;
-    private volatile int transferRequest = NO_TRANSFER;
+    private volatile TransferRequest transferRequest;
     /**
      * What the application asked, applied to the election by the node thread each turn and to
      * every new election on start.
      */
     private volatile boolean candidate = true;
-    private boolean transferServed;
-    private boolean transferSent;
     private volatile Thread thread;
     private volatile Thread eventsThread;
 
@@ -149,12 +146,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         try {
             store = stores.get();
             transport = transports.get();
-        } catch (RuntimeException e) {
-            closeQuietly();
-            throw e;
-        }
-        election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
-        try {
+            election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
             election.setCandidate(candidate);
             // Here rather than on the node thread, so a state file it cannot read fails this call.
             election.start();
@@ -258,44 +250,30 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * the transport under it, and one caller at a time uses the single request slot.
      */
     private synchronized boolean awaitTransfer(int target) {
-        synchronized (transfer) {
-            if (!running) {
-                return false;
-            }
-            transferServed = false;
-            transferRequest = target;
-            transport.wakeup();
-            long deadline = clock.nanoTime() + stopTimeoutNanos;
-            try {
-                while (!transferServed && running) {
-                    long remaining = deadline - clock.nanoTime();
-                    if (remaining <= 0) {
-                        break;
-                    }
-                    TimeUnit.NANOSECONDS.timedWait(transfer, remaining);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                transferRequest = NO_TRANSFER;
-            }
-            return transferServed && transferSent;
+        if (!running) {
+            return false;
+        }
+        TransferRequest request = new TransferRequest(target);
+        transferRequest = request;
+        transport.wakeup();
+        try {
+            return request.sent.get(stopTimeoutNanos, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (TimeoutException | ExecutionException e) {
+            return false;
+        } finally {
+            transferRequest = null;
         }
     }
 
     private void serveTransfer() {
-        if (transferRequest == NO_TRANSFER) {
-            return;
-        }
-        synchronized (transfer) {
-            int target = transferRequest;
-            if (target == NO_TRANSFER) {
-                return;
-            }
-            transferRequest = NO_TRANSFER;
-            transferSent = target == ANY_FOLLOWER ? election.transferLeadership() : election.transferLeadership(target);
-            transferServed = true;
-            transfer.notifyAll();
+        TransferRequest request = transferRequest;
+        if (request != null) {
+            transferRequest = null;
+            request.sent.complete(request.target == ANY_FOLLOWER
+                    ? election.transferLeadership() : election.transferLeadership(request.target));
         }
     }
 
@@ -404,7 +382,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             throw fatal;
         }
         announceShutdown();
-        publish();
     }
 
     private void announceShutdown() {
@@ -440,7 +417,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         if (published.role() != election.role() || published.term() != election.currentTerm()) {
             roleAndTerm = new RoleAndTerm(election.role(), election.currentTerm());
         }
-        leader = election.leader();
         leadershipConfirmedNanos = election.leadershipConfirmedNanos();
     }
 
@@ -463,5 +439,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     public String toString() {
         return "primos-" + config.applicationName() + "-" + config.nodeId()
                 + " " + roleAndTerm.role() + "/" + roleAndTerm.term();
+    }
+
+    @RequiredArgsConstructor
+    private static final class TransferRequest {
+
+        private final int target;
+        private final CompletableFuture<Boolean> sent = new CompletableFuture<>();
     }
 }
