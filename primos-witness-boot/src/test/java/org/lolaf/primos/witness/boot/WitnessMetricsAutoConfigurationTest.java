@@ -57,7 +57,7 @@ class WitnessMetricsAutoConfigurationTest {
             assertThat(context).hasSingleBean(WitnessMetrics.class);
             MeterRegistry registry = context.getBean(MeterRegistry.class);
 
-            assertThat(registry.find("primos.witness.routing").functionCounters()).hasSize(10);
+            assertThat(registry.find("primos.witness.routing").functionCounters()).hasSize(9);
             assertThat(registry.find("primos.witness.term").tag("application", "orders").gauge())
                     .as("a tenant named in the configuration directory is opened by the server's"
                             + " own constructor, so its gauges are registered when bind catches up")

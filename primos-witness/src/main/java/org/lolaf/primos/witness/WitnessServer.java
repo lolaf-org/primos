@@ -359,19 +359,16 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     /**
-     * Why datagrams were not handed to any application, and what could not be answered.
+     * Why datagrams were not handed to any application.
      */
     public RoutingStats routing() {
         long overflowed = 0;
-        long undeliverable = 0;
         for (Tenant tenant : tenants.values()) {
             overflowed += tenant.transport.overflowed();
-            undeliverable += tenant.transport.sendsDropped();
         }
         return new RoutingStats(unroutable, unservedApplication, autoRegistrationsRefused,
                 unusableName, droppedForFailedApplication, autoRegistrations, awaitingNodeConfig,
-                registrationBadTag, overflowed,
-                undeliverable);
+                registrationBadTag, overflowed);
     }
 
     /**
@@ -1079,16 +1076,6 @@ public final class WitnessServer implements AutoCloseable {
          * every other tenant's problem too.
          */
         long inboxOverflowed;
-
-        /**
-         * Replies this witness never put on the wire, for any reason.
-         *
-         * <p>Expected to stay at zero, and worth alerting on if it does not. A witness that
-         * silently fails to answer is indistinguishable from a witness nobody is asking, and the
-         * cluster on the other end is the one that pays: it waits out an election timeout for a
-         * vote that was never coming.
-         */
-        long undeliverableReplies;
 
     }
 

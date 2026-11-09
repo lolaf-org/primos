@@ -162,9 +162,9 @@ Every served cluster gets the whole node table above, tagged with its own name. 
 The routing meters carry `node` and **no `application`**: the meaning of `unroutable` is precisely that the datagram
 could not be attributed to a cluster.
 
-Alert on **`primos.witness.routing{reason="undeliverable_replies"}`**. It should stay at zero, and a witness that
-silently fails to answer is indistinguishable from a witness nobody is asking, while the cluster on the other end waits
-out an election timeout for a vote that was never coming.
+Alert on **`primos.sends.dropped`** for a served cluster, on any `reason` but `transport_closed`. It should stay at zero,
+and a witness that silently fails to answer is indistinguishable from a witness nobody is asking, while the cluster on
+the other end waits out an election timeout for a vote that was never coming.
 
 `awaiting_node_config` is ordinary and transient while a new cluster starts, and means something else when it is
 sustained: a cluster is talking to this witness and never saying who it is.

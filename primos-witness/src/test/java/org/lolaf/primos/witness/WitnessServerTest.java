@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.MemoryStateStore;
@@ -774,13 +775,19 @@ class WitnessServerTest {
     @Test
     void a_witness_serving_normally_never_fails_to_send_a_reply() {
         application("orders");
-        start();
+        RecordingStats recorded = new RecordingStats();
+        server = WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(loopback())
+                .statsListeners(application -> recorded)
+                .build();
 
         try (WitnessClient candidate = client("orders", 1)) {
             assertThat(candidate.requestVote(server, 1L)).isTrue();
         }
 
-        assertThat(server.routing().undeliverableReplies())
+        assertThat(recorded.sendsDropped())
                 .as("a witness that silently fails to answer is indistinguishable from one nobody"
                         + " is asking, and the cluster waiting for the vote is what pays")
                 .isZero();

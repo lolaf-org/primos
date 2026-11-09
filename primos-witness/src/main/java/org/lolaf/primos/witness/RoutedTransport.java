@@ -82,7 +82,6 @@ final class RoutedTransport implements Transport {
     // Volatile for the metrics thread reading the totals; the server thread is the only writer.
     private volatile long overflowed;
 
-    private volatile long sendsDropped;
 
     /**
      * Queues a datagram the server has routed here, copying it out of the shared receive buffer, unless the inbox
@@ -112,7 +111,6 @@ final class RoutedTransport implements Transport {
     @Override
     public SendDropReason send(int peerId, ByteBuffer datagram) {
         if (closed) {
-            sendsDropped++;
             return SendDropReason.TRANSPORT_CLOSED;
         }
         InetSocketAddress target = endpoints.get(peerId);
@@ -129,13 +127,11 @@ final class RoutedTransport implements Transport {
         if (target == null) {
             // Not a reply, and nobody to send to. The witness only ever answers, so it can have no
             // address for a node that has never spoken to it.
-            sendsDropped++;
             return SendDropReason.NO_ADDRESS;
         }
         try {
             int bytes = datagram.remaining();
             if (channel.send(datagram, target) < bytes) {
-                sendsDropped++;
                 if (log.isDebugEnabled()) {
                     log.debug("cluster '{}': no room in the socket to reply to node {} at {}", application, peerId, target);
                 }
@@ -147,7 +143,6 @@ final class RoutedTransport implements Transport {
             // The algorithm's timers are the retry mechanism, so this must never become a failure.
             // It is still reported: a reply this witness never managed to send is the difference
             // between a cluster failing over and a cluster waiting.
-            sendsDropped++;
             if (log.isDebugEnabled()) {
                 log.debug("cluster '{}': send to node {} at {} failed: {}",
                         application, peerId, target, e.toString());
@@ -254,10 +249,6 @@ final class RoutedTransport implements Transport {
      */
     long overflowed() {
         return overflowed;
-    }
-
-    long sendsDropped() {
-        return sendsDropped;
     }
 
     /**

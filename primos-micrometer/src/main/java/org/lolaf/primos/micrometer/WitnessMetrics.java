@@ -95,7 +95,7 @@ public final class WitnessMetrics {
 
         ROUTING.forEach((reason, value) -> FunctionCounter
                 .builder("primos.witness.routing", server, s -> value.applyAsDouble(s.routing()))
-                .description("Datagrams that reached no application, and replies that reached no node")
+                .description("Datagrams that reached no application")
                 .tags(base.and("reason", reason))
                 .register(registry));
 
@@ -154,8 +154,8 @@ public final class WitnessMetrics {
 
     /**
      * Every field of {@code RoutingStats}, as function counters: the server maintains the counts,
-     * so this reads them rather than keeping a second set that could drift. They can step
-     * backwards when a tenant is removed, since two of them are sums over the served set.
+     * so this reads them rather than keeping a second set that could drift. {@code inbox_overflowed} can step
+     * backwards when a tenant is removed, being a sum over the served set.
      */
     private static Map<String, ToDoubleFunction<WitnessServer.RoutingStats>> routingMeters() {
         Map<String, ToDoubleFunction<WitnessServer.RoutingStats>> meters = new LinkedHashMap<>();
@@ -168,7 +168,6 @@ public final class WitnessMetrics {
         meters.put("awaiting_node_config", WitnessServer.RoutingStats::awaitingNodeConfig);
         meters.put("registration_bad_tag", WitnessServer.RoutingStats::registrationBadTag);
         meters.put("inbox_overflowed", WitnessServer.RoutingStats::inboxOverflowed);
-        meters.put("undeliverable_replies", WitnessServer.RoutingStats::undeliverableReplies);
         return meters;
     }
 }
