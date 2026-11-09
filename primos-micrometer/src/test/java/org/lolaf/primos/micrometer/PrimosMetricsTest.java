@@ -64,8 +64,9 @@ class PrimosMetricsTest {
     void a_leader_reports_one_so_a_cluster_can_be_summed() {
         ClusterConfig cluster = cluster(1);
         PrimosMetrics metrics = PrimosMetrics.create(registry, cluster);
-        PrimosNode node = start(builder(cluster).statsListener(metrics));
+        PrimosNode node = builder(cluster).statsListener(metrics).build();
         metrics.bind(node);
+        start(node);
 
         await().atMost(5, TimeUnit.SECONDS).until(() -> gauge("primos.leader") == 1.0);
 
@@ -202,8 +203,9 @@ class PrimosMetricsTest {
                 .timings(FAST)
                 .build();
         PrimosMetrics metrics = PrimosMetrics.create(registry, witness);
-        PrimosNode node = start(builder(witness).statsListener(metrics));
+        PrimosNode node = builder(witness).statsListener(metrics).build();
         metrics.bind(node);
+        start(node);
 
         assertThat(registry.find("primos.voters").gauge())
                 .as("Quorum.unknown is never reached; publishing 0 voters would invite an alert"
@@ -216,12 +218,27 @@ class PrimosMetricsTest {
     void binding_twice_is_refused_because_it_would_double_count_every_event() {
         ClusterConfig cluster = cluster(1);
         PrimosMetrics metrics = PrimosMetrics.create(registry, cluster);
-        PrimosNode node = start(builder(cluster).statsListener(metrics));
+        PrimosNode node = builder(cluster).statsListener(metrics).build();
         metrics.bind(node);
 
         assertThatThrownBy(() -> metrics.bind(node))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already bound");
+    }
+
+    /**
+     * A peer already up never reports it again, so its gauge would read 0 for as long as it stayed up. Its twin is
+     * {@link #a_peer_leaving_moves_its_gauge_its_counter_and_the_departure_counter}, which binds first.
+     */
+    @Test
+    void binding_a_node_that_is_already_running_is_refused() {
+        ClusterConfig cluster = cluster(1);
+        PrimosMetrics metrics = PrimosMetrics.create(registry, cluster);
+        PrimosNode node = start(builder(cluster).statsListener(metrics));
+
+        assertThatThrownBy(() -> metrics.bind(node))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before starting the node");
     }
 
     /**
@@ -233,8 +250,9 @@ class PrimosMetricsTest {
     void a_peer_leaving_moves_its_gauge_its_counter_and_the_departure_counter() {
         ClusterConfig one = cluster(1, 2);
         PrimosMetrics metrics = PrimosMetrics.create(registry, one);
-        PrimosNode node = start(builder(one).statsListener(metrics));
+        PrimosNode node = builder(one).statsListener(metrics).build();
         metrics.bind(node);
+        start(node);
         PrimosNode other = start(builder(cluster(2, 1)));
 
         await().atMost(5, TimeUnit.SECONDS)
@@ -255,8 +273,9 @@ class PrimosMetricsTest {
     void a_publication_is_counted_on_the_leader_and_on_the_follower_told_of_it() {
         ClusterConfig one = cluster(1, 2);
         PrimosMetrics metrics = PrimosMetrics.create(registry, one);
-        PrimosNode node = start(builder(one).statsListener(metrics));
+        PrimosNode node = builder(one).statsListener(metrics).build();
         metrics.bind(node);
+        start(node);
         PrimosNode other = start(builder(cluster(2, 1)));
         await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader() || other.role().isLeader());
         boolean metredNodeLeads = node.role().isLeader();
@@ -312,7 +331,10 @@ class PrimosMetricsTest {
     }
 
     private PrimosNode start(PrimosNodeBuilder builder) {
-        PrimosNode node = builder.build();
+        return start(builder.build());
+    }
+
+    private PrimosNode start(PrimosNode node) {
         node.start();
         started.add(node);
         return node;

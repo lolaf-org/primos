@@ -69,8 +69,8 @@ class ReadmeExamplesTest {
                         .peers(cluster.allPeers()))
                 .build();
 
-        node.start();
         metrics.bind(node);
+        node.start();
 
         try {
             assertThat(registry.get("primos.leader")
