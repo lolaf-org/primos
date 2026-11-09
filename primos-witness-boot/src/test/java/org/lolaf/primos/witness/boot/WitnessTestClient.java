@@ -49,8 +49,8 @@ final class WitnessTestClient implements AutoCloseable {
     WitnessTestClient(String application, int nodeId, String secret, int witnessId,
                       InetSocketAddress witness) {
         this.witness = witness;
-        MessageAuthenticator authenticator = MessageAuthenticator.hmacSha256(
-                secret.getBytes(StandardCharsets.UTF_8), null);
+        MessageAuthenticator authenticator = MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM,
+                secret.getBytes(StandardCharsets.UTF_8));
         this.encoder = new MessageEncoder(application, nodeId, authenticator);
         this.decoder = new MessageDecoder(application, authenticator, id -> id == witnessId,
                 PrimosStatsListener.NONE);

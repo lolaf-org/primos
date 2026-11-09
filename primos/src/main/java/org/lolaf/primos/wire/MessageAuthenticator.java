@@ -29,7 +29,7 @@ import java.util.Objects;
 /**
  * Appends and verifies the tag that proves a datagram came from a cluster member.
  *
- * <p>HMAC-SHA256 unless a cluster chooses otherwise; see {@link #hmac(String, byte[], byte[])},
+ * <p>HMAC-SHA256 unless a cluster chooses otherwise; see {@link #hmac(String, byte[])},
  * and note that the choice is local policy every member has to share, because nothing on the wire
  * says which algorithm was used.
  *
@@ -103,15 +103,13 @@ public final class MessageAuthenticator {
      */
     private static final class Key {
 
-        private final String name;
         private final String algorithm;
         private final Mac mac;
         private final int tagBytes;
         private final byte[] computed;
         private final byte[] received;
 
-        private Key(String name, String algorithm, Mac mac) {
-            this.name = name;
+        private Key(String algorithm, Mac mac) {
             this.algorithm = algorithm;
             this.mac = mac;
             this.tagBytes = mac.getMacLength();
@@ -129,17 +127,6 @@ public final class MessageAuthenticator {
      */
     public String algorithm() {
         return keys.length == 0 ? null : keys[selected].algorithm;
-    }
-
-    /**
-     * The name of the key that last verified something, or null when it has none.
-     *
-     * <p>Only a witness server names its keys, and it does so for one reason: a log line saying
-     * <em>which</em> key admitted a tenant is the difference between a diagnosable configuration
-     * and a working one nobody can explain.
-     */
-    public String keyName() {
-        return keys.length == 0 ? null : keys[selected].name;
     }
 
     /**
@@ -164,37 +151,6 @@ public final class MessageAuthenticator {
     }
 
     /**
-     * Authentication with a shared cluster secret.
-     *
-     * <p>The key is initialised once, because the key schedule is the expensive part of HMAC.
-     */
-    public static MessageAuthenticator hmacSha256(byte[] secret) {
-        return hmac(DEFAULT_ALGORITHM, secret, null);
-    }
-
-    /**
-     * Authentication during a secret rotation: tags with {@code secret}, accepts either.
-     *
-     * <p>Without this, changing a secret is a flag day: every node in the cluster has to be
-     * restarted at the same instant, because the moment one holds the new secret and another holds
-     * the old one they stop being able to talk at all. That is the worst possible time to lose a
-     * cluster's consensus traffic, and the pressure it creates is what makes people leave secrets
-     * unrotated for years.
-     *
-     * <p>With it, rotation is two edits and a window: set the new secret as current and the old one
-     * as previous, wait until every node has been updated, then drop the previous one. Nothing is
-     * ever unable to talk, and nothing restarts in lockstep.
-     *
-     * <p>The cost is that a compromised old secret keeps working until the second edit, which is
-     * why the previous secret is a rotation window rather than a permanent second key.
-     *
-     * @param previousSecret the secret being rotated out, or null when none is
-     */
-    public static MessageAuthenticator hmacSha256(byte[] secret, byte[] previousSecret) {
-        return hmac(DEFAULT_ALGORITHM, secret, previousSecret);
-    }
-
-    /**
      * Authentication with a chosen {@link Mac} algorithm: any name the platform's JCE knows, such
      * as {@code HmacSHA256} or {@code HmacSHA512}.
      *
@@ -212,36 +168,20 @@ public final class MessageAuthenticator {
      * default, 64 for {@code HmacSHA512}, 20 for {@code HmacSHA1}. Everything that measures a
      * datagram asks {@link #tagBytes()}, so a longer tag costs bytes on the wire and nothing else.
      *
-     * @param algorithm      a JCE {@code Mac} algorithm name; {@link #DEFAULT_ALGORITHM} unless
-     *                       there is a reason to differ
-     * @param secret         the cluster secret, which this tags with
-     * @param previousSecret the secret being rotated out and still accepted, or null when none is
-     * @throws IllegalArgumentException if the platform has no such algorithm, or its tag is too
+     * @param algorithm a JCE {@code Mac} algorithm name; {@link #DEFAULT_ALGORITHM} unless there is a reason to differ
+     * @param secret    the cluster secret
+     * @throws IllegalArgumentException if the secret is empty, the platform has no such algorithm, or its tag is too
      *                                  short or too long to carry
      */
-    public static MessageAuthenticator hmac(String algorithm, byte[] secret, byte[] previousSecret) {
-        Objects.requireNonNull(algorithm, "algorithm");
-        Objects.requireNonNull(secret, "secret");
-        if (secret.length == 0) {
-            throw new IllegalArgumentException("the cluster secret must not be empty");
-        }
-        if (previousSecret != null && previousSecret.length == 0) {
-            throw new IllegalArgumentException("the previous cluster secret must not be empty");
-        }
-        Key current = key(null, algorithm, secret);
-        if (previousSecret == null) {
-            return new MessageAuthenticator(new Key[] {current});
-        }
-        return new MessageAuthenticator(new Key[] {current, key(null, algorithm, previousSecret)});
+    public static MessageAuthenticator hmac(String algorithm, byte[] secret) {
+        return new MessageAuthenticator(new Key[] {key(algorithm, secret)});
     }
 
     /**
      * Authentication against several keys at once, accepting any of them.
      *
-     * <p>This is what {@link #hmac(String, byte[], byte[])} already was (a current key and its
-     * predecessor are a two-key ring) generalised to the case a witness server has: <em>keys
-     * belonging to different parties</em>, not one key and its own past. A datagram is authentic
-     * if any key accepts it, and replies are signed with whichever key last did.
+     * <p>A key and its predecessor during a rotation, or on a witness server, <em>keys belonging to different
+     * parties</em>. A datagram is authentic if any key accepts it, and replies are signed with whichever key last did.
      *
      * <p>Two consequences worth knowing before relying on it. <strong>A ring is not isolation:</strong>
      * any key in it verifies any datagram given to this authenticator, so whoever decides which
@@ -250,8 +190,7 @@ public final class MessageAuthenticator {
      * <strong>the keys may use different algorithms</strong>, so the tag length varies with the key
      * that matched; see {@link #tagBytes()}.
      *
-     * @param keys at least one, each a name for logs (may be null), a JCE {@code Mac} algorithm
-     *             and a secret
+     * @param keys at least one, each a JCE {@code Mac} algorithm and a secret
      * @throws IllegalArgumentException if the list is empty, or any entry names an algorithm the
      *                                  platform lacks or whose tag will not carry
      */
@@ -264,37 +203,34 @@ public final class MessageAuthenticator {
         Key[] ring = new Key[keys.size()];
         for (int i = 0; i < ring.length; i++) {
             KeySpec spec = keys.get(i);
-            ring[i] = key(spec.name, spec.algorithm, spec.secret);
+            ring[i] = key(spec.algorithm, spec.secret);
         }
         return new MessageAuthenticator(ring);
     }
 
     /**
-     * One entry for {@link #keyring(List)}: a name for logs, an algorithm and a secret.
+     * One entry for {@link #keyring(List)}: an algorithm and a secret.
      */
     public static final class KeySpec {
 
-        private final String name;
         private final String algorithm;
         private final byte[] secret;
 
-        private KeySpec(String name, String algorithm, byte[] secret) {
-            this.name = name;
+        private KeySpec(String algorithm, byte[] secret) {
             this.algorithm = algorithm == null ? DEFAULT_ALGORITHM : algorithm;
             this.secret = secret;
         }
 
         /**
-         * @param name      what to call this key in a log line, or null when it has no name
          * @param algorithm a JCE {@code Mac} name, or null for {@link #DEFAULT_ALGORITHM}
          * @param secret    the key itself; not copied, because the caller built it for this
          */
-        public static KeySpec of(String name, String algorithm, byte[] secret) {
-            return new KeySpec(name, algorithm, Objects.requireNonNull(secret, "secret"));
+        public static KeySpec of(String algorithm, byte[] secret) {
+            return new KeySpec(algorithm, Objects.requireNonNull(secret, "secret"));
         }
     }
 
-    private static Key key(String name, String algorithm, byte[] secret) {
+    private static Key key(String algorithm, byte[] secret) {
         Objects.requireNonNull(algorithm, "algorithm");
         Objects.requireNonNull(secret, "secret");
         if (secret.length == 0) {
@@ -302,15 +238,7 @@ public final class MessageAuthenticator {
         }
         Mac mac = keyed(algorithm, secret);
         requireCarriableTag(algorithm, mac.getMacLength());
-        return new Key(name, algorithm, mac);
-    }
-
-    /**
-     * Authentication with a chosen algorithm and no rotation window. See
-     * {@link #hmac(String, byte[], byte[])}.
-     */
-    public static MessageAuthenticator hmac(String algorithm, byte[] secret) {
-        return hmac(algorithm, secret, null);
+        return new Key(algorithm, mac);
     }
 
     private static Mac keyed(String algorithm, byte[] secret) {
@@ -371,13 +299,6 @@ public final class MessageAuthenticator {
         } catch (ShortBufferException e) {
             throw new IllegalStateException("the buffer is sized to this Mac's tag", e);
         }
-    }
-
-    /**
-     * How many keys are accepted: one, two during a rotation, more for a witness's several tenants.
-     */
-    public int keyCount() {
-        return keys.length;
     }
 
     /**

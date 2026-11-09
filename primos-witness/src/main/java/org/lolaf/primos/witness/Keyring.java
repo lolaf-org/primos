@@ -104,7 +104,7 @@ public final class Keyring {
         }
         List<MessageAuthenticator.KeySpec> ring = new ArrayList<>(candidates.size());
         for (WitnessKey key : candidates) {
-            ring.add(MessageAuthenticator.KeySpec.of(key.name(), key.algorithm(), key.secret()));
+            ring.add(MessageAuthenticator.KeySpec.of(key.algorithm(), key.secret()));
         }
         return MessageAuthenticator.keyring(ring);
     }

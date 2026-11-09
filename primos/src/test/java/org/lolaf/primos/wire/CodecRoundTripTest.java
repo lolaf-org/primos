@@ -103,8 +103,8 @@ class CodecRoundTripTest {
     @Test
     void every_message_survives_a_round_trip_authenticated() {
         byte[] secret = "a-shared-cluster-secret".getBytes();
-        MessageEncoder encoder = encoder(MessageAuthenticator.hmacSha256(secret));
-        MessageDecoder decoder = decoder(MessageAuthenticator.hmacSha256(secret));
+        MessageEncoder encoder = encoder(MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, secret));
+        MessageDecoder decoder = decoder(MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, secret));
 
         assertThat(decode(decoder, encoder.requestVote(buffer, 7, true)))
                 .isEqualTo("requestVote(3,7,preVote=true)");
@@ -122,7 +122,7 @@ class CodecRoundTripTest {
     @Test
     void a_tag_adds_exactly_thirty_two_bytes() {
         MessageEncoder plain = encoder(MessageAuthenticator.disabled());
-        MessageEncoder tagged = encoder(MessageAuthenticator.hmacSha256("secret".getBytes()));
+        MessageEncoder tagged = encoder(MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, "secret".getBytes()));
 
         assertThat(plain.requestVote(buffer, 1, false).remaining()).isEqualTo(52);
         assertThat(tagged.requestVote(buffer, 1, false).remaining()).isEqualTo(52 + 32);

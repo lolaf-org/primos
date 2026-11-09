@@ -40,6 +40,10 @@ class ReceivePipelineTest {
     private final MessageDecoder decoder = new MessageDecoder(APP,
             MessageAuthenticator.disabled(), id -> id == SENDER, drops);
 
+    private static MessageAuthenticator sha256(byte[] secret) {
+        return MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, secret);
+    }
+
     @Test
     void step_1_too_short_to_hold_a_header() {
         assertDropped(ByteBuffer.allocate(WireFormat.HEADER_BYTES - 1), DropReason.MALFORMED);
@@ -53,9 +57,9 @@ class ReceivePipelineTest {
     @Test
     void step_2_a_flipped_bit_anywhere_fails_authentication() {
         MessageEncoder tagging = new MessageEncoder(APP, SENDER,
-                MessageAuthenticator.hmacSha256(SECRET));
+                sha256(SECRET));
         MessageDecoder verifying = new MessageDecoder(APP,
-                MessageAuthenticator.hmacSha256(SECRET), id -> true, drops);
+                sha256(SECRET), id -> true, drops);
 
         for (int index : new int[] {0, 5, WireFormat.OFFSET_TERM, WireFormat.HEADER_BYTES - 1}) {
             ByteBuffer datagram = tagging.ping(buffer, 7, 1);
@@ -71,7 +75,7 @@ class ReceivePipelineTest {
     @Test
     void step_2_an_untagged_datagram_is_rejected_by_a_node_expecting_one() {
         MessageDecoder verifying = new MessageDecoder(APP,
-                MessageAuthenticator.hmacSha256(SECRET), id -> true, drops);
+                sha256(SECRET), id -> true, drops);
 
         assertThat(verifying.decode(encoder.ping(buffer, 7, 1), handler)).isFalse();
         assertThat(handler.received).isEmpty();
@@ -162,9 +166,9 @@ class ReceivePipelineTest {
     @Test
     void authentication_is_checked_before_anything_else_is_believed() {
         MessageDecoder verifying = new MessageDecoder(APP,
-                MessageAuthenticator.hmacSha256(SECRET), id -> id == SENDER, drops);
+                sha256(SECRET), id -> id == SENDER, drops);
         MessageEncoder forger = new MessageEncoder("ordres", 999,
-                MessageAuthenticator.hmacSha256("a-different-secret".getBytes()));
+                sha256("a-different-secret".getBytes()));
 
         assertThat(verifying.decode(forger.appendEntries(buffer, 1, 0, 0), handler)).isFalse();
 
@@ -202,7 +206,7 @@ class ReceivePipelineTest {
     @Test
     void the_application_name_can_be_read_before_the_tag_is_verified() {
         MessageEncoder encoder = new MessageEncoder("orders", 1,
-                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)));
+                sha256("s3cret".getBytes(StandardCharsets.UTF_8)));
         ByteBuffer datagram = encoder.requestVote(
                 ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
 
@@ -215,7 +219,7 @@ class ReceivePipelineTest {
     @Test
     void peeking_a_forged_name_still_cannot_get_a_datagram_accepted() {
         MessageEncoder wrongKey = new MessageEncoder("orders", 1,
-                MessageAuthenticator.hmacSha256("not-the-secret".getBytes(StandardCharsets.UTF_8)));
+                sha256("not-the-secret".getBytes(StandardCharsets.UTF_8)));
         ByteBuffer datagram = wrongKey.requestVote(
                 ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 1L, false);
 
@@ -224,7 +228,7 @@ class ReceivePipelineTest {
         RecordingHandler handler = new RecordingHandler();
         RecordingStats drops = new RecordingStats();
         boolean accepted = new MessageDecoder("orders",
-                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)),
+                sha256("s3cret".getBytes(StandardCharsets.UTF_8)),
                 id -> true, drops).decode(datagram, handler);
 
         assertThat(accepted)
@@ -241,7 +245,7 @@ class ReceivePipelineTest {
     @Test
     void the_message_type_can_be_read_before_the_tag_is_verified() {
         MessageEncoder encoder = new MessageEncoder("orders", 1,
-                MessageAuthenticator.hmacSha256("s3cret".getBytes(StandardCharsets.UTF_8)));
+                sha256("s3cret".getBytes(StandardCharsets.UTF_8)));
         ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
 
         assertThat(MessageDecoder.peekMessageType(encoder.nodeConfig(buffer, 1L, 50, 300, 600, 1000, 3)))
