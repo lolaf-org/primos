@@ -422,10 +422,25 @@ public final class ElectionNode implements MessageHandler {
         long deadline = Math.min(probeDeadlineNanos, nodeConfigDeadlineNanos);
         if (role == Role.LEADER) {
             deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, quorumContactDeadlineNanos()));
-        } else if (campaigns()) {
+            return deadline;
+        }
+        if (campaigns()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
+        if (isFollowingLeader()) {
+            deadline = Math.min(deadline, leaderSilenceDeadlineNanos());
+        }
         return deadline;
+    }
+
+    // Not a witness: it has no timer of this kind, and nothing reads the leader it holds.
+    private boolean isFollowingLeader() {
+        return role != Role.LEADER && leaderId >= 0 && !config.isWitness();
+    }
+
+    // The moment this node would grant a pre-vote anyway, so it no longer vouches for that leader.
+    private long leaderSilenceDeadlineNanos() {
+        return lastLeaderContactNanos + electionTimeoutMinNanos;
     }
 
     /**
@@ -584,6 +599,9 @@ public final class ElectionNode implements MessageHandler {
             }
             announcePublication();
             return;
+        }
+        if (isFollowingLeader() && now >= leaderSilenceDeadlineNanos()) {
+            setLeader(-1);
         }
         if (campaigns() && now >= electionDeadlineNanos) {
             startPreVote();

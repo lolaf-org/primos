@@ -92,8 +92,9 @@ public interface PrimosNode extends AutoCloseable {
     RoleAndTerm roleAndTerm();
 
     /**
-     * Who is currently leading, if anyone is known to be. Empty during an election, which is a
-     * real and common state rather than an error.
+     * Who is currently leading, if anyone is known to be. Empty during an election and once the
+     * leader has been silent for the minimum election timeout, which are real and common states
+     * rather than errors.
      *
      * <p>A {@link Leader} rather than a bare id, so that a follower asking where to forward work
      * is answered rather than pointed at a lookup, and so that this node holding leadership is
