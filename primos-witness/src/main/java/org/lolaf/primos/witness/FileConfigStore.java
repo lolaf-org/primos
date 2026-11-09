@@ -182,7 +182,7 @@ public final class FileConfigStore implements ConfigStore {
         return raw == null ? Collections.emptyList() : Arrays.asList(raw.split(","));
     }
 
-    private static byte[] secretValue(Properties properties, String key, Path base) {
+    private byte[] secretValue(Properties properties, String key) {
         String raw = properties.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
             return null;
@@ -198,7 +198,7 @@ public final class FileConfigStore implements ConfigStore {
             return fromEnvironment.getBytes(StandardCharsets.UTF_8);
         }
         if (value.startsWith(FILE_SECRET)) {
-            Path path = secretFile(value, base);
+            Path path = secretFile(value);
             try {
                 return Files.readAllBytes(path);
             } catch (IOException e) {
@@ -212,8 +212,8 @@ public final class FileConfigStore implements ConfigStore {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static Path secretFile(String value, Path base) {
-        return base.getFileSystem().getPath(value.substring(FILE_SECRET.length()));
+    private Path secretFile(String value) {
+        return directory.resolve(value.substring(FILE_SECRET.length()));
     }
 
     private static void absorb(CRC32 sum, Path file) {
@@ -268,7 +268,7 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     private WitnessKey readKey(Properties properties, String name) {
-        byte[] secret = secretValue(properties, SECRET_PREFIX + name + ".value", directory);
+        byte[] secret = secretValue(properties, SECRET_PREFIX + name + ".value");
         if (secret == null) {
             throw new IllegalArgumentException("key '" + name + "' has no "
                     + SECRET_PREFIX + name + ".value; a key without a secret cannot verify"
@@ -409,7 +409,7 @@ public final class FileConfigStore implements ConfigStore {
         for (String key : new TreeSet<>(properties.stringPropertyNames())) {
             String value = properties.getProperty(key).trim();
             if (isSecretValue(key) && value.startsWith(FILE_SECRET)) {
-                files.add(secretFile(value, directory));
+                files.add(secretFile(value));
             }
         }
         return files;

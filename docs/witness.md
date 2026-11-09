@@ -204,7 +204,7 @@ application file carrying `secret` is *refused* rather than ignored: an operator
 while the keyring decides otherwise is the worst failure available here, so the witness will not start.
 
 `value` takes four forms, so configuration can go into version control while the key does not: inline, `env:NAME`,
-`file:/path`, `base64:...`. The loader warns the way `ssh` does when `witness.properties` holds a secret or a `file:` secret is
+`file:/path`, `base64:...`. A relative `file:` path is taken from the configuration directory. The loader warns the way `ssh` does when `witness.properties` holds a secret or a `file:` secret is
 world-readable; keep them `0640` and owned by the service user.
 
 `algorithm` is per key, because a witness serves clusters it does not own and one of them moving to another algorithm

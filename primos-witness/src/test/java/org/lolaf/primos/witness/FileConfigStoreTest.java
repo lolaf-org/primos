@@ -295,6 +295,19 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_relative_file_secret_is_found_beside_the_configuration() throws IOException {
+        Files.createDirectories(directory.resolve("keys"));
+        Files.write(directory.resolve("keys/orders"), "s3cret".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:keys/orders");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().keyring().keys().get(0).secret())
+                    .as("a witness started from another directory must still find its keys")
+                    .isEqualTo("s3cret".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
     void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
         settings("secret.orders.value = base64:");
 
