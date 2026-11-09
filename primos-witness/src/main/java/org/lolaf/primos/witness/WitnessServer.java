@@ -110,6 +110,9 @@ public final class WitnessServer implements AutoCloseable {
      */
     private static final int MAX_REMEMBERED_NAMES = 1024;
 
+    /** Across every tenant on the socket. Without a bound a sustained flood means no node ever gets a turn. */
+    static final int MAX_DATAGRAMS_PER_TURN = 1024;
+
     /**
      * An upper bound on one blocking select, so {@link #stop()} is never waited out for long.
      */
@@ -425,7 +428,7 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void drainSocket() {
-        while (!closed) {
+        for (int read = 0; !closed && read < MAX_DATAGRAMS_PER_TURN; read++) {
             receiveBuffer.clear();
             SocketAddress source;
             try {

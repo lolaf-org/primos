@@ -97,6 +97,11 @@ final class WitnessClient implements AutoCloseable {
         announceConfig(server, 50, 300, 600, 1000, 3);
     }
 
+    /** Only sends, for a test that is already inside the server's loop. */
+    void sendConfig() {
+        write(encoder.nodeConfig(send, 0L, 50, 300, 600, 1000, 3));
+    }
+
     /**
      * States a particular profile, for the tests about which one a witness ends up running.
      */

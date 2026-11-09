@@ -74,6 +74,9 @@ public final class UdpTransport implements Transport {
      */
     private static final int RECEIVE_CAPACITY = WireFormat.MAX_DATAGRAM_BYTES + 1;
 
+    /** A bound on one turn's reading, or a sustained flood keeps the loop from ever reaching its timers. */
+    static final int MAX_DATAGRAMS_PER_POLL = 256;
+
     private final DatagramChannel channel;
     private final Selector selector;
     private final ByteBuffer receiveBuffer = ByteBuffer.allocate(RECEIVE_CAPACITY);
@@ -237,7 +240,7 @@ public final class UdpTransport implements Transport {
 
     private int drain(DatagramHandler handler) throws IOException {
         int delivered = 0;
-        while (!closed) {
+        while (!closed && delivered < MAX_DATAGRAMS_PER_POLL) {
             receiveBuffer.clear();
             SocketAddress source = channel.receive(receiveBuffer);
             if (source == null) {

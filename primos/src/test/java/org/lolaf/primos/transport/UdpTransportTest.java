@@ -22,12 +22,14 @@ import org.lolaf.primos.wire.WireFormat;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /**
  * The same contract as every other transport, over a real socket.
@@ -101,6 +103,45 @@ class UdpTransportTest extends TransportContractTest {
                 .as("the receive buffer is one byte larger than a legal datagram, so anything"
                         + " oversized arrives too long for any message type and is rejected above")
                 .isEqualTo(WireFormat.MAX_DATAGRAM_BYTES + 1);
+    }
+
+    @Test
+    void a_socket_that_never_empties_still_lets_poll_return() {
+        int[] delivered = {0};
+        a.send(NODE_B, wrap("first"));
+        awaitReadable();
+
+        int returned = assertTimeoutPreemptively(Duration.ofSeconds(20), () -> b.poll(0, datagram -> {
+            delivered[0]++;
+            a.send(NODE_B, wrap("the next one is already there"));
+        }));
+
+        assertThat(returned).isEqualTo(UdpTransport.MAX_DATAGRAMS_PER_POLL);
+        assertThat(delivered[0]).isEqualTo(UdpTransport.MAX_DATAGRAMS_PER_POLL);
+    }
+
+    @Test
+    void what_one_poll_leaves_behind_the_next_delivers() {
+        int total = UdpTransport.MAX_DATAGRAMS_PER_POLL + 10;
+        int[] delivered = {0};
+        a.send(NODE_B, wrap("first"));
+        awaitReadable();
+
+        for (int polls = 0; polls < 200 && delivered[0] < total; polls++) {
+            b.poll(TimeUnit.MILLISECONDS.toNanos(50), datagram -> {
+                delivered[0]++;
+                if (delivered[0] < total) {
+                    a.send(NODE_B, wrap("next"));
+                }
+            });
+        }
+
+        assertThat(delivered[0]).isEqualTo(total);
+    }
+
+    private void awaitReadable() {
+        // Long enough for loopback, and a miss only makes the first poll deliver nothing.
+        org.awaitility.Awaitility.await().pollDelay(Duration.ofMillis(20)).until(() -> true);
     }
 
     @Test

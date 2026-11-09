@@ -69,6 +69,9 @@ timeout, and closes its state stores before exiting. Give it the time to do that
 One inbound UDP port (7420 by default) from every node of every served cluster. Replies leave from the same socket, so
 no separate outbound rule is needed, and that is also what keeps NAT pinholes open in both directions.
 
+Restrict that port to those nodes. Under a flood the witness keeps running its timers, but the operating system drops
+datagrams once its socket buffer is full, genuine ones included, and only the network can stop that.
+
 ## Configuring
 
 A directory, not a single file:
