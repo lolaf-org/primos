@@ -436,23 +436,26 @@ public final class FileConfigStore implements ConfigStore {
         CRC32 sum = new CRC32();
         absorb(sum, directory.resolve(SETTINGS_FILE));
         currentSecretFiles().forEach(file -> absorb(sum, file));
-        if (Files.isDirectory(applicationsDirectory)) {
-            List<Path> files = new ArrayList<>();
-            try (DirectoryStream<Path> stream =
-                         Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
-                stream.forEach(files::add);
-            } catch (IOException e) {
-                // Unreadable is a state like any other: it sums differently from readable, so it
-                // reloads once and the existing keep-the-last-good-configuration path reports it.
-                sum.update('?');
-                return sum.getValue();
-            }
-            files.sort(Comparator.comparing(Path::toString));
-            for (Path file : files) {
-                absorb(sum, file);
-            }
+        try {
+            applicationFiles().forEach(file -> absorb(sum, file));
+        } catch (IOException e) {
+            // Unreadable is a state like any other: it sums differently from readable, so it
+            // reloads once and the existing keep-the-last-good-configuration path reports it.
+            sum.update('?');
         }
         return sum.getValue();
+    }
+
+    private List<Path> applicationFiles() throws IOException {
+        if (!Files.isDirectory(applicationsDirectory)) {
+            return Collections.emptyList();
+        }
+        List<Path> files = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
+            stream.forEach(files::add);
+        }
+        files.sort(Comparator.comparing(Path::toString));
+        return files;
     }
 
     private List<Path> currentSecretFiles() {
@@ -499,20 +502,13 @@ public final class FileConfigStore implements ConfigStore {
     private ConfigSnapshot read() {
         WitnessSettings settings = readSettings();
         Map<String, ApplicationConfig> applications = new LinkedHashMap<>();
-
-        if (Files.isDirectory(applicationsDirectory)) {
-            List<Path> files = new ArrayList<>();
-            try (DirectoryStream<Path> stream =
-                         Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
-                stream.forEach(files::add);
-            } catch (IOException e) {
-                throw new UncheckedIOException("cannot list " + applicationsDirectory, e);
-            }
-            files.sort(Comparator.comparing(Path::toString));
-            for (Path file : files) {
+        try {
+            for (Path file : applicationFiles()) {
                 ApplicationConfig application = readApplication(file, settings);
                 applications.put(application.name(), application);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot list " + applicationsDirectory, e);
         }
         return new ConfigSnapshot(settings, applications);
     }
