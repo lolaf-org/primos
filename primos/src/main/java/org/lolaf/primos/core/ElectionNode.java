@@ -1134,24 +1134,23 @@ public final class ElectionNode implements MessageHandler {
     /**
      * Tells every peer this node is going away, so none of them has to wait out a probe timeout.
      */
-    public int announceDeparture() {
+    public void announceDeparture() {
         if (peers.length == 0) {
-            return 0;
+            return;
         }
         for (TrackedPeer peer : peers) {
             send(peer.peer.id(), encoder.leaving(sendBuffer, currentTerm));
         }
         log.info("cluster '{}': node {} told {} peer(s) it is shutting down",
                 config.applicationName(), config.nodeId(), peers.length);
-        return peers.length;
     }
 
     /**
      * Hands leadership to a follower on the way out, instead of just going quiet.
      */
-    public boolean handOverLeadership() {
+    public void handOverLeadership() {
         if (role != Role.LEADER) {
-            return false;
+            return;
         }
         Peer target = handoverTarget();
         if (target == null) {
@@ -1159,13 +1158,12 @@ public final class ElectionNode implements MessageHandler {
                             + " follower to hand over to; the cluster will elect a replacement on"
                             + " its own timeout", config.applicationName(), config.nodeId(),
                     currentTerm);
-            return false;
+            return;
         }
         log.info("cluster '{}': node {} is stopping and handing leadership of term {} to node {}",
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
         stats.onHandoverSent(target.id());
         sendTimeoutNow(target);
-        return true;
     }
 
     /**

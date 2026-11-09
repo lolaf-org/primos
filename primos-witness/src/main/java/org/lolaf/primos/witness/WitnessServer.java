@@ -15,7 +15,6 @@
  */
 package org.lolaf.primos.witness;
 
-import lombok.AllArgsConstructor;
 import lombok.Setter;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
@@ -1022,7 +1021,6 @@ public final class WitnessServer implements AutoCloseable {
      * Why datagrams did not reach an application.
      */
     @Value
-    @AllArgsConstructor
     public static class RoutingStats {
 
         /**

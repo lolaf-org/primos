@@ -98,13 +98,12 @@ final class RoutedTransport implements Transport {
     }
 
     /**
-     * Queues a datagram the server has routed here, copying it out of the shared receive buffer.
-     *
-     * @return whether it was queued rather than dropped for a full inbox
+     * Queues a datagram the server has routed here, copying it out of the shared receive buffer, unless the inbox
+     * is full.
      */
-    boolean offer(ByteBuffer datagram, InetSocketAddress source) {
+    void offer(ByteBuffer datagram, InetSocketAddress source) {
         if (closed) {
-            return false;
+            return;
         }
         if (queued.size() >= INBOX_CAPACITY) {
             overflowed++;
@@ -113,7 +112,7 @@ final class RoutedTransport implements Transport {
                                 + " traffic; {} dropped so far",
                         application, INBOX_CAPACITY, overflowed);
             }
-            return false;
+            return;
         }
         Inbound slot = free.pollFirst();
         if (slot == null) {
@@ -121,7 +120,6 @@ final class RoutedTransport implements Transport {
         }
         slot.set(datagram, source);
         queued.addLast(slot);
-        return true;
     }
 
     @Override

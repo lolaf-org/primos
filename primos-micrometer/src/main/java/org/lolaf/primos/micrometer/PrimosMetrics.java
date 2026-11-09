@@ -83,7 +83,6 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
     private final MeterRegistry registry;
     private final Tags base;
-    private final boolean learnedMembership;
 
     /**
      * The configured peer ids, in declaration order, with one extra slot past the end for
@@ -141,7 +140,6 @@ public final class PrimosMetrics implements PrimosStatsListener {
                           List<Peer> peers, boolean learnedMembership) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.base = Tags.of("application", application, "node", String.valueOf(nodeId));
-        this.learnedMembership = learnedMembership;
 
         int slots = peers.size() + 1;
         this.peerIds = new int[peers.size()];
@@ -371,10 +369,6 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
     private static String lower(String name) {
         return name.toLowerCase(Locale.ROOT);
-    }
-
-    boolean isLearnedMembership() {
-        return learnedMembership;
     }
 
     /**

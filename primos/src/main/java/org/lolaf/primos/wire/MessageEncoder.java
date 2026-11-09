@@ -163,15 +163,8 @@ public final class MessageEncoder {
         return finish(out);
     }
 
-    /**
-     * How many bytes a message of this type occupies, tag included.
-     */
-    public int sizeOf(MessageType type) {
-        return type.messageBytes() + authenticator.tagBytes();
-    }
-
     private void header(ByteBuffer out, MessageType type, int flags, long term) {
-        int needed = sizeOf(type);
+        int needed = type.messageBytes() + authenticator.tagBytes();
         if (out.capacity() < needed) {
             throw new IllegalArgumentException(
                     "buffer holds " + out.capacity() + " bytes but " + type + " needs " + needed);

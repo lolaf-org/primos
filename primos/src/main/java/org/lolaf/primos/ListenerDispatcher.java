@@ -53,14 +53,6 @@ final class ListenerDispatcher implements PrimosListener {
         listeners.add(listener);
     }
 
-    void remove(PrimosListener listener) {
-        listeners.remove(listener);
-    }
-
-    boolean isEmpty() {
-        return listeners.isEmpty();
-    }
-
     /**
      * Tells one listener what it missed.
      *

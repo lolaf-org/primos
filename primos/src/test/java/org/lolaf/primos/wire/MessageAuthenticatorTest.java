@@ -141,7 +141,7 @@ class MessageAuthenticatorTest {
         MessageAuthenticator authenticator = MessageAuthenticator.hmacSha256(SECRET);
 
         assertThat(authenticator.algorithm()).isEqualTo(MessageAuthenticator.DEFAULT_ALGORITHM);
-        assertThat(authenticator.tagBytes()).isEqualTo(WireFormat.DEFAULT_TAG_BYTES);
+        assertThat(authenticator.tagBytes()).isEqualTo(32);
     }
 
     @Test
