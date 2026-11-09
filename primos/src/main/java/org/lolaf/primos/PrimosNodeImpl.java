@@ -151,7 +151,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // Here rather than on the node thread, so a state file it cannot read fails this call.
             election.start();
         } catch (RuntimeException e) {
-            closeQuietly();
+            releaseResources();
             throw e;
         }
         running = true;
@@ -194,7 +194,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // Never started, or already stopped. Either way the store and the transport are this
             // node's to release: it made them, and a generation that never ran is still holding a
             // bound socket and an exclusive lock. Both closes are idempotent.
-            closeQuietly();
+            releaseResources();
             return;
         }
         running = false;
@@ -212,7 +212,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             Thread.currentThread().interrupt();
         } finally {
             standDown();
-            closeQuietly();
+            releaseResources();
         }
         log.info("cluster '{}': node {} stopped", config.applicationName(), config.nodeId());
     }
@@ -372,7 +372,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
                 election.runOnce(Long.MAX_VALUE);
                 election.setElectable(electable);
                 serveTransfer();
-                publish();
+                publishSnapshot();
                 if (election.isFailed()) {
                     running = false;
                 }
@@ -412,7 +412,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         dispatcher.onLeaderChanged(Optional.empty(), last.term());
     }
 
-    private void publish() {
+    private void publishSnapshot() {
         RoleAndTerm published = roleAndTerm;
         if (published.role() != election.role() || published.term() != election.currentTerm()) {
             roleAndTerm = new RoleAndTerm(election.role(), election.currentTerm());
@@ -428,7 +428,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return running;
     }
 
-    private void closeQuietly() {
+    private void releaseResources() {
         closeQuietly(transport);
         closeQuietly(store);
         transport = null;
