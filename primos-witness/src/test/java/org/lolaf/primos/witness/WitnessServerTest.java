@@ -535,6 +535,26 @@ class WitnessServerTest {
         assertThat(server.servedApplications()).containsExactly("payments");
     }
 
+    /**
+     * A name no key covers has no way to prove itself, which is not the same as a witness that holds no keys at all.
+     */
+    @Test
+    void a_name_no_key_covers_creates_nothing_on_a_witness_that_holds_keys() {
+        settings(String.join("\n", "config.source=cluster",
+                "secret.orders.value = orders-secret",
+                "secret.orders.applications = orders-*"));
+        start();
+
+        try (WitnessClient anybody = new WitnessClient("payments", 1, null, WITNESS_ID, server.boundAddress())) {
+            anybody.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications())
+                .as("reaching the port must not be enough to make a state directory here")
+                .isEmpty();
+        assertThat(server.routing().registrationBadTag()).isEqualTo(1L);
+    }
+
     @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
         settings("config.source=cluster\nsecret.shared.value=" + SECRET);

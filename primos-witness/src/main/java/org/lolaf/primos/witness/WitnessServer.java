@@ -538,7 +538,10 @@ public final class WitnessServer implements AutoCloseable {
         //
         // The keys tried are the ones that claim this name, or those claiming nothing when none
         // does, so a name somebody has reserved cannot be created by a holder of the general key.
-        if (!admissionRing(application, settings).verify(datagram)) {
+        MessageAuthenticator ring = admissionRing(application, settings);
+        // A disabled ring verifies anything, which is right only on a witness that holds no keys at all.
+        boolean covered = ring.isEnabled() || settings.keyring().isEmpty();
+        if (!covered || !ring.verify(datagram)) {
             registrationBadTag++;
             if (firstSighting) {
                 log.warn("dropping a config message for unserved application '{}' from {}: no key"
