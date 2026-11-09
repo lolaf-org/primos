@@ -165,7 +165,7 @@ public final class WitnessServer implements AutoCloseable {
      * reader when those coincide, which is a health check that fails <em>because</em> a tenant was
      * being onboarded. The loop's own use is unchanged: one writer, and lookups still hash.
      */
-    private final Map<String, Served> served = new ConcurrentHashMap<>();
+    private final Map<String, Tenant> tenants = new ConcurrentHashMap<>();
     private final Set<String> namesSeen = new HashSet<>();
 
     private volatile boolean stopped;
@@ -193,7 +193,7 @@ public final class WitnessServer implements AutoCloseable {
     private final Map<String, MessageAuthenticator> admissionRings = new HashMap<>();
 
     /** Tenants whose node could not be created. Concurrent because a health endpoint reads it from another thread. */
-    private final Set<String> unopened = ConcurrentHashMap.newKeySet();
+    private final Set<String> failedToOpen = ConcurrentHashMap.newKeySet();
 
     private WitnessServer(Builder builder) {
         this.configStore = Objects.requireNonNull(builder.configStore, "configStore");
@@ -266,7 +266,7 @@ public final class WitnessServer implements AutoCloseable {
      * Runs until {@link #stop()}.
      */
     public void run() {
-        log.info("witness {} is serving {} application(s)", nodeId, served.size());
+        log.info("witness {} is serving {} application(s)", nodeId, tenants.size());
         while (!stopped) {
             runOnce(MAX_WAIT_NANOS);
         }
@@ -286,7 +286,7 @@ public final class WitnessServer implements AutoCloseable {
         awaitReadable(wait);
         drainSocket();
 
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             if (tenant.failed) {
                 continue;
             }
@@ -318,7 +318,7 @@ public final class WitnessServer implements AutoCloseable {
     public Set<String> servedApplications() {
         // Sorted rather than in insertion order: a concurrent map has no order of its own, and a
         // set of names that reshuffles between two reads is a diagnostic nobody can diff.
-        return Collections.unmodifiableSet(new TreeSet<>(served.keySet()));
+        return Collections.unmodifiableSet(new TreeSet<>(tenants.keySet()));
     }
 
     /**
@@ -349,8 +349,8 @@ public final class WitnessServer implements AutoCloseable {
      * since that rebuilds its node.
      */
     public Set<String> quarantinedApplications() {
-        Set<String> quarantined = new TreeSet<>(unopened);
-        for (Served tenant : served.values()) {
+        Set<String> quarantined = new TreeSet<>(failedToOpen);
+        for (Tenant tenant : tenants.values()) {
             if (tenant.failed) {
                 quarantined.add(tenant.name);
             }
@@ -364,7 +364,7 @@ public final class WitnessServer implements AutoCloseable {
     public RoutingStats routing() {
         long overflowed = 0;
         long undeliverable = 0;
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             overflowed += tenant.transport.overflowed();
             undeliverable += tenant.transport.sendsDropped();
         }
@@ -393,8 +393,8 @@ public final class WitnessServer implements AutoCloseable {
         return require(application).node.votedFor();
     }
 
-    private Served require(String application) {
-        Served found = served.get(application);
+    private Tenant require(String application) {
+        Tenant found = tenants.get(application);
         if (found == null) {
             throw new IllegalArgumentException("this witness does not serve '" + application + "'");
         }
@@ -403,7 +403,7 @@ public final class WitnessServer implements AutoCloseable {
 
     private long nextDeadlineNanos(long now) {
         long deadline = configStore.nextCheckNanos(now);
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             if (!tenant.failed) {
                 deadline = Math.min(deadline, tenant.node.nextDeadlineNanos());
             }
@@ -461,7 +461,7 @@ public final class WitnessServer implements AutoCloseable {
             unroutable++;
             return;
         }
-        Served target = served.get(application);
+        Tenant target = tenants.get(application);
         if (target == null) {
             target = admit(application, datagram, MessageDecoder.peekMessageType(datagram),
                     source);
@@ -481,7 +481,7 @@ public final class WitnessServer implements AutoCloseable {
      *
      * @return the application now serving it, or null if the datagram is to be dropped
      */
-    private Served admit(String application, ByteBuffer datagram, MessageType claimed,
+    private Tenant admit(String application, ByteBuffer datagram, MessageType claimed,
                          InetSocketAddress source) {
         boolean firstSighting = rememberName(application);
         WitnessSettings settings = configStore.current().settings();
@@ -565,7 +565,7 @@ public final class WitnessServer implements AutoCloseable {
 
     private boolean limitAllows(String application, InetSocketAddress source, WitnessSettings settings,
                                 boolean firstSighting) {
-        if (served.size() < settings.clusterApplicationLimit()) {
+        if (tenants.size() < settings.clusterApplicationLimit()) {
             return true;
         }
         autoRegistrationsRefused++;
@@ -578,9 +578,9 @@ public final class WitnessServer implements AutoCloseable {
         return false;
     }
 
-    private Served register(String application, InetSocketAddress source, WitnessSettings settings) {
-        String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
-        if (!unopened.contains(application)) {
+    private Tenant register(String application, InetSocketAddress source, WitnessSettings settings) {
+        String nearMiss = ApplicationNames.nearMiss(application, tenants.keySet());
+        if (!failedToOpen.contains(application)) {
             log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
                     + " config.source=cluster is serving it anyway.", application, source);
         }
@@ -594,7 +594,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
-        Served opened = openIsolated(new ApplicationConfig(application, settings.defaultTimings(), true));
+        Tenant opened = tryOpen(new ApplicationConfig(application, settings.defaultTimings(), true));
         if (opened != null) {
             autoRegistrations++;
         }
@@ -621,7 +621,7 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
-        String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
+        String nearMiss = ApplicationNames.nearMiss(application, tenants.keySet());
         if (nearMiss != null) {
             log.warn("dropping traffic for unserved application '{}' from {}, which is one or two"
                     + " characters from '{}'. That is very likely a typo in one cluster's"
@@ -648,22 +648,22 @@ public final class WitnessServer implements AutoCloseable {
 
     private void applyConfiguration() {
         ConfigSnapshot snapshot = configStore.current();
-        unopened.clear();
-        boolean follows = follows();
-        if (!follows) {
+        failedToOpen.clear();
+        boolean following = followsStatedTimings();
+        if (!following) {
             // First, so a rebuild below for any other reason already runs on the files' intervals.
-            served.values().forEach(tenant -> tenant.adoptedTimings = null);
+            tenants.values().forEach(tenant -> tenant.adoptedTimings = null);
         }
 
         for (ApplicationConfig applicationConfig : snapshot.applications().values()) {
-            Served current = served.get(applicationConfig.name());
+            Tenant current = tenants.get(applicationConfig.name());
             if (current == null) {
-                openIsolated(applicationConfig);
+                tryOpen(applicationConfig);
             } else if (!current.config.equals(applicationConfig)) {
                 rebuild(current, applicationConfig);
             }
         }
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             boolean heldByCluster = tenant.config.isAutoRegistered() && snapshot.settings().configSource().isCluster();
             if (snapshot.serves(tenant.name) || heldByCluster) {
                 continue;
@@ -671,11 +671,11 @@ public final class WitnessServer implements AutoCloseable {
             // Its state stays on disk, deliberately. A cluster that comes back later still needs
             // the vote it was given remembered, and deleting it is the double-vote bug.
             log.info("no longer serving application '{}'; its state is left in place", tenant.name);
-            served.remove(tenant.name);
+            tenants.remove(tenant.name);
             tenant.close();
         }
-        for (Served tenant : served.values()) {
-            boolean sourceChanged = tenant.node.config().isFollowingStatedTimings() != follows;
+        for (Tenant tenant : tenants.values()) {
+            boolean sourceChanged = tenant.node.config().isFollowingStatedTimings() != following;
             if (sourceChanged || !tenant.keys.equals(keysFor(tenant.name))) {
                 rebuild(tenant, tenant.config);
             }
@@ -686,7 +686,7 @@ public final class WitnessServer implements AutoCloseable {
         return configStore.current().settings().keyring().candidatesFor(application);
     }
 
-    private Served open(ApplicationConfig applicationConfig) {
+    private Tenant open(ApplicationConfig applicationConfig) {
         String application = applicationConfig.name();
         if (!ApplicationNames.isUsableAsDirectory(application)) {
             throw new IllegalArgumentException("application name '" + application
@@ -704,11 +704,11 @@ public final class WitnessServer implements AutoCloseable {
             }
             // Before the stats factory: a tenant being retried must not bind its meters again each time.
             store.load();
-            Served opened = new Served(applicationConfig, transport, store, statsListenerFor(application));
+            Tenant opened = new Tenant(applicationConfig, transport, store, statsListenerFor(application));
             opened.keys = keysFor(application);
             opened.node = newNode(opened);
             opened.node.start();
-            served.put(application, opened);
+            tenants.put(application, opened);
             return opened;
         } catch (RuntimeException e) {
             transport.close();
@@ -722,13 +722,13 @@ public final class WitnessServer implements AutoCloseable {
      *
      * @return null if it could not be opened; a reload or its next announcement tries again
      */
-    private Served openIsolated(ApplicationConfig applicationConfig) {
+    private Tenant tryOpen(ApplicationConfig applicationConfig) {
         try {
-            Served opened = open(applicationConfig);
-            unopened.remove(applicationConfig.name());
+            Tenant opened = open(applicationConfig);
+            failedToOpen.remove(applicationConfig.name());
             return opened;
         } catch (RuntimeException e) {
-            if (unopened.size() < MAX_REMEMBERED_NAMES && unopened.add(applicationConfig.name())) {
+            if (failedToOpen.size() < MAX_REMEMBERED_NAMES && failedToOpen.add(applicationConfig.name())) {
                 log.error("application '{}' could not be opened and is not being served. Every other application is"
                         + " unaffected.", applicationConfig.name(), e);
             }
@@ -745,7 +745,7 @@ public final class WitnessServer implements AutoCloseable {
      * what it had promised. Learned addresses are kept too, in the transport, so replies keep
      * flowing without waiting for every node to speak again.
      */
-    private void rebuild(Served tenant, ApplicationConfig updated) {
+    private void rebuild(Tenant tenant, ApplicationConfig updated) {
         log.info("application '{}' was reconfigured", updated.name());
         tenant.config = updated;
         tenant.keys = keysFor(updated.name());
@@ -794,8 +794,8 @@ public final class WitnessServer implements AutoCloseable {
      * learned address: the term and the vote are on disk and are re-read, so the node comes back
      * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
      */
-    private void adoptStatedTimings(Served tenant) {
-        if (tenant.failed || !follows()) {
+    private void adoptStatedTimings(Tenant tenant) {
+        if (tenant.failed || !followsStatedTimings()) {
             return;
         }
         Timings stated = tenant.node.observedTimings();
@@ -848,7 +848,7 @@ public final class WitnessServer implements AutoCloseable {
         return new RoutedTransport(application, channel, selector);
     }
 
-    private ElectionNode newNode(Served tenant) {
+    private ElectionNode newNode(Tenant tenant) {
         ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
                 .applicationName(tenant.name)
                 .nodeId(nodeId)
@@ -856,7 +856,7 @@ public final class WitnessServer implements AutoCloseable {
                 .learnedMembership()
                 .timings(timings(tenant.config, tenant.adoptedTimings))
                 .voteLogging(voteLogging);
-        if (follows()) {
+        if (followsStatedTimings()) {
             config.followsStatedTimings();
         }
         return new ElectionNode(config.build(), tenant.store, tenant.transport, clock, random,
@@ -870,7 +870,7 @@ public final class WitnessServer implements AutoCloseable {
      * intervals in code gets them whatever any datagram says, so nothing is being followed and a
      * mismatch is a real one worth reporting.
      */
-    private boolean follows() {
+    private boolean followsStatedTimings() {
         return timingsOverride == null
                 && configStore.current().settings().configSource().isCluster();
     }
@@ -893,7 +893,7 @@ public final class WitnessServer implements AutoCloseable {
      * answer for that application would mean voting on state it may forget, so it stops; every
      * other tenant keeps its failover, because one broken disk must not be a shared outage.
      */
-    private void quarantineIfFailed(Served tenant) {
+    private void quarantineIfFailed(Tenant tenant) {
         if (tenant.failed || !tenant.node.isFailed()) {
             return;
         }
@@ -916,10 +916,10 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void closeQuietly() {
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             tenant.close();
         }
-        served.clear();
+        tenants.clear();
         try {
             configStore.close();
         } catch (RuntimeException e) {
@@ -949,7 +949,7 @@ public final class WitnessServer implements AutoCloseable {
     /**
      * One served application: its configuration, its socket view, its state and its voter.
      */
-    private static final class Served {
+    private static final class Tenant {
 
         private final String name;
         private final RoutedTransport transport;
@@ -986,7 +986,7 @@ public final class WitnessServer implements AutoCloseable {
          */
         private Timings adoptedTimings;
 
-        private Served(ApplicationConfig config, RoutedTransport transport, StateStore store,
+        private Tenant(ApplicationConfig config, RoutedTransport transport, StateStore store,
                        PrimosStatsListener stats) {
             this.name = config.name();
             this.config = config;

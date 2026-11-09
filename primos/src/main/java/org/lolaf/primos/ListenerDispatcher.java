@@ -61,30 +61,30 @@ final class ListenerDispatcher implements PrimosListener {
 
     @Override
     public void onRoleChanged(Role previous, Role current, long term) {
-        each("onRoleChanged", listener -> listener.onRoleChanged(previous, current, term));
+        deliverToAll("onRoleChanged", listener -> listener.onRoleChanged(previous, current, term));
     }
 
     @Override
     public void onLeaderChanged(Optional<Leader> leader, long term) {
-        each("onLeaderChanged", listener -> listener.onLeaderChanged(leader, term));
+        deliverToAll("onLeaderChanged", listener -> listener.onLeaderChanged(leader, term));
     }
 
     @Override
     public void onLeaderVersion(Leader leader, long term, long version) {
-        each("onLeaderVersion", listener -> listener.onLeaderVersion(leader, term, version));
+        deliverToAll("onLeaderVersion", listener -> listener.onLeaderVersion(leader, term, version));
     }
 
     @Override
     public void onPeerUp(Peer peer) {
-        each("onPeerUp", listener -> listener.onPeerUp(peer));
+        deliverToAll("onPeerUp", listener -> listener.onPeerUp(peer));
     }
 
     @Override
     public void onPeerDown(Peer peer, PeerDownReason reason) {
-        each("onPeerDown", listener -> listener.onPeerDown(peer, reason));
+        deliverToAll("onPeerDown", listener -> listener.onPeerDown(peer, reason));
     }
 
-    private void each(String event, Consumer<PrimosListener> delivery) {
+    private void deliverToAll(String event, Consumer<PrimosListener> delivery) {
         for (PrimosListener listener : listeners) {
             deliverTo(listener, event, () -> delivery.accept(listener));
         }

@@ -58,7 +58,7 @@ public final class FileConfigStore implements ConfigStore {
     private static final String APPLICATIONS_DIRECTORY = "applications";
     private static final String SETTINGS_FILE = "witness.properties";
     private static final String SUFFIX = ".properties";
-    private static final String KEY_PREFIX = "secret.";
+    private static final String SECRET_PREFIX = "secret.";
     private static final String FILE_SECRET = "file:";
     private static final String ENV_SECRET = "env:";
 
@@ -76,7 +76,7 @@ public final class FileConfigStore implements ConfigStore {
     /**
      * A checksum of the configuration as last read. A tick that produces the same one does nothing.
      */
-    private long stamp;
+    private long lastChecksum;
     private volatile ConfigSnapshot current;
     private long nextRescanNanos;
     private boolean closed;
@@ -96,7 +96,7 @@ public final class FileConfigStore implements ConfigStore {
         this.applicationsDirectory = directory.resolve(APPLICATIONS_DIRECTORY);
         this.current = read();
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
-        this.stamp = stamp();
+        this.lastChecksum = checksum();
         logServedApplications();
     }
 
@@ -242,7 +242,7 @@ public final class FileConfigStore implements ConfigStore {
      */
     private static void refuseKeysHere(String name, Properties properties) {
         for (String property : properties.stringPropertyNames()) {
-            if (property.equals("secret") || property.startsWith(KEY_PREFIX)) {
+            if (property.equals("secret") || property.startsWith(SECRET_PREFIX)) {
                 throw new IllegalArgumentException("application '" + name + "' sets '" + property
                         + "', but keys live in witness.properties as secret.<name>.value, with an"
                         + " optional secret.<name>.applications naming what each covers. Leaving"
@@ -263,10 +263,10 @@ public final class FileConfigStore implements ConfigStore {
     private Keyring readKeyring(Properties properties) {
         Set<String> names = new TreeSet<>();
         for (String property : properties.stringPropertyNames()) {
-            if (!property.startsWith(KEY_PREFIX)) {
+            if (!property.startsWith(SECRET_PREFIX)) {
                 continue;
             }
-            String rest = property.substring(KEY_PREFIX.length());
+            String rest = property.substring(SECRET_PREFIX.length());
             int dot = rest.indexOf('.');
             if (dot <= 0) {
                 throw new IllegalArgumentException("'" + property + "' names no key: a secret is"
@@ -277,15 +277,15 @@ public final class FileConfigStore implements ConfigStore {
         }
         List<WitnessKey> keys = new ArrayList<>(names.size());
         for (String name : names) {
-            byte[] secret = secretValue(properties, KEY_PREFIX + name + ".value", directory);
+            byte[] secret = secretValue(properties, SECRET_PREFIX + name + ".value", directory);
             if (secret == null) {
                 throw new IllegalArgumentException("key '" + name + "' has no "
-                        + KEY_PREFIX + name + ".value; a key without a secret cannot verify"
+                        + SECRET_PREFIX + name + ".value; a key without a secret cannot verify"
                         + " anything and is more likely a typo than an intention");
             }
             keys.add(new WitnessKey(name, secret,
-                    properties.getProperty(KEY_PREFIX + name + ".algorithm"),
-                    splitPatterns(properties.getProperty(KEY_PREFIX + name + ".applications"))));
+                    properties.getProperty(SECRET_PREFIX + name + ".algorithm"),
+                    splitPatterns(properties.getProperty(SECRET_PREFIX + name + ".applications"))));
         }
         return new Keyring(keys);
     }
@@ -302,13 +302,13 @@ public final class FileConfigStore implements ConfigStore {
         }
         nextRescanNanos = nowNanos + current.settings().rescanInterval().toNanos();
 
-        long seen = stamp();
-        if (seen == stamp) {
+        long seen = checksum();
+        if (seen == lastChecksum) {
             // The common case by an enormous margin, and it costs a handful of stats rather than
             // parsing every file to discover nothing moved.
             return false;
         }
-        stamp = seen;
+        lastChecksum = seen;
         return reload();
     }
 
@@ -405,7 +405,7 @@ public final class FileConfigStore implements ConfigStore {
      * keep the length and land on the same coarse timestamp. {@link CRC32} because this detects an
      * edit, it does not defend against one.
      */
-    private long stamp() {
+    private long checksum() {
         CRC32 sum = new CRC32();
         absorb(sum, directory.resolve(SETTINGS_FILE));
         currentSecretFiles().forEach(file -> absorb(sum, file));
@@ -452,7 +452,7 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     private static boolean isSecretValue(String key) {
-        return key.startsWith(KEY_PREFIX) && key.endsWith(".value");
+        return key.startsWith(SECRET_PREFIX) && key.endsWith(".value");
     }
 
     private static boolean holdsInlineSecret(Properties properties) {
