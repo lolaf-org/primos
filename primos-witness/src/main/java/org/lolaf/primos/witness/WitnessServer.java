@@ -211,10 +211,8 @@ public final class WitnessServer implements AutoCloseable {
                 : StateStoreFactory.perApplicationDirectory(settings.stateDirectory());
 
         try {
-            this.channel = DatagramChannel.open();
-            this.channel.configureBlocking(false);
-            setReceiveBuffer(builder.receiveBufferBytes);
-            this.channel.bind(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress());
+            this.channel = boundChannel(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress(),
+                    builder.receiveBufferBytes);
             this.selector = Selector.open();
             this.channel.register(selector, SelectionKey.OP_READ);
         } catch (IOException e) {
@@ -875,7 +873,20 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    private void setReceiveBuffer(int bytes) {
+    private static DatagramChannel boundChannel(InetSocketAddress address, int receiveBufferBytes) throws IOException {
+        DatagramChannel channel = DatagramChannel.open();
+        try {
+            channel.configureBlocking(false);
+            setReceiveBuffer(channel, receiveBufferBytes);
+            channel.bind(address);
+            return channel;
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
+    }
+
+    private static void setReceiveBuffer(DatagramChannel channel, int bytes) {
         try {
             channel.setOption(StandardSocketOptions.SO_RCVBUF, bytes);
         } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
