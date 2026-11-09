@@ -873,8 +873,8 @@ class PrimosNodeTest {
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
-            delegate.send(peerId, datagram);
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
+            return delegate.send(peerId, datagram);
         }
 
         @Override
@@ -884,11 +884,6 @@ class PrimosNodeTest {
                 throw failure;
             }
             return delegate.poll(Math.min(timeoutNanos, TimeUnit.MILLISECONDS.toNanos(5)), handler);
-        }
-
-        @Override
-        public long sendsDropped() {
-            return delegate.sendsDropped();
         }
 
         @Override

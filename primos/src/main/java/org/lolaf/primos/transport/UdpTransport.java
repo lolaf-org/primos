@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
@@ -82,27 +83,6 @@ public final class UdpTransport implements Transport {
 
     private SocketAddress currentSource;
     private volatile boolean closed;
-
-    /**
-     * How many sends the socket itself rejected. Routine on UDP; a rising rate is not.
-     */
-    @Getter
-    private long sendFailures;
-
-    /**
-     * Sends attempted after {@link #close}. Expected during shutdown, and harmless.
-     */
-    @Getter
-    private long sendsWhileClosed;
-
-    /**
-     * Sends addressed to a peer this transport was not configured with.
-     *
-     * <p>Should stay at zero. Unlike the others this is not a network condition: it means
-     * something asked for a peer id that was never in the configuration.
-     */
-    @Getter
-    private long sendsToUnknownPeer;
 
     /**
      * How many times a peer has been observed at a new address.
@@ -184,24 +164,19 @@ public final class UdpTransport implements Transport {
     }
 
     @Override
-    public void send(int peerId, ByteBuffer datagram) {
-        // Every path out of here that does not put bytes on the wire is counted, because the SPI
-        // promises a failed send is counted and logged rather than propagated, and a send that
-        // returns without doing either is indistinguishable from a working one. A failed send is
-        // logged at debug: heartbeats are every 50ms per peer, so a visible level would turn a
-        // broken peer into a second outage.
+    public SendDropReason send(int peerId, ByteBuffer datagram) {
+        // A failed send is logged at debug: heartbeats are every 50ms per peer, so a visible level
+        // would turn a broken peer into a second outage.
         if (closed) {
-            sendsWhileClosed++;
-            return;
+            return SendDropReason.TRANSPORT_CLOSED;
         }
         InetSocketAddress target = addresses.get(peerId);
         if (target == null) {
             // Not a network condition: this node was asked for a peer it was never configured
             // with, which is a bug in the caller rather than a lost datagram. Every configured
             // peer has an address, because one that did not resolve refused to build.
-            sendsToUnknownPeer++;
             log.warn("cluster '{}': asked to send to peer {}, which is not a configured peer", clusterName, peerId);
-            return;
+            return SendDropReason.NO_ADDRESS;
         }
         try {
             // Always from the bound socket, never a transient one, so a peer sees this node's
@@ -209,19 +184,20 @@ public final class UdpTransport implements Transport {
             // keeps a NAT pinhole usable in both directions.
             int bytes = datagram.remaining();
             if (channel.send(datagram, target) < bytes) {
-                sendFailures++;
                 if (log.isDebugEnabled()) {
                     log.debug("cluster '{}': no room in the socket to send to peer {} at {}", clusterName, peerId, target);
                 }
+                return SendDropReason.SOCKET_ERROR;
             }
+            return null;
         } catch (IOException | RuntimeException e) {
             // Sends fail routinely on UDP, and an ICMP port-unreachable can surface here long
             // after the fact. The algorithm's timers are the retry mechanism, so this must never
             // become a node failure.
-            sendFailures++;
             if (log.isDebugEnabled()) {
                 log.debug("cluster '{}': send to peer {} at {} failed: {}", clusterName, peerId, target, e.toString());
             }
+            return SendDropReason.SOCKET_ERROR;
         }
     }
 
@@ -314,19 +290,6 @@ public final class UdpTransport implements Transport {
         } catch (IOException e) {
             log.debug("closing the selector failed", e);
         }
-    }
-
-    /**
-     * Every datagram this transport did not put on the wire, for any reason.
-     *
-     * <p>The one number worth alerting on. A healthy node's is flat: the individual counters below
-     * separate a network that is refusing traffic from a bug in the caller, and those want very
-     * different responses. A name that will not resolve is not among them: that is refused at
-     * construction rather than counted here.
-     */
-    @Override
-    public long sendsDropped() {
-        return sendFailures + sendsWhileClosed + sendsToUnknownPeer;
     }
 
     private void setReceiveBuffer(int bytes) {

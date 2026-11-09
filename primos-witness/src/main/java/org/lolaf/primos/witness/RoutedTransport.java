@@ -19,6 +19,7 @@ import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.wire.WireFormat;
@@ -81,18 +82,7 @@ final class RoutedTransport implements Transport {
     // Volatile for the metrics thread reading the totals; the server thread is the only writer.
     private volatile long overflowed;
 
-    /**
-     * Replies this application could not address to anybody.
-     *
-     * <p>Expected to stay at zero. A witness only ever answers, and an answer is addressed to the
-     * source of the datagram being answered even before that node has been learned, so anything
-     * counted here means a send went looking for a node outside a reply, which a witness has no
-     * reason to do.
-     */
-    private volatile long undeliverable;
-
-    private volatile long sendFailures;
-    private volatile long sendsWhileClosed;
+    private volatile long sendsDropped;
 
     /**
      * Queues a datagram the server has routed here, copying it out of the shared receive buffer, unless the inbox
@@ -120,10 +110,10 @@ final class RoutedTransport implements Transport {
     }
 
     @Override
-    public void send(int peerId, ByteBuffer datagram) {
+    public SendDropReason send(int peerId, ByteBuffer datagram) {
         if (closed) {
-            sendsWhileClosed++;
-            return;
+            sendsDropped++;
+            return SendDropReason.TRANSPORT_CLOSED;
         }
         InetSocketAddress target = endpoints.get(peerId);
         if (target == null) {
@@ -139,27 +129,30 @@ final class RoutedTransport implements Transport {
         if (target == null) {
             // Not a reply, and nobody to send to. The witness only ever answers, so it can have no
             // address for a node that has never spoken to it.
-            undeliverable++;
-            return;
+            sendsDropped++;
+            return SendDropReason.NO_ADDRESS;
         }
         try {
             int bytes = datagram.remaining();
             if (channel.send(datagram, target) < bytes) {
-                sendFailures++;
+                sendsDropped++;
                 if (log.isDebugEnabled()) {
                     log.debug("cluster '{}': no room in the socket to reply to node {} at {}", application, peerId, target);
                 }
+                return SendDropReason.SOCKET_ERROR;
             }
+            return null;
         } catch (IOException | RuntimeException e) {
             // Routine on UDP, and an ICMP port-unreachable can surface here long after the fact.
-            // The algorithm's timers are the retry mechanism, so this must never become a failure,
-            //but it is counted, because a reply this witness never managed to send is the
-            // difference between a cluster failing over and a cluster waiting.
-            sendFailures++;
+            // The algorithm's timers are the retry mechanism, so this must never become a failure.
+            // It is still reported: a reply this witness never managed to send is the difference
+            // between a cluster failing over and a cluster waiting.
+            sendsDropped++;
             if (log.isDebugEnabled()) {
                 log.debug("cluster '{}': send to node {} at {} failed: {}",
                         application, peerId, target, e.toString());
             }
+            return SendDropReason.SOCKET_ERROR;
         }
     }
 
@@ -263,16 +256,8 @@ final class RoutedTransport implements Transport {
         return overflowed;
     }
 
-    /**
-     * Every reply this transport did not put on the wire, for any reason.
-     *
-     * <p>Counted for the same reason the node's transport counts them: a send that returns without
-     * either sending or recording anything is indistinguishable from one that worked, and a
-     * witness that silently fails to answer looks exactly like a witness nobody is asking.
-     */
-    @Override
-    public long sendsDropped() {
-        return undeliverable + sendFailures + sendsWhileClosed;
+    long sendsDropped() {
+        return sendsDropped;
     }
 
     /**

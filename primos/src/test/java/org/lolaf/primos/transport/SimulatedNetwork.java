@@ -16,6 +16,7 @@
 package org.lolaf.primos.transport;
 
 import lombok.Getter;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.time.VirtualClock;
 
 import java.nio.ByteBuffer;
@@ -325,24 +326,18 @@ public final class SimulatedNetwork {
 
         private final int nodeId;
         private boolean closed;
-        private long sendsDropped;
 
         private SimulatedTransport(int nodeId) {
             this.nodeId = nodeId;
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
             if (closed) {
-                sendsDropped++;
-                return;
+                return SendDropReason.TRANSPORT_CLOSED;
             }
             enqueue(nodeId, peerId, datagram);
-        }
-
-        @Override
-        public long sendsDropped() {
-            return sendsDropped;
+            return null;
         }
 
         @Override

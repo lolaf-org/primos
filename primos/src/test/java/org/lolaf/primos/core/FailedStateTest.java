@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.Role;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.store.StateStoreException;
 import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.transport.DatagramHandler;
@@ -209,21 +210,14 @@ class FailedStateTest {
 
         private final Throwable failure;
 
-        private long sendsDropped;
-
         private ThrowingTransport(Throwable failure) {
             this.failure = failure;
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
             // Nothing goes anywhere, and the SPI says a transport must be able to say so.
-            sendsDropped++;
-        }
-
-        @Override
-        public long sendsDropped() {
-            return sendsDropped;
+            return SendDropReason.NO_ADDRESS;
         }
 
         @Override

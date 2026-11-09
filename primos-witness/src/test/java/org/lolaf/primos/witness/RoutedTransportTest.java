@@ -25,11 +25,13 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.Selector;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import org.lolaf.primos.SendDropReason;
 
 /**
- * A reply the socket had no room for is a reply that never left, and is counted like one.
+ * A reply the socket had no room for is a reply that never left, and is reported like one.
  */
 class RoutedTransportTest {
 
@@ -37,22 +39,23 @@ class RoutedTransportTest {
     private static final int NODE = 1;
 
     @Test
-    void a_reply_the_socket_had_no_room_for_is_counted() throws IOException {
-        assertThat(sendsDroppedWhenChannelAccepts(0)).isEqualTo(1);
+    void a_reply_the_socket_had_no_room_for_is_reported() throws IOException {
+        assertThat(outcomeWhenChannelAccepts(0)).isEqualTo(SendDropReason.SOCKET_ERROR);
     }
 
     @Test
-    void a_reply_the_socket_took_whole_is_not_counted() throws IOException {
-        assertThat(sendsDroppedWhenChannelAccepts(REPLY_BYTES)).isZero();
+    void a_reply_the_socket_took_whole_reports_nothing() throws IOException {
+        assertThat(outcomeWhenChannelAccepts(REPLY_BYTES)).isNull();
     }
 
-    private static long sendsDroppedWhenChannelAccepts(int bytes) throws IOException {
+    private static SendDropReason outcomeWhenChannelAccepts(int bytes) throws IOException {
         DatagramChannel channel = mock(DatagramChannel.class);
         when(channel.send(any(), any())).thenReturn(bytes);
+        AtomicReference<SendDropReason> outcome = new AtomicReference<>();
         try (RoutedTransport transport = new RoutedTransport("orders", channel, mock(Selector.class))) {
             transport.offer(ByteBuffer.allocate(REPLY_BYTES), new InetSocketAddress("127.0.0.1", 7000));
-            transport.poll(0L, datagram -> transport.send(NODE, ByteBuffer.allocate(REPLY_BYTES)));
-            return transport.sendsDropped();
+            transport.poll(0L, datagram -> outcome.set(transport.send(NODE, ByteBuffer.allocate(REPLY_BYTES))));
+            return outcome.get();
         }
     }
 }

@@ -18,6 +18,7 @@ package org.lolaf.primos.core;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.transport.DatagramHandler;
@@ -294,14 +295,20 @@ class LoopAllocationTest {
     private static final class ReplayingTransport implements Transport {
 
         private final ByteBuffer datagram;
+        private final SendDropReason sendOutcome;
 
         private ReplayingTransport(ByteBuffer datagram) {
+            this(datagram, null);
+        }
+
+        private ReplayingTransport(ByteBuffer datagram, SendDropReason sendOutcome) {
             this.datagram = datagram;
+            this.sendOutcome = sendOutcome;
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
-            // nothing to do
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
+            return sendOutcome;
         }
 
         @Override
@@ -312,11 +319,6 @@ class LoopAllocationTest {
             datagram.position(0).limit(datagram.capacity());
             handler.onDatagram(datagram);
             return 1;
-        }
-
-        @Override
-        public long sendsDropped() {
-            return 0;
         }
 
         @Override
