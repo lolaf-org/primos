@@ -23,7 +23,7 @@ import java.util.Optional;
  *
  * <p>Every method has a default implementation, so implement only what you care about.
  *
- * <p><strong>Callbacks run on a thread of the node's own</strong>, never the one sending heartbeats, so a slow
+ * <p><strong>Callbacks run on a dedicated events thread</strong>, never the one sending heartbeats, so a slow
  * listener cannot stall consensus. It does delay every event behind it, so the role you are told about may have
  * moved on; a watchdog warns when a callback runs long.
  *

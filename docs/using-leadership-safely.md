@@ -36,9 +36,10 @@ takes, and check it when it ends, not on your next poll. Handing leadership over
 
 ## Keep callbacks short
 
-Listener callbacks run one at a time on a thread of the node's own, so a slow one cannot make this node miss heartbeats.
-It does delay every event behind it, so by the time a callback runs the role may have moved on: act on the term it was
-given, and hand long work to your own executor. A callback slower than half the heartbeat interval is logged.
+Listener callbacks run one at a time on a dedicated events thread, not the node thread, so a slow one cannot make this
+node miss heartbeats. It does delay every event behind it, so by the time a callback runs the role may have moved on:
+act on the term it was given, and hand long work to your own executor. A callback slower than half the heartbeat
+interval is logged.
 
 ## Treat `FAILED` as a restart signal
 

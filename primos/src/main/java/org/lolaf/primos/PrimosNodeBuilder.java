@@ -88,7 +88,7 @@ public final class PrimosNodeBuilder {
     private PrimosStatsListener statsListener = PrimosStatsListener.NONE;
 
     /**
-     * Where listener callbacks run. By default a thread of the node's own, which keeps a slow listener from stalling
+     * Where listener callbacks run. By default a dedicated events thread, which keeps a slow listener from stalling
      * consensus. One supplied here must run tasks one at a time, in order, without blocking the caller.
      */
     @Setter

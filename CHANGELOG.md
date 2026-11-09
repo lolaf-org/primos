@@ -26,8 +26,9 @@ state.
 - **Leader election.** `PrimosNode` joins a cluster described by a `ClusterConfig` and reports its role, its term and
   the current leader, through calls and through `PrimosListener` callbacks. Pre-vote stops a node that was cut off from
   forcing an election when it comes back, and a leader that loses contact with a majority stands down instead of
-  believing it still leads. Callbacks run in order on a thread of the node's own, so a slow listener delays later events
-  but cannot stall the election; supply a `listenerExecutor` to run them elsewhere.
+  believing it still leads. Callbacks run in order on a dedicated events thread, separate from the one running the
+  election, so a slow listener delays later events but cannot stall it; supply a `listenerExecutor` to run them
+  elsewhere.
 - **The term as a fencing token.** `roleAndTerm()` reads the role and the term together, so work done as leader can
   carry the term to an external system that rejects anything older. The documentation explains why a role check alone
   is not enough.

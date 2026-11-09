@@ -66,13 +66,13 @@ Every `PrimosListener` method has a default, so override only what you need: `on
 `onLeaderVersion`, `onPeerUp`, `onPeerDown`. `onLeaderVersion` says the leader's own data changed; see
 [Leader data](leader-data.md).
 
-**Callbacks run one at a time on a thread of the node's own.** A slow one cannot hold up heartbeats, but it delays every
-event behind it, so hand long work to your own executor. A callback slower than half the heartbeat interval is logged as
-such, and `stop()` waits for queued callbacks, up to its stop timeout.
+**Callbacks run one at a time on a dedicated events thread, not the node thread.** A slow one cannot hold up
+heartbeats, but it delays every event behind it, so hand long work to your own executor. A callback slower than half the
+heartbeat interval is logged as such, and `stop()` waits for queued callbacks, up to its stop timeout.
 
 `listenerExecutor` replaces that thread. Yours must run tasks one at a time, in order, and never block the caller: an
-ordinary pool can deliver `LEADER` after the `FOLLOWER` that followed it, and one that runs tasks on the caller puts your
-listeners back on the node thread.
+ordinary pool can deliver `LEADER` after the `FOLLOWER` that followed it, and one that runs tasks on the caller puts
+your listeners back on the node thread.
 
 What you branch on is a plain call: `role()`, `roleAndTerm()`, `leader()`, `isRunning()`. Read
 [Using leadership safely](using-leadership-safely.md) before branching on any of them.
