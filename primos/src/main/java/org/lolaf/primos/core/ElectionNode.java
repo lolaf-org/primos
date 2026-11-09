@@ -1401,10 +1401,17 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void send(int peerId, ByteBuffer datagram) {
+        SendDropReason dropped;
         try {
-            transport.send(peerId, datagram);
+            dropped = transport.send(peerId, datagram);
         } catch (RuntimeException e) {
-            log.debug("node {} could not send to {}: {}", config.nodeId(), peerId, e.toString());
+            dropped = SendDropReason.SOCKET_ERROR;
+            if (log.isDebugEnabled()) {
+                log.debug("node {} could not send to {}: {}", config.nodeId(), peerId, e.toString());
+            }
+        }
+        if (dropped != null) {
+            stats.onSendDropped(dropped);
         }
     }
 

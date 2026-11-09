@@ -174,6 +174,20 @@ class LoopAllocationTest {
     }
 
     /**
+     * A socket refusing every send is one event per datagram on the timer path, and a listener told about each must
+     * cost what it costs when they all leave.
+     */
+    @Test
+    void a_counting_listener_told_of_refused_sends_adds_nothing() {
+        Counting told = new Counting();
+        long leaving = bytesPerTurn(witness(new ReplayingTransport(null), new Counting()));
+        long refused = bytesPerTurn(witness(new ReplayingTransport(null, SendDropReason.SOCKET_ERROR), told));
+
+        assertThat(refused - leaving).isLessThan(8L);
+        assertThat(told.events).as("otherwise the measurement above is vacuous").isPositive();
+    }
+
+    /**
      * The negative pair, and it earned itself immediately: the first version of the measurement
      * above replayed a <em>heartbeat</em>, which fires no stats event at all, so it was weighing a
      * listener that was never called.
@@ -242,6 +256,10 @@ class LoopAllocationTest {
     }
 
     private ElectionNode witness(Transport transport) {
+        return witness(transport, org.lolaf.primos.PrimosStatsListener.NONE);
+    }
+
+    private ElectionNode witness(Transport transport, org.lolaf.primos.PrimosStatsListener stats) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
@@ -250,7 +268,8 @@ class LoopAllocationTest {
                         Peer.application(PEER_B, "sim", 7002)))
                 .build();
         ElectionNode node = new ElectionNode(config, new MemoryStateStore(), transport, clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new org.lolaf.primos.PrimosListener() {
+                }, stats);
         node.start();
         return node;
     }
@@ -269,6 +288,11 @@ class LoopAllocationTest {
 
         @Override
         public void onDatagramDropped(org.lolaf.primos.DropReason reason) {
+            events++;
+        }
+
+        @Override
+        public void onSendDropped(SendDropReason reason) {
             events++;
         }
 

@@ -108,6 +108,13 @@ final class CompositeStatsListener implements PrimosStatsListener {
     }
 
     @Override
+    public void onSendDropped(SendDropReason reason) {
+        for (PrimosStatsListener sink : sinks) {
+            sink.onSendDropped(reason);
+        }
+    }
+
+    @Override
     public void onTimingMismatch(int peerId) {
         for (PrimosStatsListener sink : sinks) {
             sink.onTimingMismatch(peerId);

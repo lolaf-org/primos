@@ -54,10 +54,14 @@ public final class RecordingStats implements PrimosStatsListener {
     public final List<Long> leaderlessPeriods = new ArrayList<>();
 
     private final Map<DropReason, AtomicLong> drops = new EnumMap<>(DropReason.class);
+    private final Map<SendDropReason, AtomicLong> sendDrops = new EnumMap<>(SendDropReason.class);
 
     public RecordingStats() {
         for (DropReason reason : DropReason.values()) {
             drops.put(reason, new AtomicLong());
+        }
+        for (SendDropReason reason : SendDropReason.values()) {
+            sendDrops.put(reason, new AtomicLong());
         }
     }
 
@@ -128,6 +132,11 @@ public final class RecordingStats implements PrimosStatsListener {
     }
 
     @Override
+    public void onSendDropped(SendDropReason reason) {
+        sendDrops.get(reason).incrementAndGet();
+    }
+
+    @Override
     public void onTimingMismatch(int peerId) {
         timingMismatches.incrementAndGet();
     }
@@ -140,6 +149,18 @@ public final class RecordingStats implements PrimosStatsListener {
     @Override
     public void onPeerForgotten(int peerId) {
         peersForgotten.incrementAndGet();
+    }
+
+    public long sendDrops(SendDropReason reason) {
+        return sendDrops.get(reason).get();
+    }
+
+    public long sendsDropped() {
+        long total = 0;
+        for (AtomicLong count : sendDrops.values()) {
+            total += count.get();
+        }
+        return total;
     }
 
     public long drops(DropReason reason) {

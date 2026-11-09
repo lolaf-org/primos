@@ -180,6 +180,12 @@ public interface PrimosStatsListener {
     }
 
     /**
+     * A datagram this node sent never reached the network, and why. Called on every such send.
+     */
+    default void onSendDropped(SendDropReason reason) {
+    }
+
+    /**
      * A peer was seen running different intervals from this node's.
      *
      * <p>Fired on the transition into disagreement, not per datagram: a peer that stays

@@ -150,6 +150,15 @@ final class GuardedStatsListener implements PrimosStatsListener {
     }
 
     @Override
+    public void onSendDropped(SendDropReason reason) {
+        try {
+            sink.onSendDropped(reason);
+        } catch (RuntimeException e) {
+            failed("onSendDropped", e);
+        }
+    }
+
+    @Override
     public void onTimingMismatch(int peerId) {
         try {
             sink.onTimingMismatch(peerId);
