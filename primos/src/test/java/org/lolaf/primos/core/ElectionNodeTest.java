@@ -42,6 +42,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ElectionNodeTest {
 
+    /** These vote the moment a node starts, inside the window an ordinary candidate is refused for. */
+    private static final boolean HANDOVER = true;
+
     private final VirtualClock clock = new VirtualClock();
     private final SimulatedNetwork network = new SimulatedNetwork(1L, clock);
     private final RecordingStats recorded = new RecordingStats();
@@ -122,7 +125,7 @@ class ElectionNodeTest {
     @Test
     void a_vote_granted_before_a_crash_is_still_binding_after_it() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
 
         assertThat(node.currentTerm()).isEqualTo(5);
         assertThat(node.votedFor()).isEqualTo(2);
@@ -134,7 +137,7 @@ class ElectionNodeTest {
                 .isEqualTo(5);
         assertThat(restarted.votedFor()).isEqualTo(2);
 
-        restarted.onRequestVote(3, 5, false);
+        restarted.onRequestVote(3, 5, false, HANDOVER);
 
         assertThat(restarted.votedFor())
                 .as("granting a second vote in term 5 would let two candidates each win")
@@ -145,8 +148,8 @@ class ElectionNodeTest {
     void a_second_request_from_the_same_candidate_is_answered_the_same_way() {
         ElectionNode node = startedNode();
 
-        node.onRequestVote(2, 5, false);
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
+        node.onRequestVote(2, 5, false, HANDOVER);
 
         assertThat(node.votedFor())
                 .as("a duplicated request must be idempotent, not a refusal")
@@ -156,7 +159,7 @@ class ElectionNodeTest {
     @Test
     void a_higher_term_clears_the_vote_that_belonged_to_the_old_one() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
         assertThat(node.votedFor()).isEqualTo(2);
 
         node.onAppendEntries(3, 6, 0, 0);
@@ -219,7 +222,7 @@ class ElectionNodeTest {
     @Test
     void a_heartbeat_from_a_stale_leader_is_refused_and_does_not_move_the_term() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 7, false);
+        node.onRequestVote(2, 7, false, HANDOVER);
 
         node.onAppendEntries(3, 4, 0, 0);
 
@@ -316,7 +319,7 @@ class ElectionNodeTest {
         }, recorded);
         witness.start();
 
-        witness.onRequestVote(1, 3, false);
+        witness.onRequestVote(1, 3, false, HANDOVER);
 
         assertThat(witness.votedFor()).isEqualTo(1);
         assertThat(witness.currentTerm()).isEqualTo(3);
@@ -327,7 +330,7 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
         node.onAppendEntries(2, 1, 0, 0);
 
-        node.onRequestVote(3, 99, true);
+        node.onRequestVote(3, 99, true, false);
 
         CapturedReply reply = new CapturedReply("t").drain(network.transportFor(3));
         assertThat(reply.granted())
@@ -342,7 +345,7 @@ class ElectionNodeTest {
         node.onAppendEntries(2, 1, 0, 0);
         clock.advance(Duration.ofSeconds(1));
 
-        node.onRequestVote(3, 2, true);
+        node.onRequestVote(3, 2, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted()).isTrue();
     }
@@ -351,9 +354,9 @@ class ElectionNodeTest {
     void a_pre_vote_is_refused_for_an_election_timeout_after_granting_a_vote() {
         ElectionNode node = startedNode();
         clock.advance(Duration.ofSeconds(1));
-        node.onRequestVote(2, 1, false);
+        node.onRequestVote(2, 1, false, HANDOVER);
 
-        node.onRequestVote(3, 2, true);
+        node.onRequestVote(3, 2, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted())
                 .as("node 2 may lead from its election on, and its lease counts on this refusal")
@@ -366,7 +369,7 @@ class ElectionNodeTest {
         clock.advance(Duration.ofSeconds(1));
         long termBefore = node.currentTerm();
 
-        node.onRequestVote(3, 500, true);
+        node.onRequestVote(3, 500, true, false);
 
         assertThat(node.currentTerm())
                 .as("a pre-vote carrying a huge term must not inflate ours: that is the whole point")
@@ -385,7 +388,7 @@ class ElectionNodeTest {
         node.onRequestVoteReply(3, node.currentTerm(), true, false);
         assertThat(node.role()).isEqualTo(Role.LEADER);
 
-        node.onRequestVote(4, node.currentTerm() + 1, true);
+        node.onRequestVote(4, node.currentTerm() + 1, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(4)).granted()).isFalse();
     }
@@ -395,7 +398,7 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
         clock.advance(Duration.ofSeconds(1));
 
-        node.onRequestVote(3, 42, true);
+        node.onRequestVote(3, 42, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).replyTerm())
                 .isEqualTo(42);

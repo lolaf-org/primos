@@ -72,7 +72,7 @@ final class WitnessTestClient implements AutoCloseable {
      * test.
      */
     Boolean requestVote(long term, Duration timeout) {
-        write(encoder.requestVote(send, term, false));
+        write(encoder.handoverVote(send, term));
         Reply reply = awaitReply(timeout, received -> received.answered);
         return reply == null ? null : reply.granted;
     }
@@ -153,7 +153,7 @@ final class WitnessTestClient implements AutoCloseable {
         }
 
         @Override
-        public void onRequestVote(int senderId, long term, boolean preVote) {
+        public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
             // nothing to do
         }
 

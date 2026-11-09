@@ -650,7 +650,7 @@ public final class ElectionNode implements MessageHandler {
         log.debug("node {} is asking whether term {} would elect it", config.nodeId(), preVoteTerm);
 
         if (quorum.isReached(preVotesGranted.size())) {
-            startElection();
+            startElection(false);
             return;
         }
         for (TrackedPeer trackedPeer : peers) {
@@ -698,7 +698,7 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    private void startElection() {
+    private void startElection(boolean handover) {
         abandonPreVote();
         currentTerm++;
         votedFor = config.nodeId();
@@ -720,7 +720,9 @@ public final class ElectionNode implements MessageHandler {
             return;
         }
         for (TrackedPeer trackedPeer : peers) {
-            send(trackedPeer.peer.id(), encoder.requestVote(sendBuffer, currentTerm, false));
+            send(trackedPeer.peer.id(), handover
+                    ? encoder.handoverVote(sendBuffer, currentTerm)
+                    : encoder.requestVote(sendBuffer, currentTerm, false));
         }
     }
 
@@ -808,7 +810,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     @Override
-    public void onRequestVote(int senderId, long term, boolean preVote) {
+    public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
         if (preVote) {
             // Deliberately no step-down, no persistence and no timer reset. A pre-vote must be
             // answerable without changing anything, or it would inflate terms exactly as the real
@@ -823,6 +825,16 @@ public final class ElectionNode implements MessageHandler {
                             + " term is ahead",
                     config.applicationName(), config.nodeId(), senderId, term);
             send(senderId, encoder.requestVoteReply(sendBuffer, term, would, true));
+            return;
+        }
+        // Departure from the paper's figure 2, per thesis section 4.2.3: a pre-vote granted before a heartbeat would
+        // otherwise elect a successor during the lease that heartbeat renewed. A repeat of this term's vote is exempt,
+        // and a handover, which the leader asked for.
+        boolean alreadyThisVoter = term == currentTerm && votedFor == senderId;
+        if (!handover && !alreadyThisVoter && term >= currentTerm && !wouldGrantVote(term, clock.nanoTime())) {
+            logVote("cluster '{}': node {} refused node {} a vote for term {}; it has heard from a leader too recently",
+                    config.applicationName(), config.nodeId(), senderId, term);
+            send(senderId, encoder.requestVoteReply(sendBuffer, currentTerm, false, false));
             return;
         }
         if (term > currentTerm) {
@@ -866,7 +878,7 @@ public final class ElectionNode implements MessageHandler {
                 logVote("cluster '{}': node {} has {} of the {} pre-votes it needs for term {}, after node {} agreed",
                         config.applicationName(), config.nodeId(), preVotesGranted.size(), quorum.required(), term, senderId);
                 if (quorum.isReached(preVotesGranted.size())) {
-                    startElection();
+                    startElection(false);
                 }
             }
             return;
@@ -1059,7 +1071,7 @@ public final class ElectionNode implements MessageHandler {
         stats.onHandoverAccepted(currentTerm);
         log.info("cluster '{}': node {} is campaigning immediately, handed over by node {} in"
                 + " term {}", config.applicationName(), config.nodeId(), senderId, term);
-        startElection();
+        startElection(true);
     }
 
     /**

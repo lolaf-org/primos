@@ -68,7 +68,7 @@ final class CapturedReply implements MessageHandler {
     }
 
     @Override
-    public void onRequestVote(int senderId, long term, boolean preVote) {
+    public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
         messages.add("requestVote/" + term + (preVote ? "/pre" : ""));
     }
 

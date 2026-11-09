@@ -248,6 +248,40 @@ class InvariantsTest {
     }
 
     @Test
+    void a_successor_during_an_older_leader_s_lease_is_caught() {
+        ScriptedNode older = add(1);
+        ScriptedNode newer = add(2);
+        simulation.checking(Invariants.noSuccessorDuringALease(java.time.Duration.ofSeconds(1),
+                node -> node == older ? clock.nanoTime() : Long.MIN_VALUE));
+
+        older.forceTerm(3);
+        older.becomeLeader();
+        simulation.step();
+        newer.forceTerm(4);
+        newer.becomeLeader();
+
+        assertThatThrownBy(simulation::step)
+                .isInstanceOf(SimulationFailure.class)
+                .hasMessageContaining("node 2 leads term 4 while node 1 still holds a lease in term 3");
+    }
+
+    @Test
+    void a_successor_after_the_lease_has_ended_is_fine() {
+        ScriptedNode older = add(1);
+        ScriptedNode newer = add(2);
+        long confirmedAt = clock.nanoTime() - java.time.Duration.ofSeconds(2).toNanos();
+        simulation.checking(Invariants.noSuccessorDuringALease(java.time.Duration.ofSeconds(1),
+                node -> node == older ? confirmedAt : Long.MIN_VALUE));
+
+        older.forceTerm(3);
+        older.becomeLeader();
+        newer.forceTerm(4);
+        newer.becomeLeader();
+
+        assertThatCode(simulation::step).doesNotThrowAnyException();
+    }
+
+    @Test
     void a_failure_names_the_seed_so_it_can_be_replayed() {
         Simulation seeded = new Simulation(123456789L);
         ScriptedNode one = ScriptedNode.idle(1, seeded.clock(), new MemoryStateStore());

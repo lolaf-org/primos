@@ -78,6 +78,8 @@ class CodecRoundTripTest {
                 .isEqualTo("requestVote(3,7,preVote=false)");
         assertThat(decode(decoder, encoder.requestVote(buffer, 7, true)))
                 .isEqualTo("requestVote(3,7,preVote=true)");
+        assertThat(decode(decoder, encoder.handoverVote(buffer, 7)))
+                .isEqualTo("requestVote(3,7,preVote=false,handover)");
         assertThat(decode(decoder, encoder.requestVoteReply(buffer, 7, true, false)))
                 .isEqualTo("requestVoteReply(3,7,granted=true,preVote=false)");
         assertThat(decode(decoder, encoder.requestVoteReply(buffer, 7, false, true)))

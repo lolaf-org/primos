@@ -31,7 +31,7 @@ public interface MessageHandler {
      * <em>would</em> be granted, and answering must not touch {@code currentTerm} or
      * {@code votedFor} — so it costs no fsync, and a partitioned node cannot inflate its term.
      */
-    void onRequestVote(int senderId, long term, boolean preVote);
+    void onRequestVote(int senderId, long term, boolean preVote, boolean handover);
 
     /**
      * A vote reply. Count it only while still a candidate in this exact term, and dedupe by sender.

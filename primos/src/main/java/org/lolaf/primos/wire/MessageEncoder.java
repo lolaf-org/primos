@@ -68,6 +68,14 @@ public final class MessageEncoder {
     }
 
     /**
+     * A real vote request from a candidate a leader handed over to.
+     */
+    public ByteBuffer handoverVote(ByteBuffer out, long term) {
+        header(out, MessageType.REQUEST_VOTE, WireFormat.FLAG_HANDOVER, term);
+        return finish(out);
+    }
+
+    /**
      * A vote reply, echoing whether this was a pre-vote so the two rounds cannot be confused.
      */
     public ByteBuffer requestVoteReply(ByteBuffer out, long term, boolean granted, boolean preVote) {

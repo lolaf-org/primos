@@ -18,6 +18,7 @@ package org.lolaf.primos.sim;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.ToLongFunction;
 
 import org.lolaf.primos.Role;
 
@@ -41,6 +42,40 @@ public final class Invariants {
                 atMostOneVotePerTerm(),
                 witnessNeverLeads(),
                 leaderStandsDownWithoutQuorum(Duration.ofSeconds(2)),
+        };
+    }
+
+    /**
+     * The promise on {@code leadershipConfirmedNanos()}: no successor leads while an older leader's lease runs. Not
+     * in {@link #all()}, because a handover deliberately overrides it and the caller is told to stop first.
+     */
+    public static Invariant noSuccessorDuringALease(Duration lease, ToLongFunction<SimNode> confirmedNanos) {
+        return new Invariant() {
+
+            @Override
+            public String name() {
+                return "no successor during a lease";
+            }
+
+            @Override
+            public void check(Simulation simulation) {
+                long now = simulation.clock().nanoTime();
+                for (SimNode older : simulation.nodes()) {
+                    if (!older.isRunning() || older.role() != Role.LEADER
+                            || confirmedNanos.applyAsLong(older) == Long.MIN_VALUE
+                            || now >= confirmedNanos.applyAsLong(older) + lease.toNanos()) {
+                        continue;
+                    }
+                    for (SimNode newer : simulation.nodes()) {
+                        if (newer.isRunning() && newer.role() == Role.LEADER
+                                && newer.currentTerm() > older.currentTerm()) {
+                            throw new AssertionError("node " + newer.id() + " leads term " + newer.currentTerm()
+                                    + " while node " + older.id() + " still holds a lease in term "
+                                    + older.currentTerm());
+                        }
+                    }
+                }
+            }
         };
     }
 

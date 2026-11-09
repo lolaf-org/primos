@@ -24,8 +24,8 @@ final class RecordingHandler implements MessageHandler {
     final List<String> received = new ArrayList<>();
 
     @Override
-    public void onRequestVote(int senderId, long term, boolean preVote) {
-        received.add("requestVote(" + senderId + "," + term + ",preVote=" + preVote + ")");
+    public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
+        received.add("requestVote(" + senderId + "," + term + ",preVote=" + preVote + (handover ? ",handover" : "") + ")");
     }
 
     @Override

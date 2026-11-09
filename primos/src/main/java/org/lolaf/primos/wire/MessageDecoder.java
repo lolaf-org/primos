@@ -233,7 +233,7 @@ public final class MessageDecoder {
 
         switch (type) {
             case REQUEST_VOTE:
-                handler.onRequestVote(senderId, term, preVote);
+                handler.onRequestVote(senderId, term, preVote, (flags & WireFormat.FLAG_HANDOVER) != 0);
                 break;
             case REQUEST_VOTE_REPLY:
                 handler.onRequestVoteReply(senderId, term,

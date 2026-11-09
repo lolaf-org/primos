@@ -107,6 +107,12 @@ public final class WireFormat {
      */
     public static final int FLAG_DECLINES_CANDIDACY = 0x0002;
 
+    /**
+     * Marks a real {@code RequestVote} as campaigning on a leader's own {@code TimeoutNow}, so a voter that has just
+     * heard from that leader does not refuse it.
+     */
+    public static final int FLAG_HANDOVER = 0x0004;
+
     private WireFormat() {
     }
 }

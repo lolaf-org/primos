@@ -72,12 +72,13 @@ final class WitnessClient implements AutoCloseable {
     }
 
     /**
-     * Asks for a vote and returns whether it was granted, driving the server until it answers.
+     * Asks for a vote and returns whether it was granted, driving the server until it answers. Marked as a handover
+     * because these tests vote the moment a witness starts, inside the window it refuses an ordinary candidate.
      *
      * @return null if the witness never replied, which is what a dropped datagram looks like
      */
     Boolean requestVote(WitnessServer server, long term) {
-        Reply reply = exchange(server, encoder.requestVote(send, term, false));
+        Reply reply = exchange(server, encoder.handoverVote(send, term));
         return reply == null ? null : reply.granted;
     }
 
@@ -111,7 +112,7 @@ final class WitnessClient implements AutoCloseable {
      * Sends without waiting for anything, for traffic that is expected to be dropped.
      */
     void fireAndForget(WitnessServer server, long term) {
-        write(encoder.requestVote(send, term, false));
+        write(encoder.handoverVote(send, term));
         server.runOnce(Duration.ofMillis(20).toNanos());
         server.runOnce(0L);
     }
@@ -212,7 +213,7 @@ final class WitnessClient implements AutoCloseable {
         }
 
         @Override
-        public void onRequestVote(int senderId, long term, boolean preVote) {
+        public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
             // nothing to do
         }
 
