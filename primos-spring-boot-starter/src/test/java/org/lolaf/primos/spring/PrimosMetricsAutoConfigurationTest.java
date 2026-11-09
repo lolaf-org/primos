@@ -55,6 +55,15 @@ class PrimosMetricsAutoConfigurationTest {
     }
 
     @Test
+    void a_registry_without_a_cluster_contributes_nothing() {
+        runner().withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(PrimosMetrics.class);
+                });
+    }
+
+    @Test
     void nothing_is_contributed_without_a_registry() {
         runner().withPropertyValues(singleNodeCluster())
                 .run(context -> assertThat(context).doesNotHaveBean(PrimosMetrics.class));
