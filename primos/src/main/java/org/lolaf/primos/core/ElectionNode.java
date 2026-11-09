@@ -1282,9 +1282,9 @@ public final class ElectionNode implements MessageHandler {
             stepDown(term);
         }
         TrackedPeer trackedPeer = trackedPeer(senderId);
-        if (trackedPeer == null || sequence != trackedPeer.outstandingSequence) {
-            // A reply to a probe we have already given up on. Counting it would let one badly
-            // delayed datagram keep a peer that is long gone looking alive.
+        if (trackedPeer == null || sequence != trackedPeer.outstandingSequence || !trackedPeer.awaitingReply) {
+            // A reply to a probe we have already given up on or already counted. Counting it would
+            // let one badly delayed datagram keep a peer that is long gone looking alive.
             return;
         }
         long now = clock.nanoTime();

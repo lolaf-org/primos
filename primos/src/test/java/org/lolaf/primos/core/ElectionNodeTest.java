@@ -58,6 +58,45 @@ class ElectionNodeTest {
         return peers;
     }
 
+    @Test
+    void a_probe_reply_reordered_behind_the_peers_departure_does_not_bring_it_back() {
+        List<String> events = new ArrayList<>();
+        ElectionNode node = startedNode(peers(2), new PrimosListener() {
+            @Override
+            public void onPeerUp(Peer peer) {
+                events.add("up");
+            }
+
+            @Override
+            public void onPeerDown(Peer peer, PeerDownReason reason) {
+                events.add("down/" + reason);
+            }
+        });
+        long sequence = awaitProbeTo(2, node);
+        MessageEncoder peer = new MessageEncoder("t", 2, MessageAuthenticator.disabled());
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+        network.transportFor(2).send(1, peer.leaving(buffer, node.currentTerm()));
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        node.runOnce(0L);
+
+        assertThat(events).containsExactly("down/LEFT");
+    }
+
+    @Test
+    void a_duplicated_probe_reply_is_one_sample() {
+        ElectionNode node = startedNode(peers(2));
+        long sequence = awaitProbeTo(2, node);
+        MessageEncoder peer = new MessageEncoder("t", 2, MessageAuthenticator.disabled());
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        node.runOnce(0L);
+
+        assertThat(recorded.probeRoundTrips).hasSize(1);
+    }
+
     private static int countNodeConfigs(CapturedReply seen) {
         int count = 0;
         for (String message : seen.messages()) {
@@ -799,6 +838,11 @@ class ElectionNodeTest {
     }
 
     private ElectionNode startedNode(List<Peer> peers) {
+        return startedNode(peers, new PrimosListener() {
+        });
+    }
+
+    private ElectionNode startedNode(List<Peer> peers, PrimosListener listener) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
@@ -806,9 +850,19 @@ class ElectionNodeTest {
                 .build();
         Transport transport = network.transportFor(1);
         ElectionNode node = new ElectionNode(config, store, transport, clock,
-                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-        }, recorded);
+                new Random(1L), MessageAuthenticator.disabled(), listener, recorded);
         node.start();
         return node;
+    }
+
+    private long awaitProbeTo(int peerId, ElectionNode node) {
+        clock.advance(Duration.ofSeconds(1));
+        node.runOnce(0L);
+        CapturedReply seen = new CapturedReply("t").drain(network.transportFor(peerId));
+        return seen.messages().stream()
+                .filter(message -> message.startsWith("ping/"))
+                .mapToLong(message -> Long.parseLong(message.substring("ping/".length())))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no probe was sent; saw " + seen.messages()));
     }
 }
