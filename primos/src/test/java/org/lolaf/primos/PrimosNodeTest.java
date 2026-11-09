@@ -643,6 +643,13 @@ class PrimosNodeTest {
     }
 
     @Test
+    void a_null_stats_listener_is_refused_at_build_time() {
+        assertThatThrownBy(() -> builder(1).statsListener(null).build())
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("statsListener");
+    }
+
+    @Test
     void an_unknown_mac_algorithm_is_refused_at_build_time() {
         // Better here than as a cluster that comes up, talks to nobody, and counts BAD_TAG.
         assertThatThrownBy(() -> PrimosNode.builder()

@@ -190,6 +190,7 @@ public final class PrimosNodeBuilder {
             throw new IllegalStateException("a transport is required");
         }
         Objects.requireNonNull(macAlgorithm, "macAlgorithm");
+        Objects.requireNonNull(statsListener, "statsListener");
         Objects.requireNonNull(stopTimeout, "stopTimeout");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(random, "random");
