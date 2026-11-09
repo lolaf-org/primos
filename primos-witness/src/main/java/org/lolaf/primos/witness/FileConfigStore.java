@@ -102,9 +102,10 @@ public final class FileConfigStore implements ConfigStore {
     public FileConfigStore(Path directory, MonotonicClock clock) {
         this.directory = directory;
         this.applicationsDirectory = directory.resolve(APPLICATIONS_DIRECTORY);
+        // Before the read, so an edit landing between the two is seen by the next rescan rather than absorbed.
+        this.lastChecksum = checksum();
         this.current = read();
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
-        this.lastChecksum = checksum();
         logServedApplications();
     }
 
