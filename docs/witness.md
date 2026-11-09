@@ -204,8 +204,8 @@ application file carrying `secret` is *refused* rather than ignored: an operator
 while the keyring decides otherwise is the worst failure available here, so the witness will not start.
 
 `value` takes four forms, so configuration can go into version control while the key does not: inline, `env:NAME`,
-`file:/path`, `base64:...`. The loader warns about world-readable files the way `ssh` does; keep them `0640` and owned
-by the service user.
+`file:/path`, `base64:...`. The loader warns the way `ssh` does when `witness.properties` holds a secret or a `file:` secret is
+world-readable; keep them `0640` and owned by the service user.
 
 `algorithm` is per key, because a witness serves clusters it does not own and one of them moving to another algorithm
 must not be a flag day for the rest. **It has to match what that cluster's nodes were built with.** Nothing on the wire
@@ -360,7 +360,7 @@ Worth alerting on:
 |---|---|---|
 | WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody. Under `cluster` this is INFO, because empty is the intended shape |
 | WARN | `no keys are configured` | see rule 3 |
-| WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
+| WARN | `... is world-readable and holds a cluster secret` | fix the file mode |
 | WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |
 | WARN | `'X' is one or two characters from 'Y'` | **near miss: check both configurations** |
 | WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |

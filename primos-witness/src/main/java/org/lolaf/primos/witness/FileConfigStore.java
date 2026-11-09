@@ -61,6 +61,7 @@ public final class FileConfigStore implements ConfigStore {
     private static final String SUFFIX = ".properties";
     private static final String KEY_PREFIX = "secret.";
     private static final String FILE_SECRET = "file:";
+    private static final String ENV_SECRET = "env:";
 
     private final Path directory;
     private final Path applicationsDirectory;
@@ -262,8 +263,8 @@ public final class FileConfigStore implements ConfigStore {
             return null;
         }
         String value = raw.trim();
-        if (value.startsWith("env:")) {
-            String variable = value.substring(4);
+        if (value.startsWith(ENV_SECRET)) {
+            String variable = value.substring(ENV_SECRET.length());
             String fromEnvironment = System.getenv(variable);
             if (fromEnvironment == null || fromEnvironment.isEmpty()) {
                 throw new IllegalArgumentException(
@@ -482,7 +483,7 @@ public final class FileConfigStore implements ConfigStore {
     private long stamp() {
         CRC32 sum = new CRC32();
         absorb(sum, directory.resolve(SETTINGS_FILE));
-        secretFiles().forEach(file -> absorb(sum, file));
+        currentSecretFiles().forEach(file -> absorb(sum, file));
         if (Files.isDirectory(applicationsDirectory)) {
             List<Path> files = new ArrayList<>();
             try (DirectoryStream<Path> stream =
@@ -502,21 +503,45 @@ public final class FileConfigStore implements ConfigStore {
         return sum.getValue();
     }
 
-    private List<Path> secretFiles() {
+    private List<Path> currentSecretFiles() {
         try {
-            Properties properties = load(directory.resolve(SETTINGS_FILE), true);
-            List<Path> files = new ArrayList<>();
-            for (String key : new TreeSet<>(properties.stringPropertyNames())) {
-                String value = properties.getProperty(key).trim();
-                if (key.startsWith(KEY_PREFIX) && key.endsWith(".value") && value.startsWith(FILE_SECRET)) {
-                    files.add(secretFile(value, directory));
-                }
-            }
-            return files;
+            return secretFiles(load(directory.resolve(SETTINGS_FILE), true));
         } catch (IllegalArgumentException malformed) {
             // The file's own bytes are already in the sum, and the read that follows reports this.
             return Collections.emptyList();
         }
+    }
+
+    private List<Path> secretFiles(Properties properties) {
+        List<Path> files = new ArrayList<>();
+        for (String key : new TreeSet<>(properties.stringPropertyNames())) {
+            String value = properties.getProperty(key).trim();
+            if (isSecretValue(key) && value.startsWith(FILE_SECRET)) {
+                files.add(secretFile(value, directory));
+            }
+        }
+        return files;
+    }
+
+    private static boolean isSecretValue(String key) {
+        return key.startsWith(KEY_PREFIX) && key.endsWith(".value");
+    }
+
+    private static boolean holdsInlineSecret(Properties properties) {
+        for (String key : properties.stringPropertyNames()) {
+            String value = properties.getProperty(key).trim();
+            if (isSecretValue(key) && !value.startsWith(FILE_SECRET) && !value.startsWith(ENV_SECRET)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void warnAboutReadableSecrets(Properties properties) {
+        if (holdsInlineSecret(properties)) {
+            warnIfWorldReadable(directory.resolve(SETTINGS_FILE));
+        }
+        secretFiles(properties).forEach(this::warnIfWorldReadable);
     }
 
     private ConfigSnapshot read() {
@@ -559,6 +584,7 @@ public final class FileConfigStore implements ConfigStore {
         builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
+        warnAboutReadableSecrets(properties);
         builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 5)));
         builder.defaultTimings(timings(properties, Timings.lan()));
         builder.voteLogging(booleanValue(properties, "vote.logging", true));
@@ -567,7 +593,6 @@ public final class FileConfigStore implements ConfigStore {
 
     private ApplicationConfig readApplication(Path file, WitnessSettings settings) {
         String name = applicationNameOf(file);
-        warnIfWorldReadable(file);
         Properties properties = load(file, false);
 
         refuseKeysHere(name, properties);
@@ -637,7 +662,7 @@ public final class FileConfigStore implements ConfigStore {
         try {
             Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
             if (permissions.contains(PosixFilePermission.OTHERS_READ)) {
-                log.warn("{} is world-readable and may contain a cluster secret. Anyone who can"
+                log.warn("{} is world-readable and holds a cluster secret. Anyone who can"
                         + " read it can forge messages for that cluster.", file);
             }
         } catch (IOException | UnsupportedOperationException e) {

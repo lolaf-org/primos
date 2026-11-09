@@ -22,10 +22,13 @@ import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -206,6 +209,52 @@ class FileConfigStoreTest {
 
         try (FileConfigStore store = open()) {
             assertThat(rescan(store)).isFalse();
+        }
+    }
+
+    @Test
+    void a_world_readable_witness_file_holding_a_secret_is_warned_about() throws IOException {
+        settings("secret.orders.value = s3cret");
+        worldReadable(directory.resolve("witness.properties"), true);
+
+        assertThat(loggedWhileOpening()).contains("witness.properties is world-readable");
+    }
+
+    @Test
+    void a_world_readable_secret_file_is_warned_about() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
+        worldReadable(secretFile, true);
+        settings("secret.orders.value = file:" + secretFile);
+
+        assertThat(loggedWhileOpening()).contains("orders.key is world-readable");
+    }
+
+    @Test
+    void files_that_hold_no_secret_or_are_private_are_not_warned_about() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
+        worldReadable(secretFile, false);
+        settings("secret.orders.value = file:" + secretFile);
+        worldReadable(directory.resolve("witness.properties"), true);
+        application("orders", "");
+        worldReadable(applicationFile("orders"), true);
+
+        assertThat(loggedWhileOpening()).doesNotContain("world-readable");
+    }
+
+    private static void worldReadable(Path file, boolean readable) throws IOException {
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(readable ? "rw-r--r--" : "rw-------"));
+    }
+
+    private String loggedWhileOpening() {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        try (FileConfigStore ignored = open()) {
+            return captured.toString(StandardCharsets.UTF_8);
+        } finally {
+            System.setErr(original);
         }
     }
 
