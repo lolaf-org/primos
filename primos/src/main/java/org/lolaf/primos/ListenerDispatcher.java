@@ -53,10 +53,9 @@ final class ListenerDispatcher implements PrimosListener {
      * <p>A listener registered after the node started would otherwise wait for the next change to
      * learn anything, and the transition it was registered for may already have happened.
      */
-    void deliverCurrentState(PrimosListener listener, Role role, long term,
-                             Optional<Leader> leader) {
-        deliverTo(listener, "onRoleChanged", () -> listener.onRoleChanged(role, role, term));
-        deliverTo(listener, "onLeaderChanged", () -> listener.onLeaderChanged(leader, term));
+    void deliverCurrentState(PrimosListener listener, RoleAndTerm current, Optional<Leader> leader) {
+        deliverTo(listener, "onRoleChanged", () -> listener.onRoleChanged(current.role(), current.role(), current.term()));
+        deliverTo(listener, "onLeaderChanged", () -> listener.onLeaderChanged(leader, current.term()));
     }
 
     @Override

@@ -320,7 +320,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         if (running) {
             // A listener registered after the node started would otherwise wait for the next
             // change to learn anything, and may have been registered for one that already happened.
-            dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(), leader());
+            dispatcher.deliverCurrentState(listener, roleAndTerm, leader());
         }
     }
 
