@@ -97,7 +97,7 @@ public final class ElectionNode implements MessageHandler {
     private long leaderSinceNanos;
     private long leaderlessSinceNanos = NO_READING;
     private TrackedPeer[] peers;
-    private long[] confirmationScratch = new long[0];
+    private final long[] confirmationScratch;
     @Getter
     private Role role = Role.FOLLOWER;
     // Volatile because a witness's term gauge reads it from a metrics thread.
@@ -220,6 +220,7 @@ public final class ElectionNode implements MessageHandler {
         this.electionTimeoutSpreadNanos = timings.electionTimeoutSpread().toNanos();
         List<Peer> configured = config.allPeers();
         this.peers = new TrackedPeer[configured.size()];
+        this.confirmationScratch = new long[configured.size()];
         for (int i = 0; i < peers.length; i++) {
             peers[i] = new TrackedPeer(configured.get(i));
         }
@@ -239,10 +240,10 @@ public final class ElectionNode implements MessageHandler {
     /**
      * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
      */
-    private static long nthLatest(long[] values, int count, int n) {
+    private static long nthLatest(long[] values, int n) {
         for (int i = 0; i < n; i++) {
             int latest = i;
-            for (int j = i + 1; j < count; j++) {
+            for (int j = i + 1; j < values.length; j++) {
                 if (values[j] > values[latest]) {
                     latest = j;
                 }
@@ -395,7 +396,6 @@ public final class ElectionNode implements MessageHandler {
         failureCause = cause;
         abandonPreVote();
         votesGranted.clear();
-        forgetQuorumContact();
 
         log.error("cluster '{}': node {} has failed while {} in term {} and will not lead again."
                         + " Restart the process; this node cannot recover in place.",
@@ -586,7 +586,7 @@ public final class ElectionNode implements MessageHandler {
             nodeConfigDeadlineNanos = now + nextNodeConfigIntervalNanos();
         }
         if (role == Role.LEADER) {
-            if (!hasQuorumContact(now)) {
+            if (now >= quorumContactDeadlineNanos()) {
                 relinquishLeadership();
                 return;
             }
@@ -1048,7 +1048,7 @@ public final class ElectionNode implements MessageHandler {
         }
         // This is the only thing that proves a round trip: the peer received a heartbeat this node
         // sent, and answered it. It counts from the send, which is before the peer reset its own
-        // election clock. See hasQuorumContact.
+        // election clock. See leadershipConfirmedNanos.
         if (role == Role.LEADER && term == currentTerm) {
             TrackedPeer trackedPeer = trackedPeer(senderId);
             if (trackedPeer != null) {
@@ -1265,7 +1265,7 @@ public final class ElectionNode implements MessageHandler {
                 continue;
             }
             long lastContact = trackedPeer.lastConfirmedNanos;
-            if (lastContact == NO_READING || now - lastContact > electionTimeoutMinNanos) {
+            if (now - lastContact > electionTimeoutMinNanos) {
                 continue;
             }
             if (best == null || lastContact > bestContactNanos) {
@@ -1392,37 +1392,15 @@ public final class ElectionNode implements MessageHandler {
         if (needed <= 0) {
             return clock.nanoTime();
         }
-        if (confirmationScratch.length < peers.length) {
-            confirmationScratch = new long[peers.length];
+        for (int i = 0; i < peers.length; i++) {
+            confirmationScratch[i] = peers[i].lastConfirmedNanos;
         }
-        int count = 0;
-        for (TrackedPeer trackedPeer : peers) {
-            confirmationScratch[count++] = trackedPeer.lastConfirmedNanos;
-        }
-        if (count < needed) {
-            return Long.MIN_VALUE;
-        }
-        long confirmed = nthLatest(confirmationScratch, count, needed);
-        return confirmed == NO_READING ? Long.MIN_VALUE : confirmed;
+        return nthLatest(confirmationScratch, needed);
     }
 
     private long quorumContactDeadlineNanos() {
-        return Math.max(leadershipConfirmedNanos(), leaderSinceNanos) + electionTimeoutMinNanos;
-    }
-
-    private boolean hasQuorumContact(long now) {
         // From the win, not the vote requests the lease counts from: a first heartbeat cannot be answered any sooner.
-        if (now - leaderSinceNanos < electionTimeoutMinNanos) {
-            return true;
-        }
-        int inContact = 1;
-        for (TrackedPeer trackedPeer : peers) {
-            long confirmed = trackedPeer.lastConfirmedNanos;
-            if (confirmed != NO_READING && now - confirmed < electionTimeoutMinNanos) {
-                inContact++;
-            }
-        }
-        return quorum.isReached(inContact);
+        return Math.max(leadershipConfirmedNanos(), leaderSinceNanos) + electionTimeoutMinNanos;
     }
 
     private void relinquishLeadership() {
@@ -1436,14 +1414,7 @@ public final class ElectionNode implements MessageHandler {
         setRole(Role.FOLLOWER);
         setLeader(-1);
         votesGranted.clear();
-        forgetQuorumContact();
         resetElectionTimer();
-    }
-
-    private void forgetQuorumContact() {
-        for (TrackedPeer trackedPeer : peers) {
-            trackedPeer.lastConfirmedNanos = NO_READING;
-        }
     }
 
     private void resetElectionTimer() {
@@ -1496,7 +1467,7 @@ public final class ElectionNode implements MessageHandler {
         private Reachability reachability = Reachability.UNKNOWN;
         private long lastHeardNanos = NO_READING;
         private boolean timingsMatch = true;
-        private long lastConfirmedNanos = NO_READING;
+        private long lastConfirmedNanos;
         /**
          * What its last heartbeat reply in this node's leadership said; standing until one says otherwise.
          */
