@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
- * {@code primos.lifecycle}: when the node joins, and — in both modes — who makes it leave.
+ * {@code primos.lifecycle}: when the node joins, and (in both modes) who makes it leave.
  */
 class NodeLifecycleModeTest {
 
@@ -77,7 +77,7 @@ class NodeLifecycleModeTest {
 
     /**
      * The stop is never manual. This is what sends the handover and the departure announcement, so
-     * losing it would cost the cluster an election timeout on every deploy — and would do it
+     * losing it would cost the cluster an election timeout on every deploy, and would do it
      * silently.
      */
     @Test
@@ -103,7 +103,7 @@ class NodeLifecycleModeTest {
     /**
      * The sharp one. {@code stop()} on a node that was never started closes nothing of its own, so
      * a manual-mode application that never got round to starting its node would hold the state
-     * directory's exclusive lock — and its socket — until the JVM exited. Opening a second store on
+     * directory's exclusive lock (and its socket) until the JVM exited. Opening a second store on
      * the same directory is what proves the lock went.
      *
      * <p>The mechanism changed under this test and the assertion did not, which is the sort of
@@ -126,7 +126,7 @@ class NodeLifecycleModeTest {
     /**
      * The reason any of this exists. A Spring singleton is exactly the shape that cannot be handed
      * back as "build a new one", so an application wanting to leave the cluster for a maintenance
-     * window and rejoin had no way to say so — the workaround was a factory bean, which pushes the
+     * window and rejoin had no way to say so: the workaround was a factory bean, which pushes the
      * lifecycle back into the application this module exists to relieve.
      */
     @Test

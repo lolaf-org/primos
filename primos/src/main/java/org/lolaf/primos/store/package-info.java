@@ -18,7 +18,7 @@
  * Where a node's term and vote survive a restart: the {@link org.lolaf.primos.store.StateStore} SPI
  * with a file implementation and an in-memory one.
  *
- * <p>Public and supported. {@link org.lolaf.primos.store.FileStateStore} is the production choice —
+ * <p>Public and supported. {@link org.lolaf.primos.store.FileStateStore} is the production choice:
  * temp file, fsync, atomic rename, a CRC over the record and an exclusive lock so two processes
  * cannot vote from one identity. It refuses to start on a corrupt file rather than treating it as a
  * fresh node, because that fallback is precisely how a vote is forgotten and a second leader

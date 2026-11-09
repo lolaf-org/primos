@@ -20,11 +20,14 @@ import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.Timings;
+import org.lolaf.primos.store.StateStoreException;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -96,6 +99,16 @@ class PrimosAutoConfigurationTest {
                     assertThat(context.getBean(Timings.class))
                             .isSameAs(context.getBean(OwnTimings.class).timings);
                 });
+    }
+
+    @Test
+    void a_corrupt_state_file_stops_the_application_starting() throws IOException {
+        Files.write(stateDirectory.resolve("state"), new byte[] {1, 2, 3});
+
+        runner().withPropertyValues(singleNodeCluster())
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure()
+                        .isInstanceOf(StateStoreException.class));
     }
 
     @Test

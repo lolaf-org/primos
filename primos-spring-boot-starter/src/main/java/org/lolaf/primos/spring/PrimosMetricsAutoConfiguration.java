@@ -32,7 +32,7 @@ import org.springframework.context.annotation.Bean;
  *
  * <p>The two halves land in different places because they must: {@link PrimosMetrics} is a
  * {@code PrimosStatsListener}, so {@link PrimosAutoConfiguration} picks it up and installs it while
- * the node is being built — a sink fixed at build time cannot be added afterwards — and the gauges
+ * the node is being built (a sink fixed at build time cannot be added afterwards) and the gauges
  * are bound once every singleton exists, which is still before the node is started.
  */
 @AutoConfiguration(after = PrimosAutoConfiguration.class,

@@ -42,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * What a witness reports about itself: counters per served application, and which tenants it has
  * stopped serving.
  *
- * <p>Both exist for something outside this artifact to read — {@code primos-micrometer} for the
- * first and a health endpoint for the second — and both have a failure that is silent. Counters
+ * <p>Both exist for something outside this artifact to read ({@code primos-micrometer} for the
+ * first and a health endpoint for the second) and both have a failure that is silent. Counters
  * summed across tenants are a number nobody can act on; a quarantined tenant reported as an
  * unhealthy witness takes every other tenant's witness away with it.
  */
@@ -78,7 +78,7 @@ class WitnessObservabilityTest {
     /**
      * The reason the SPI is a function of the name rather than one sink: a witness runs an election
      * per served cluster, so one tenant's dropped datagrams added to another's would be a number
-     * nobody could act on — and it would look perfectly plausible on a dashboard.
+     * nobody could act on, and it would look perfectly plausible on a dashboard.
      */
     @Test
     void counters_are_recorded_against_the_application_that_produced_them() {
@@ -130,7 +130,7 @@ class WitnessObservabilityTest {
      * The SPI already promises that a listener which throws is caught and logged rather than
      * killing the node. On a witness that promise is worth more than it is anywhere else: the
      * catch-all it would otherwise reach marks the node {@code FAILED}, and a failed node here is a
-     * quarantined tenant — so a bug in a counter would take a cluster's tie-breaker away from it.
+     * quarantined tenant, so a bug in a counter would take a cluster's tie-breaker away from it.
      */
     @Test
     void a_listener_that_throws_does_not_cost_its_tenant_the_witness() {
@@ -198,7 +198,7 @@ class WitnessObservabilityTest {
     /**
      * The shape a health endpoint needs. One tenant whose disk can no longer make a vote durable
      * stops being served; every other tenant keeps its tie-breaker, and the witness is still doing
-     * its job for all of them — which is why this is a set of names to put in a health detail and
+     * its job for all of them, which is why this is a set of names to put in a health detail and
      * not a verdict about the server.
      */
     @Test
@@ -256,6 +256,57 @@ class WitnessObservabilityTest {
         return recorders.computeIfAbsent(application, name -> new RecordingStats());
     }
 
+    @Test
+    void an_impossible_sender_id_costs_a_keyed_tenant_nothing() {
+        application("orders");
+        server = builder().build();
+
+        assertImpossibleSendersAreDropped(SECRET);
+
+        try (WitnessClient valid = new WitnessClient("orders", 1, SECRET, WITNESS_ID, server.boundAddress())) {
+            assertThat(valid.requestVote(server, 1L)).isTrue();
+        }
+    }
+
+    @Test
+    void an_impossible_sender_id_costs_an_unkeyed_tenant_nothing() {
+        write(directory.resolve("witness.properties"), "");
+        application("orders");
+        server = builder().build();
+
+        assertImpossibleSendersAreDropped(null);
+    }
+
+    @Test
+    void the_first_and_the_last_usable_ids_are_still_served() {
+        application("orders");
+        server = builder().build();
+
+        for (int id : new int[] {Peer.MIN_ID, Peer.MAX_ID - 1}) {
+            try (WitnessClient edge = new WitnessClient("orders", id, SECRET, WITNESS_ID, server.boundAddress())) {
+                assertThat(edge.requestVote(server, id + 1L)).as("id %s", id).isTrue();
+            }
+        }
+        assertThat(recorder("orders").drops(DropReason.UNKNOWN_PEER)).isZero();
+        assertThat(server.quarantinedApplications()).isEmpty();
+    }
+
+    private void assertImpossibleSendersAreDropped(String secret) {
+        int[] impossible = {Peer.MAX_ID + 1, 5000, Integer.MAX_VALUE, Peer.MIN_ID - 1, Integer.MIN_VALUE};
+        for (int id : impossible) {
+            try (WitnessClient sender = new WitnessClient("orders", id, secret, WITNESS_ID, server.boundAddress())) {
+                sender.fireAndForget(server, 9L);
+            }
+        }
+
+        assertThat(server.quarantinedApplications())
+                .as("one datagram must not be able to take a cluster's witness away")
+                .isEmpty();
+        assertThat(server.currentTerm("orders")).isZero();
+        assertThat(server.votedFor("orders")).as("no vote spent on a node that cannot exist").isEqualTo(-1);
+        assertThat(recorder("orders").drops(DropReason.UNKNOWN_PEER)).isEqualTo(impossible.length);
+    }
+
     /**
      * One datagram for 'orders' carrying a tag from the wrong key, which is dropped and counted.
      */
@@ -297,7 +348,7 @@ class WitnessObservabilityTest {
     }
 
     /**
-     * Durable by its own account and unable to write — a disk that has gone bad rather than one
+     * Durable by its own account and unable to write: a disk that has gone bad rather than one
      * that was never asked to be durable, which the server refuses outright at startup.
      */
     private static final class UnwritableStateStore implements StateStore {
@@ -325,7 +376,7 @@ class WitnessObservabilityTest {
 
     /**
      * What the other tenant runs on. {@code MemoryStateStore} reports itself non-durable and the
-     * server refuses it, quite rightly — this one is that lie told deliberately, in a test that is
+     * server refuses it, quite rightly: this one is that lie told deliberately, in a test that is
      * about what happens to the tenants beside a broken one.
      */
     private static final class InMemoryDurableStateStore implements StateStore {

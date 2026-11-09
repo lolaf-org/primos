@@ -18,16 +18,25 @@ package org.lolaf.primos.transport;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.wire.WireFormat;
+import org.mockito.MockedStatic;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /**
  * The same contract as every other transport, over a real socket.
@@ -57,6 +66,40 @@ class UdpTransportTest extends TransportContractTest {
     @Test
     void it_binds_where_it_was_told_to() {
         assertThat(((UdpTransport) a).boundAddress().getPort()).isEqualTo(portA);
+    }
+
+    @Test
+    void a_send_the_socket_had_no_room_for_is_counted() throws IOException {
+        assertThat(sendsDroppedWhenChannelAccepts(0)).isEqualTo(1);
+    }
+
+    @Test
+    void a_send_the_socket_took_whole_is_not_counted() throws IOException {
+        assertThat(sendsDroppedWhenChannelAccepts(WireFormat.HEADER_BYTES)).isZero();
+    }
+
+    private long sendsDroppedWhenChannelAccepts(int bytes) throws IOException {
+        DatagramChannel channel = mock(DatagramChannel.class);
+        when(channel.send(any(), any())).thenReturn(bytes);
+        try (MockedStatic<DatagramChannel> open = mockStatic(DatagramChannel.class)) {
+            open.when(DatagramChannel::open).thenReturn(channel);
+            try (UdpTransport transport = UdpTransport.builder()
+                    .bindAddress(new InetSocketAddress(LOOPBACK, 0))
+                    .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, 7000)))
+                    .build()) {
+                transport.send(NODE_B, datagram());
+                return transport.sendsDropped();
+            }
+        }
+    }
+
+    @Test
+    void a_port_already_in_use_is_refused_rather_than_shared() {
+        assertThatThrownBy(() -> UdpTransport.builder()
+                .bindAddress(((UdpTransport) a).boundAddress())
+                .peers(Collections.emptyList())
+                .build())
+                .isInstanceOf(BindException.class);
     }
 
     @Test
@@ -101,6 +144,45 @@ class UdpTransportTest extends TransportContractTest {
                 .as("the receive buffer is one byte larger than a legal datagram, so anything"
                         + " oversized arrives too long for any message type and is rejected above")
                 .isEqualTo(WireFormat.MAX_DATAGRAM_BYTES + 1);
+    }
+
+    @Test
+    void a_socket_that_never_empties_still_lets_poll_return() {
+        int[] delivered = {0};
+        a.send(NODE_B, wrap("first"));
+        awaitReadable();
+
+        int returned = assertTimeoutPreemptively(Duration.ofSeconds(20), () -> b.poll(0, datagram -> {
+            delivered[0]++;
+            a.send(NODE_B, wrap("the next one is already there"));
+        }));
+
+        assertThat(returned).isEqualTo(UdpTransport.MAX_DATAGRAMS_PER_POLL);
+        assertThat(delivered[0]).isEqualTo(UdpTransport.MAX_DATAGRAMS_PER_POLL);
+    }
+
+    @Test
+    void what_one_poll_leaves_behind_the_next_delivers() {
+        int total = UdpTransport.MAX_DATAGRAMS_PER_POLL + 10;
+        int[] delivered = {0};
+        a.send(NODE_B, wrap("first"));
+        awaitReadable();
+
+        for (int polls = 0; polls < 200 && delivered[0] < total; polls++) {
+            b.poll(TimeUnit.MILLISECONDS.toNanos(50), datagram -> {
+                delivered[0]++;
+                if (delivered[0] < total) {
+                    a.send(NODE_B, wrap("next"));
+                }
+            });
+        }
+
+        assertThat(delivered[0]).isEqualTo(total);
+    }
+
+    private void awaitReadable() {
+        // Long enough for loopback, and a miss only makes the first poll deliver nothing.
+        org.awaitility.Awaitility.await().pollDelay(Duration.ofMillis(20)).until(() -> true);
     }
 
     @Test
@@ -247,7 +329,7 @@ class UdpTransportTest extends TransportContractTest {
             learning.poll(TimeUnit.SECONDS.toNanos(2), buffer -> {
                 // Inside the handler, deliberately: the transport only knows where the datagram
                 // it is currently delivering came from. In production the node calls this from
-                // the same place, once the datagram has passed every check — learning from an
+                // the same place, once the datagram has passed every check: learning from an
                 // unverified one would let a spoofed packet redirect a peer's traffic.
                 learning.confirmSender(NODE_B);
                 learning.confirmSender(NODE_B);

@@ -35,11 +35,11 @@ import java.util.Objects;
  * when asking why a cluster did not fail over, and logging it beats reconstructing the voter set
  * from config files. It also logs any {@link #warnings()}: a configuration can be strictly worse
  * than an available alternative without being wrong, and primos says so rather than refusing to
- * start — refusing would break a legitimate transient, such as keeping a witness while scaling a
+ * start: refusing would break a legitimate transient, such as keeping a witness while scaling a
  * pair up to three nodes.
  *
  * <p>Two shapes are worth knowing before they are met in production. <strong>Two nodes with no
- * witness tolerates zero failures</strong> — it looks redundant and is not. And <strong>one node is
+ * witness tolerates zero failures</strong>: it looks redundant and is not. And <strong>one node is
  * permanently the leader</strong>: quorum is one, so it elects itself and nothing can ever depose
  * it. Both are allowed, and both are warned about.
  */
@@ -110,7 +110,7 @@ public class Quorum {
      * The arithmetic of a voter set nobody told us about: no quorum, ever reached.
      *
      * <p>The standalone witness server does not know how many nodes the clusters it serves have,
-     * and deliberately does not need to — it never campaigns and never leads, so it never counts
+     * and deliberately does not need to: it never campaigns and never leads, so it never counts
      * votes; it only answers them. Rather than invent a plausible-looking number, this refuses.
      * If some future path did ask this witness whether it held a majority, "no" is the only answer
      * that cannot manufacture a leader.
@@ -177,7 +177,7 @@ public class Quorum {
             // they are healthy.
             warnings.add("cluster '" + applicationName + "': one node and no witness, so this node"
                     + " is the only voter. It elects itself about one election timeout after"
-                    + " starting and leads for as long as it runs, and nothing can depose it —"
+                    + " starting and leads for as long as it runs, and nothing can depose it:"
                     + " there is no majority to lose contact with.\nThat is a legitimate single"
                     + " instance deployment, and it is also what a mistyped or unread peer list"
                     + " looks like, in which case every node of the intended cluster is doing this"

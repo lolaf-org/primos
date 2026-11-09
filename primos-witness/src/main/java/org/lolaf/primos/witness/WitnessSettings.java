@@ -30,7 +30,7 @@ import java.util.Objects;
  *
  * <p>Value equality is not decoration: it is how a reload tells a settings-only change from no
  * change at all. {@code FileConfigStore} compared the served applications and nothing else, so a
- * changed registration mode or auto-registration limit was parsed and then dropped on the floor —
+ * changed registration mode or auto-registration limit was parsed and then dropped on the floor:
  * silently, because the snapshot it belonged to was never published.
  */
 @Getter
@@ -62,17 +62,13 @@ public final class WitnessSettings {
     private final int clusterApplicationLimit;
 
     /**
-     * How often the configuration is checked for change — the whole of the reload mechanism.
-     *
-     * <p>Not a safety net any more: it replaced the {@code WatchService} that used to sit above it,
-     * because a watcher that can silently stop working is worse than a check that always runs. Each
-     * tick stats the files and does nothing further unless one has moved, so this is cheap enough
-     * to be seconds rather than the half-minute it was when every tick reparsed the directory.
+     * How often the configuration is checked for change, which is the whole of the reload mechanism.
+     * A tick does nothing further unless a file has changed, so this is cheap enough to be seconds.
      */
     private final Duration rescanInterval;
 
     /**
-     * The witness-wide <em>default</em> intervals — not, despite the obvious reading, what any node
+     * The witness-wide <em>default</em> intervals, not, despite the obvious reading, what any node
      * is run with.
      *
      * <p>Worth stating plainly, because nothing consumes this at serving time and it looks dead:
@@ -82,7 +78,7 @@ public final class WitnessSettings {
      * the two places one is built:
      *
      * <ul>
-     *   <li>{@link FileConfigStore}, for an application whose file names no intervals of its own —
+     *   <li>{@link FileConfigStore}, for an application whose file names no intervals of its own:
      *       a tenant that says nothing gets what the witness was told;</li>
      *   <li>auto-registration under {@link ConfigSource#CLUSTER}, where an application created from
      *       a datagram has no file at all. It runs these until its nodes state their own, which
@@ -101,7 +97,7 @@ public final class WitnessSettings {
      *
      * <p>On by default, and worth more here than anywhere else: the witness is the vote that breaks
      * the tie, so "did the witness grant it, and to whom?" is the first question asked after a
-     * two-node pair failed over — or failed to. Witness-wide rather than per application, like the
+     * two-node pair failed over, or failed to. Witness-wide rather than per application, like the
      * timing profile, because it describes how this process talks about its work rather than
      * anything about a tenant's cluster.
      */

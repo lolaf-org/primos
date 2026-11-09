@@ -164,7 +164,7 @@ class FailedStateTest {
     }
 
     private void requestVoteFrom(int from, long term) {
-        deliver(from, (encoder, buffer) -> encoder.requestVote(buffer, term, false));
+        deliver(from, (encoder, buffer) -> encoder.handoverVote(buffer, term));
     }
 
     private void requestVoteReplyFrom(int from, long term, boolean granted, boolean preVote) {

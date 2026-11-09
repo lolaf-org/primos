@@ -72,12 +72,13 @@ final class WitnessClient implements AutoCloseable {
     }
 
     /**
-     * Asks for a vote and returns whether it was granted, driving the server until it answers.
+     * Asks for a vote and returns whether it was granted, driving the server until it answers. Marked as a handover
+     * because these tests vote the moment a witness starts, inside the window it refuses an ordinary candidate.
      *
      * @return null if the witness never replied, which is what a dropped datagram looks like
      */
     Boolean requestVote(WitnessServer server, long term) {
-        Reply reply = exchange(server, encoder.requestVote(send, term, false));
+        Reply reply = exchange(server, encoder.handoverVote(send, term));
         return reply == null ? null : reply.granted;
     }
 
@@ -96,6 +97,21 @@ final class WitnessClient implements AutoCloseable {
         announceConfig(server, 50, 300, 600, 1000, 3);
     }
 
+    /** Only sends, for a test that is already inside the server's loop. */
+    void sendConfig() {
+        sendConfig(50, 300, 600, 1000, 3);
+    }
+
+    /** Only sends, so a test can put several messages in front of one turn of the loop. */
+    void sendConfig(int heartbeat, int electionMin, int electionMax, int probe, int failureThreshold) {
+        write(encoder.nodeConfig(send, 0L, heartbeat, electionMin, electionMax, probe, failureThreshold));
+    }
+
+    /** Only sends, so a test can put several messages in front of one turn of the loop. */
+    void sendVote(long term) {
+        write(encoder.handoverVote(send, term));
+    }
+
     /**
      * States a particular profile, for the tests about which one a witness ends up running.
      */
@@ -111,7 +127,7 @@ final class WitnessClient implements AutoCloseable {
      * Sends without waiting for anything, for traffic that is expected to be dropped.
      */
     void fireAndForget(WitnessServer server, long term) {
-        write(encoder.requestVote(send, term, false));
+        write(encoder.handoverVote(send, term));
         server.runOnce(Duration.ofMillis(20).toNanos());
         server.runOnce(0L);
     }
@@ -121,7 +137,7 @@ final class WitnessClient implements AutoCloseable {
      *
      * <p>Anything else that arrives meanwhile is ignored rather than mistaken for the answer. The
      * witness probes every voter it has learned about, so a probe landing between the request and
-     * its reply is entirely normal — and reading one as a refused vote is exactly the kind of
+     * its reply is entirely normal, and reading one as a refused vote is exactly the kind of
      * quietly-passing test this suite is meant not to have.
      */
     private Reply exchange(WitnessServer server, ByteBuffer datagram) {
@@ -154,6 +170,18 @@ final class WitnessClient implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    /** Forgets everything already received, so what arrives next is known to have been sent from now on. */
+    void discardReceived() {
+        try {
+            receive.clear();
+            while (channel.receive(receive) != null) {
+                receive.clear();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private void write(ByteBuffer datagram) {
@@ -212,7 +240,7 @@ final class WitnessClient implements AutoCloseable {
         }
 
         @Override
-        public void onRequestVote(int senderId, long term, boolean preVote) {
+        public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
             // nothing to do
         }
 

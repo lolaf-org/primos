@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Role;
@@ -214,6 +215,113 @@ class CheckQuorumTest {
             }
         }
         throw new IllegalStateException("no third node");
+    }
+
+    @Test
+    void a_leader_whose_first_heartbeat_returns_after_the_window_keeps_leading() {
+        for (long seed = 1; seed <= 20; seed++) {
+            Simulation simulation = simulation(seed);
+            long oneWay = Duration.ofMillis(80).toNanos();
+            simulation.network().delayRange(oneWay, oneWay);
+            ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+            assertThat(simulation.runUntil(cluster::hasSingleLeader, Duration.ofSeconds(30))).isTrue();
+            ElectionCluster.NodeUnderTest leader = cluster.leader().get();
+
+            simulation.run(Duration.ofSeconds(3));
+
+            assertThat(leader.role())
+                    .as("seed %s: the votes and the first heartbeat each take a round trip, and together"
+                            + " they outlast the window counted from the vote requests", seed)
+                    .isEqualTo(Role.LEADER);
+            assertThat(leader.election().leadershipsRelinquished()).isZero();
+        }
+    }
+
+    @Test
+    void a_win_arriving_after_the_window_is_not_deposed_in_the_same_turn() {
+        for (long seed = 1; seed <= 20; seed++) {
+            Simulation simulation = simulation(seed);
+            long slow = Duration.ofMillis(160).toNanos();
+            long fast = Duration.ofMillis(1).toNanos();
+            simulation.network().delayRange(slow, slow);
+            ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+            onFirstLeader(simulation, cluster, leader -> simulation.network().delayRange(fast, fast));
+            assertThat(simulation.runUntil(cluster::hasSingleLeader, Duration.ofSeconds(30))).isTrue();
+            ElectionCluster.NodeUnderTest leader = cluster.leader().get();
+
+            simulation.run(Duration.ofSeconds(3));
+
+            assertThat(leader.role()).as("seed %s", seed).isEqualTo(Role.LEADER);
+            assertThat(leader.election().leadershipsRelinquished()).isZero();
+        }
+    }
+
+    @Test
+    void a_new_leader_that_hears_nothing_stands_down_one_window_after_its_win() {
+        Duration window = Timings.lan().electionTimeoutMin();
+        Duration heartbeat = Timings.lan().heartbeatInterval();
+        for (long seed = 1; seed <= 20; seed++) {
+            Simulation simulation = simulation(seed);
+            long oneWay = Duration.ofMillis(80).toNanos();
+            simulation.network().delayRange(oneWay, oneWay);
+            ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+            long[] wonAt = {Long.MIN_VALUE};
+            ElectionCluster.NodeUnderTest[] winner = {null};
+            onFirstLeader(simulation, cluster, leader -> {
+                wonAt[0] = simulation.clock().nanoTime();
+                winner[0] = leader;
+                simulation.network().isolate(leader.id());
+            });
+            assertThat(simulation.runUntil(() -> winner[0] != null, Duration.ofSeconds(30))).isTrue();
+
+            assertThat(simulation.runUntil(() -> winner[0].role() != Role.LEADER, Duration.ofSeconds(5))).isTrue();
+            Duration ledFor = Duration.ofNanos(simulation.clock().nanoTime() - wonAt[0]);
+
+            assertThat(ledFor)
+                    .as("seed %s: the grace is one window from the win, and not a free pass beyond it", seed)
+                    .isGreaterThanOrEqualTo(window)
+                    .isLessThanOrEqualTo(window.plus(heartbeat.multipliedBy(2)));
+            assertThat(winner[0].election().leadershipsRelinquished()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void the_grace_does_not_lengthen_a_new_leader_s_lease() {
+        for (long seed = 1; seed <= 20; seed++) {
+            Simulation simulation = simulation(seed);
+            long oneWay = Duration.ofMillis(80).toNanos();
+            simulation.network().delayRange(oneWay, oneWay);
+            ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
+            long[] leaseAge = {Long.MIN_VALUE};
+            onFirstLeader(simulation, cluster, leader -> leaseAge[0] =
+                    simulation.clock().nanoTime() - leader.election().leadershipConfirmedNanos());
+            assertThat(simulation.runUntil(() -> leaseAge[0] != Long.MIN_VALUE, Duration.ofSeconds(30))).isTrue();
+
+            assertThat(leaseAge[0])
+                    .as("seed %s: the lease still counts from the vote requests, a round trip before the win", seed)
+                    .isGreaterThanOrEqualTo(2 * oneWay);
+        }
+    }
+
+    private static void onFirstLeader(Simulation simulation, ElectionCluster cluster,
+                                      Consumer<ElectionCluster.NodeUnderTest> action) {
+        simulation.checking(new Invariant() {
+
+            private boolean fired;
+
+            @Override
+            public String name() {
+                return "reacts to the first leader";
+            }
+
+            @Override
+            public void check(Simulation ignored) {
+                if (!fired && cluster.leader().isPresent()) {
+                    fired = true;
+                    action.accept(cluster.leader().get());
+                }
+            }
+        });
     }
 
     private static Simulation simulation(long seed) {

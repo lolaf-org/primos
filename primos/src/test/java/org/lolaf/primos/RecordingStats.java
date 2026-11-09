@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * it too.
  *
  * <p>Fields are atomic because a real node reports from its own thread while a test asserts from
- * the JUnit one. That is a test's problem and not the SPI's — a production listener is called only
+ * the JUnit one. That is a test's problem and not the SPI's: a production listener is called only
  * from the node thread and needs nothing of the sort.
  */
 public final class RecordingStats implements PrimosStatsListener {
@@ -47,7 +47,7 @@ public final class RecordingStats implements PrimosStatsListener {
     public final AtomicLong unusableNodeConfigs = new AtomicLong();
     public final AtomicLong peersForgotten = new AtomicLong();
 
-    /** Every probe round trip, in order — the samples a percentile would be built from. */
+    /** Every probe round trip, in order: the samples a percentile would be built from. */
     public final List<Long> probeRoundTrips = new ArrayList<>();
     public final List<Long> campaignsWon = new ArrayList<>();
     public final List<Long> campaignsLost = new ArrayList<>();

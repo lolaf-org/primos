@@ -26,7 +26,7 @@ import java.util.Set;
  *
  * <p><strong>One failed tenant does not make the witness {@code DOWN}.</strong> A witness serving
  * fifty clusters with one quarantined is doing its job for forty-nine, and a verdict that says
- * otherwise removes all fifty from rotation over one of them — the outage the quarantine exists to
+ * otherwise removes all fifty from rotation over one of them: the outage the quarantine exists to
  * avoid, arrived at from the other side. So a quarantined application belongs in the detail, where
  * somebody can act on it, and never in the status. The natural implementation aggregates over
  * tenants and gets this backwards, which is why there is a test for it.
@@ -37,8 +37,8 @@ import java.util.Set;
  * in a rotation.
  *
  * <p><strong>Nothing may point a liveness probe at this.</strong> Restarting a witness is the one
- * genuinely risky operation in its lifecycle — while it is down, every two-node cluster it serves
- * tolerates zero failures — so a probe that can be wrong is a mechanism for causing the outage it
+ * genuinely risky operation in its lifecycle (while it is down, every two-node cluster it serves
+ * tolerates zero failures) so a probe that can be wrong is a mechanism for causing the outage it
  * is watching for. Readiness is fine and useful; liveness is not.
  */
 public class WitnessHealthIndicator implements HealthIndicator {
@@ -67,8 +67,8 @@ public class WitnessHealthIndicator implements HealthIndicator {
                     + " it has without one.");
         }
         if (!quarantined.isEmpty()) {
-            health.withDetail("quarantineReason", "these applications' nodes failed — most often"
-                    + " state that can no longer be made durable — and this witness has stopped"
+            health.withDetail("quarantineReason", "these applications' nodes failed (most often"
+                    + " state that can no longer be made durable) and this witness has stopped"
                     + " answering for them. Every other application is unaffected, which is why"
                     + " this is not DOWN.");
         }

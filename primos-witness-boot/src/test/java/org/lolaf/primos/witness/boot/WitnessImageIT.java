@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The container image, driven the way a cluster drives it: real datagrams at a published UDP port.
  *
  * <p><strong>Bound only under {@code -Pdocker}, and guarded on the image name on top of that</strong>,
- * because {@code ./mvnw verify} has to stay green on a machine with no Docker daemon — which is the
+ * because {@code ./mvnw verify} has to stay green on a machine with no Docker daemon, which is the
  * same reason nothing in the reactor builds the image. The recipe is
  *
  * <pre>
@@ -56,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>What is asserted is the three things the image can get wrong without the build noticing: that
  * the published port speaks UDP at all, that the vote it grants reaches the volume rather than the
  * writable layer, and that {@code SIGTERM} produces a departure rather than a kill. Each fails
- * silently in production — a witness that is never spoken to looks exactly like a witness nobody is
+ * silently in production: a witness that is never spoken to looks exactly like a witness nobody is
  * asking.
  */
 @EnabledIfSystemProperty(named = WitnessImageIT.IMAGE_PROPERTY, matches = ".+",
@@ -72,7 +72,7 @@ class WitnessImageIT {
 
     /**
      * Generous, because it covers pulling nothing but starting a Spring Boot application on a
-     * loaded CI box — measured at ~4s, and a timeout tight enough to be interesting here would
+     * loaded CI box: measured at ~4s, and a timeout tight enough to be interesting here would
      * only ever be flaky.
      */
     private static final Duration STARTUP = Duration.ofSeconds(90);
@@ -154,7 +154,7 @@ class WitnessImageIT {
         while (System.nanoTime() < deadline) {
             // The same term every time on purpose. A witness that has already voted for this
             // candidate in this term grants it again, so a retry cannot turn a granted vote into a
-            // refused one — asking with a fresh term each time could.
+            // refused one: asking with a fresh term each time could.
             Boolean granted = node.requestVote(1L, Duration.ofMillis(500));
             if (granted != null) {
                 return granted;
@@ -168,7 +168,7 @@ class WitnessImageIT {
      *
      * <p>A temporary directory is created mode 700, so the image's uid 1000 could not traverse into
      * the configuration mount; and the state the container writes back comes out owned by that uid,
-     * which a build running as any other one cannot remove — so {@code @TempDir}'s cleanup would
+     * which a build running as any other one cannot remove, so {@code @TempDir}'s cleanup would
      * fail the test for a reason that has nothing to do with the image. Removal here is best-effort
      * for the same reason, and {@code clean} sweeps up whatever is left.
      */

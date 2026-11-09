@@ -34,7 +34,7 @@ import java.util.function.ToDoubleFunction;
  * A witness server's meters: its routing counters, and the whole of {@link PrimosMetrics} for every
  * cluster it serves.
  *
- * <p>Two halves, for the same reason {@link PrimosMetrics} has two — the per-tenant listeners have
+ * <p>Two halves, for the same reason {@link PrimosMetrics} has two: the per-tenant listeners have
  * to be handed to the builder, and the server's own counters cannot be read until it exists:
  *
  * <pre>
@@ -50,7 +50,7 @@ import java.util.function.ToDoubleFunction;
  * </pre>
  *
  * <p>Applications configured in a file are opened by the server's own constructor, so the factory
- * is called during {@code build()} — before {@code bind}. A tenant's meters are therefore
+ * is called during {@code build()}, before {@code bind}. A tenant's meters are therefore
  * registered either when it first appears or when the server arrives, whichever is later, and the
  * factory result is kept so that reconfiguring a tenant does not restart its counters at zero.
  *

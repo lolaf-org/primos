@@ -35,7 +35,7 @@ public final class Ports {
      *
      * <p>Inherently a race: the port is free at the instant it is reported and something else may
      * take it before the caller binds. Nothing better exists without keeping the socket, and
-     * binding to port 0 directly — which most tests here do — avoids the question entirely. Use
+     * binding to port 0 directly (which most tests here do) avoids the question entirely. Use
      * this only where the port has to be known before the thing that binds it is built.
      */
     public static int free() {

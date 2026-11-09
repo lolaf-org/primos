@@ -66,8 +66,13 @@ Every `PrimosListener` method has a default, so override only what you need: `on
 `onLeaderVersion`, `onPeerUp`, `onPeerDown`. `onLeaderVersion` says the leader's own data changed; see
 [Leader data](leader-data.md).
 
-**Callbacks arrive on the node thread.** Hand real work to your own executor, or you are holding up heartbeats. A
-callback slower than half the heartbeat interval is logged as such.
+**Callbacks run one at a time on a dedicated events thread, not the node thread.** A slow one cannot hold up
+heartbeats, but it delays every event behind it, so hand long work to your own executor. A callback slower than half the
+heartbeat interval is logged as such, and `stop()` waits for queued callbacks, up to its stop timeout.
+
+`listenerExecutor` replaces that thread. Yours must run tasks one at a time, in order, and never block the caller: an
+ordinary pool can deliver `LEADER` after the `FOLLOWER` that followed it, and one that runs tasks on the caller puts
+your listeners back on the node thread.
 
 What you branch on is a plain call: `role()`, `roleAndTerm()`, `leader()`, `isRunning()`. Read
 [Using leadership safely](using-leadership-safely.md) before branching on any of them.
@@ -82,7 +87,8 @@ durable storage: a network filesystem or a throttled cloud volume whose worst-ca
 will lose elections while writing.
 
 `addressLearning` lets a node follow a peer whose address changes. Enable it only with a cluster secret set: without a
-tag, one spoofed datagram would redirect a peer's traffic and partition it without forging any content.
+tag, one spoofed datagram would redirect a peer's traffic and partition it without forging any content. Even with one,
+an attacker on the network path can replay a captured datagram to the same end; see [protocol.md](protocol.md).
 
 ## Authentication
 

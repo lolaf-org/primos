@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * What the health endpoint says, and the one thing it must never say.
  *
  * <p>A witness serving fifty clusters with one quarantined is doing its job for forty-nine.
- * Reporting that as {@code DOWN} takes all fifty out of rotation over one of them — an outage
+ * Reporting that as {@code DOWN} takes all fifty out of rotation over one of them: an outage
  * caused by the health check rather than found by it, and the natural implementation, which
  * aggregates over tenants, does exactly that.
  */
@@ -81,7 +81,7 @@ class WitnessHealthIndicatorTest {
     @Test
     void a_quarantined_tenant_is_named_in_the_detail_and_the_witness_stays_up() {
         // 'orders' cannot write its vote; 'billing' is ordinary. The failure a witness quarantines
-        // for is a disk that goes bad while it runs, not one that was never durable — the server
+        // for is a disk that goes bad while it runs, not one that was never durable: the server
         // refuses that outright at startup.
         serve(application -> "orders".equals(application)
                 ? new UnwritableStateStore()

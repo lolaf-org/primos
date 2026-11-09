@@ -20,7 +20,7 @@ package org.lolaf.primos.witness;
  *
  * <p>An SPI with one shipped implementation, which is unusual enough to justify. The witness is
  * long-lived shared infrastructure whose served set changes over time, and it is the one seam in
- * primos genuinely likely to gain a second implementation — etcd, or a Kubernetes ConfigMap —
+ * primos genuinely likely to gain a second implementation (etcd, or a Kubernetes ConfigMap)
  * without the server needing to change.
  *
  * <p>Reloading matters more here than it would elsewhere: restarting a witness is the one risky

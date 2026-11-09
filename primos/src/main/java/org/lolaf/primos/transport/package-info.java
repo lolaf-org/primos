@@ -20,7 +20,7 @@
  *
  * <p>Public and supported. An application hands a transport to the node builder, and
  * {@link org.lolaf.primos.transport.UdpTransport} is the one to use unless there is a specific
- * reason not to — it resolves every peer's hostname once at {@code build()} and refuses to start on
+ * reason not to: it resolves every peer's hostname once at {@code build()} and refuses to start on
  * a name that does not resolve, so a configuration error is reported to whoever called it rather
  * than becoming a partition nobody can diagnose.
  *
@@ -28,7 +28,7 @@
  * supplies the second implementation, and a blocking loopback network supplies a third. All of them
  * answer the same contract test, which is what keeps the contract honest.
  *
- * <p>It is message-oriented and connectionless on purpose, and a transport may drop anything —
+ * <p>It is message-oriented and connectionless on purpose, and a transport may drop anything,
  * but it must be able to say how much of what it dropped, which is why
  * {@link org.lolaf.primos.transport.Transport#sendsDropped()} is on the SPI rather than left to
  * each implementation to spell its own way.

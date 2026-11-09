@@ -70,7 +70,7 @@ class LeaderTest {
     @Test
     void an_absent_peer_is_never_the_same_question_as_an_absent_leader() {
         // The reason this type exists rather than Optional<Peer>: both of these lead, and a bare
-        // Optional<Peer> would report both as empty — the value that means nobody leads.
+        // Optional<Peer> would report both as empty: the value that means nobody leads.
         assertThat(Leader.self(1).peer()).isEmpty();
         assertThat(Leader.byId(1).peer()).isEmpty();
         assertThat(Leader.self(1)).isNotEqualTo(Leader.byId(1));

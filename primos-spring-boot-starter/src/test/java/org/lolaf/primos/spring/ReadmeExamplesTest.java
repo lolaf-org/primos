@@ -45,7 +45,7 @@ import static org.awaitility.Awaitility.await;
  * where the documentation breaks, and both get fixed together. Documentation that is never executed
  * is documentation that is eventually wrong.
  *
- * <p>The classes below are that page's examples, trimmed only of the surrounding prose — the
+ * <p>The classes below are that page's examples, trimmed only of the surrounding prose: the
  * shapes, the method calls and the annotations are as printed.
  */
 class ReadmeExamplesTest {

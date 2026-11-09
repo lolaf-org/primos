@@ -68,6 +68,14 @@ public final class MessageEncoder {
     }
 
     /**
+     * A real vote request from a candidate a leader handed over to.
+     */
+    public ByteBuffer handoverVote(ByteBuffer out, long term) {
+        header(out, MessageType.REQUEST_VOTE, WireFormat.FLAG_HANDOVER, term);
+        return finish(out);
+    }
+
+    /**
      * A vote reply, echoing whether this was a pre-vote so the two rounds cannot be confused.
      */
     public ByteBuffer requestVoteReply(ByteBuffer out, long term, boolean granted, boolean preVote) {
@@ -138,7 +146,7 @@ public final class MessageEncoder {
     }
 
     /**
-     * States this node's own configuration — the intervals it is running.
+     * States this node's own configuration: the intervals it is running.
      *
      * <p>Milliseconds as {@code u32} rather than nanoseconds as {@code u64}: milliseconds are the
      * unit every one of these is configured in, and 32 bits carries seven weeks of them.

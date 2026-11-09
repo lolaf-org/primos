@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Role;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -116,7 +117,7 @@ class LeaderLifecycleTest {
     /**
      * Leadership can be lost and regained faster than a stop completes. Without the term check a
      * stop from term 5 landing after the start for term 6 leaves a leader with everything switched
-     * off — silent, indefinite, and the worst failure this class can have.
+     * off: silent, indefinite, and the worst failure this class can have.
      */
     @Test
     void a_stale_transition_is_dropped_by_term() {
@@ -133,6 +134,27 @@ class LeaderLifecycleTest {
             eventually(() -> assertThat(gated.isRunning())
                     .as("a stop from term 5 must not switch off a leader of term 6")
                     .isTrue());
+        });
+    }
+
+    /**
+     * A child context's refresh event reaches its parent's listeners too. A management port or a Feign client's context
+     * created at first use would otherwise quiesce the beans of a node that is already leading, with no transition to
+     * start them again. Its twin is {@link #a_gated_bean_that_auto_starts_is_stopped_before_the_node_can_lead}.
+     */
+    @Test
+    void a_child_context_refreshing_does_not_switch_off_a_running_leader() {
+        runner().withUserConfiguration(AnnotatedBean.class).run(context -> {
+            AutoStartingBean gated = context.getBean(AutoStartingBean.class);
+            context.getBean(LeaderLifecycleController.class).onRoleChanged(Role.CANDIDATE, Role.LEADER, 4);
+            eventually(() -> assertThat(gated.isRunning()).isTrue());
+
+            try (AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext()) {
+                child.setParent(context.getSourceApplicationContext());
+                child.refresh();
+            }
+
+            assertThat(gated.isRunning()).isTrue();
         });
     }
 
@@ -196,8 +218,8 @@ class LeaderLifecycleTest {
      * The reason the transitions have a thread of their own.
      *
      * <p>Stopping a message listener container drains it and can take tens of seconds. Run on the
-     * thread that reported the role change, that stalls whatever is on the other end of it — the
-     * node thread, when no listener executor is configured — which misses heartbeats, triggers a
+     * thread that reported the role change, that stalls whatever is on the other end of it (the
+     * node thread, when no listener executor is configured) which misses heartbeats, triggers a
      * spurious election and loses the leadership the stop was reacting to, which triggers another
      * stop. The executor is what makes that impossible, and until now nothing said so.
      *
@@ -241,7 +263,7 @@ class LeaderLifecycleTest {
      * The other half of what a single thread buys: a transition submitted while a slow one is in
      * flight is queued behind it rather than dropped or interleaved. Leadership regained during a
      * stop is the realistic way to get here, and a start that went missing would leave a leader
-     * with everything switched off — silent and indefinite.
+     * with everything switched off: silent and indefinite.
      */
     @Test
     void a_transition_arriving_during_a_slow_stop_is_applied_after_it() {
@@ -309,7 +331,7 @@ class LeaderLifecycleTest {
     }
 
     /**
-     * A gated bean whose stop blocks until the test lets go — a listener container draining, in
+     * A gated bean whose stop blocks until the test lets go: a listener container draining, in
      * miniature.
      *
      * <p>Not auto-start, unlike its parent. An auto-starting bean is stopped once during refresh,

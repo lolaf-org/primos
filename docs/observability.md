@@ -51,7 +51,7 @@ A snapshot cannot carry the three things worth having:
 
 | callback | what it says |
 |---|---|
-| `onElectionWon` / `onElectionLost` | with how long the campaign took, timed from the pre-vote |
+| `onElectionWon` / `onElectionLost` | with how long the campaign took, timed from the pre-vote, or for a handover from the election |
 | `onLeaderKnown` | with how long the cluster had none, across every election in the outage |
 | `onLeadershipRelinquished` | CheckQuorum stood this node down: it could not reach a majority |
 | `onHandoverSent` / `onHandoverAccepted` | leadership handed on at shutdown, and taken up (from a shutdown or a transfer) |

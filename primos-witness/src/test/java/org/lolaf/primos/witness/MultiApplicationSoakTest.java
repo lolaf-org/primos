@@ -146,7 +146,7 @@ class MultiApplicationSoakTest {
                 .as("every datagram belonged to a configured cluster")
                 .isZero();
         assertThat(server.routing().undeliverableReplies())
-                .as("every reply reached somebody, including the first from each node — those are"
+                .as("every reply reached somebody, including the first from each node: those are"
                         + " answered before the sender has been learned, and getting that wrong"
                         + " costs every new node a whole election timeout to retry")
                 .isZero();
@@ -182,7 +182,7 @@ class MultiApplicationSoakTest {
      *
      * <p>Nothing configures this cluster here: no file names it, and the witness is built without
      * the timings override the other scenarios use, so what it runs is what the nodes state. A pair
-     * that fails over correctly is the proof, because every step had to work — the nodes' config
+     * that fails over correctly is the proof, because every step had to work: the nodes' config
      * messages had to arrive and create the application, the witness had to adopt their intervals,
      * and it had to grant the vote that breaks the tie on them.
      */

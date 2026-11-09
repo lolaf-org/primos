@@ -21,7 +21,7 @@ package org.lolaf.primos.witness;
  * <p>One axis, deliberately, rather than one setting per thing that could be sourced either way.
  * Secrets are the exception that cannot be on it: a secret can never arrive over the wire, because
  * it is what authenticates the datagram that would carry it, and {@code secret.algorithm} is local
- * policy for the same reason the wire carries no algorithm name — a datagram naming its own
+ * policy for the same reason the wire carries no algorithm name: a datagram naming its own
  * algorithm lets an attacker pick the weakest one both ends accept. So the {@code applications/}
  * directory is read under either value; what changes is whether it is the served list or only a
  * keyring.
@@ -39,8 +39,8 @@ public enum ConfigSource {
     /**
      * Applications are created, and their timings taken, from the config messages their nodes send.
      *
-     * <p>Much less operational burden — a new cluster just points at the witness, and retuning it
-     * needs no change here — at the cost of the failure that made {@link #FILE} the default. Nodes
+     * <p>Much less operational burden (a new cluster just points at the witness, and retuning it
+     * needs no change here) at the cost of the failure that made {@link #FILE} the default. Nodes
      * configured {@code orders} and {@code ordres} drop each other's datagrams, so each sees the
      * other as unreachable; each then asks the witness, which creates <em>two</em> buckets and
      * grants a vote from each. Both reach a majority. Two leaders, from one transposed letter,

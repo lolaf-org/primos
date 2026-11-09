@@ -42,7 +42,7 @@ public class Peer {
     /**
      * Highest permitted node id.
      *
-     * <p>This bounds the id <em>value</em>, not the size of a cluster — see
+     * <p>This bounds the id <em>value</em>, not the size of a cluster; see
      * {@link Quorum#MAX_RECOMMENDED_VOTERS} for that, which is far smaller. Ids may be sparse, so
      * an operator is free to use a scheme that means something, such as {@code 101, 102, 201}
      * for two datacentres.
@@ -95,11 +95,18 @@ public class Peer {
      * Validates a node id, returning it unchanged, for reuse by configuration.
      */
     public static int requireValidId(int id, String what) {
-        if (id < MIN_ID || id > MAX_ID) {
+        if (!isValidId(id)) {
             throw new IllegalArgumentException(
                     what + " must be between " + MIN_ID + " and " + MAX_ID + ", but was " + id);
         }
         return id;
+    }
+
+    /**
+     * For an id read off the wire, which is an unchecked 32-bit integer.
+     */
+    public static boolean isValidId(int id) {
+        return id >= MIN_ID && id <= MAX_ID;
     }
 
     private static String requireHost(String host) {

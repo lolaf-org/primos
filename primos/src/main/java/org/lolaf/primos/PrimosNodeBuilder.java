@@ -63,7 +63,7 @@ public final class PrimosNodeBuilder {
      *
      * <p>A built {@link ClusterConfig} rather than a set of fields proxied through this builder,
      * because the two halves are genuinely different questions. That one describes the cluster and
-     * is the same shape on every node; this one wires up one node's runtime — where its state
+     * is the same shape on every node; this one wires up one node's runtime, where its state
      * lives, how it reaches the network, who listens. Keeping them apart also means there is one
      * place that validates a cluster's shape rather than two ways to express it.
      */
@@ -81,23 +81,22 @@ public final class PrimosNodeBuilder {
     private Supplier<Transport> transports;
 
     /**
-     * Where the counters go. One sink, fixed here, because some of these fire per datagram — see
+     * Where the counters go. One sink, fixed here, because some of these fire per datagram; see
      * {@link PrimosStatsListener} for why there is no list and no executor.
      */
     @Setter
     private PrimosStatsListener statsListener = PrimosStatsListener.NONE;
 
     /**
-     * Where listener callbacks run. By default they run on the node thread, which means a slow
-     * listener stalls consensus; supplying an executor moves them off it without primos creating a
-     * thread of its own.
+     * Where listener callbacks run. By default a dedicated events thread, which keeps a slow listener from stalling
+     * consensus. One supplied here must run tasks one at a time, in order, without blocking the caller. An event it
+     * rejects is logged and lost.
      */
     @Setter
     private Executor listenerExecutor;
 
     /**
-     * How long a listener callback may take before it is warned about. Defaults to half the
-     * heartbeat interval, which is the point at which one starts to threaten the next heartbeat.
+     * How long a listener callback may take before it is warned about. Defaults to half the heartbeat interval.
      */
     @Setter
     private Duration slowCallbackThreshold;

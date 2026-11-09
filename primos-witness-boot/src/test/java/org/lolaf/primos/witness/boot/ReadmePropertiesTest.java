@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The library holds its documented Java examples to a compiler; this module's examples are
  * properties, so this is the same rule with the tool that fits them. A renamed or deleted setting
- * breaks the build rather than quietly leaving the documentation wrong — which for an
+ * breaks the build rather than quietly leaving the documentation wrong, which for an
  * operator-facing artifact is the kind of wrong that is only discovered at three in the morning.
  *
  * <p>Both sides are generated: the keys come out of that page, and the truth comes from the
@@ -49,7 +49,7 @@ class ReadmePropertiesTest {
      * {@code applications[0].name} and {@code keys.<name>.value} are one setting each.
      *
      * <p>A name followed by a {@code {tag="..."} } selector is a <em>meter</em> rather than a
-     * setting — the metrics section names {@code primos.witness.routing} that way — and the
+     * setting (the metrics section names {@code primos.witness.routing} that way) and the
      * prefixes collide because both describe the same witness.
      */
     private static final Pattern KEY = Pattern.compile("primos\\.witness\\.[A-Za-z0-9.\\[\\]<>*_-]+");

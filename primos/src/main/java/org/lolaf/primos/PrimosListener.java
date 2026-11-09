@@ -23,11 +23,9 @@ import java.util.Optional;
  *
  * <p>Every method has a default implementation, so implement only what you care about.
  *
- * <p><strong>Callbacks run on the node thread.</strong> A listener that blocks — a slow log write,
- * a database call, a contended lock — stalls consensus, misses heartbeats and can trigger a
- * spurious election. Do only trivial work here and hand anything real to your own executor. If
- * that is inconvenient, supply an executor when building the node and dispatch moves off the node
- * thread entirely; a watchdog warns either way when a callback runs long.
+ * <p><strong>Callbacks run on a dedicated events thread</strong>, never the one sending heartbeats, so a slow
+ * listener cannot stall consensus. It does delay every event behind it, so the role you are told about may have
+ * moved on; a watchdog warns when a callback runs long.
  *
  * <p>Events arrive in order, one at a time, and an exception thrown from one is logged and
  * swallowed rather than allowed to kill the node. Each event carries the term and role it belongs
@@ -44,7 +42,7 @@ public interface PrimosListener {
     }
 
     /**
-     * The cluster's leader changed, which is not the same event as this node's role changing — a
+     * The cluster's leader changed, which is not the same event as this node's role changing: a
      * follower needs this to know where to forward work. Empty means no leader is currently known,
      * which is a real and common state during an election, not an error.
      *

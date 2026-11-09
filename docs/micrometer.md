@@ -39,12 +39,13 @@ PrimosNode node = PrimosNode.builder()
                 .peers(cluster.allPeers()))
         .build();
 
-node.start();
 metrics.bind(node);
+node.start();
 ```
 
 `bind` also registers for role, leader and peer events, which is why there is nothing to pass to `listener(...)`. Bind
-it once: a second call is refused, because it would count every event twice.
+once and before `start()`. A second call is refused because it would count every event twice, and a node already
+running is refused because a peer that is already up would never report it, leaving its gauge at 0.
 
 The examples on this page are compiled and run by
 [`ReadmeExamplesTest`](../primos-micrometer/src/test/java/org/lolaf/primos/micrometer/ReadmeExamplesTest.java).

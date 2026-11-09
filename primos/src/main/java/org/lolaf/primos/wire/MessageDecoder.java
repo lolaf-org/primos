@@ -20,8 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.lolaf.primos.PrimosStatsListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -35,20 +33,20 @@ import java.util.function.IntPredicate;
  * that has not passed everything above it.
  *
  * <ol>
- *   <li><b>Length</b> — at least a header, at most one unfragmented datagram.</li>
- *   <li><b>Authentication</b> — the tag over the whole datagram. Unconditionally first, because
+ *   <li><b>Length</b>: at least a header, at most one unfragmented datagram.</li>
+ *   <li><b>Authentication</b>: the tag over the whole datagram. Unconditionally first, because
  *       "verify before parse" is only useful as a rule with no exceptions, even though the
  *       application-name compare below is cheaper than a SHA-256.</li>
- *   <li><b>Magic and version</b> — exact match; an unknown version is dropped, never guessed.</li>
- *   <li><b>Application name</b> — is this datagram even for our cluster.</li>
- *   <li><b>Type and exact size</b> — one comparison kills every truncated or padded datagram.</li>
- *   <li><b>Sender</b> — a configured peer, by id rather than by address.</li>
- *   <li><b>Parse and dispatch</b> — constant offsets into the handler.</li>
+ *   <li><b>Magic and version</b>: exact match; an unknown version is dropped, never guessed.</li>
+ *   <li><b>Application name</b>: is this datagram even for our cluster.</li>
+ *   <li><b>Type and exact size</b>: one comparison kills every truncated or padded datagram.</li>
+ *   <li><b>Sender</b>: a configured peer, by id rather than by address.</li>
+ *   <li><b>Parse and dispatch</b>: constant offsets into the handler.</li>
  * </ol>
  *
  * <p>Reads are absolute, so the buffer's position is untouched and nothing is copied. Allocation
  * happens only on the diagnostic path, when a mismatched application name is decoded for the log
- * line — which is the rare case, and the case where knowing the name is the whole point.
+ * line, which is the rare case, and the case where knowing the name is the whole point.
  *
  * <p>Not thread-safe: one decoder per node thread.
  */
@@ -60,10 +58,6 @@ public final class MessageDecoder {
     private final IntPredicate knownSender;
     /**
      * Told about every drop, and the only place they are reported.
-     *
-     * <p>There used to be a {@code DropCounters} here as well, holding the same numbers so that a
-     * snapshot could read them back. Nothing reads a snapshot any more, so counting them twice was
-     * counting them once too often; the listener is the seam.
      */
     private final PrimosStatsListener stats;
 
@@ -71,7 +65,7 @@ public final class MessageDecoder {
      * The sender of the last datagram that passed every check, or -1.
      *
      * <p>Exists so a transport can be told where a peer is speaking from, but only once the
-     * message has been authenticated — learning an address from an unverified datagram would let
+     * message has been authenticated: learning an address from an unverified datagram would let
      * one spoofed packet redirect a peer's traffic.
      */
     @Getter
@@ -98,12 +92,12 @@ public final class MessageDecoder {
      * <p>Every other reader in primos verifies the tag first, unconditionally, because "verify
      * before parse" is only useful as a rule with no exceptions. <strong>The witness server cannot
      * follow it.</strong> Its secret is per-application, so it has to know which application a
-     * datagram claims to be for before it knows which key to check it with — and that claim is in
+     * datagram claims to be for before it knows which key to check it with, and that claim is in
      * the datagram's own unverified bytes.
      *
      * <p>That is sound, and the reasons are worth stating rather than rediscovering. What is read
      * here is a fixed-offset, fixed-width field: no allocation sized by attacker input, no length
-     * arithmetic, nothing that can be walked off the end. And the claim buys nothing on its own —
+     * arithmetic, nothing that can be walked off the end. And the claim buys nothing on its own:
      * an attacker may name any application they like and still cannot produce a tag that
      * application's key accepts. The real decoder then re-checks the name after verifying, so
      * routing and acceptance can never disagree.
@@ -203,8 +197,7 @@ public final class MessageDecoder {
             return drop(DropReason.UNKNOWN_VERSION, "version {}", version);
         }
         if (!hasExpectedApplication(datagram)) {
-            return drop(DropReason.WRONG_APPLICATION, "addressed to application '{}'",
-                    readApplicationName(datagram));
+            return dropForeignApplication(datagram);
         }
         MessageType type = MessageType.forCode(datagram.get(WireFormat.OFFSET_TYPE) & 0xFF);
         if (type == null) {
@@ -213,8 +206,7 @@ public final class MessageDecoder {
         }
         int expectedLength = type.messageBytes() + authenticator.tagBytes();
         if (length != expectedLength) {
-            return drop(DropReason.UNKNOWN_TYPE, "{} must be " + expectedLength + " bytes, got {}",
-                    type, length);
+            return drop(DropReason.UNKNOWN_TYPE, "{} must be {} bytes, got {}", type, expectedLength, length);
         }
         int senderId = datagram.getInt(WireFormat.OFFSET_SENDER);
         if (!knownSender.test(senderId)) {
@@ -233,7 +225,7 @@ public final class MessageDecoder {
 
         switch (type) {
             case REQUEST_VOTE:
-                handler.onRequestVote(senderId, term, preVote);
+                handler.onRequestVote(senderId, term, preVote, (flags & WireFormat.FLAG_HANDOVER) != 0);
                 break;
             case REQUEST_VOTE_REPLY:
                 handler.onRequestVoteReply(senderId, term,
@@ -286,13 +278,13 @@ public final class MessageDecoder {
      * Refuses a datagram: tells the listener, and says why at DEBUG.
      *
      * <p><strong>DEBUG and not WARN, deliberately.</strong> Logging every dropped datagram at a
-     * visible level turns a flood into a second denial of service — the attacker sends garbage and
+     * visible level turns a flood into a second denial of service: the attacker sends garbage and
      * the victim writes all of it down. The listener is the signal; the line is for somebody who
      * turned it on because they are already diagnosing something.
      *
      * <p>Guarded rather than left to the logger, and that was measured rather than assumed. SLF4J
      * takes {@code Object}, so an {@code int} sender id is boxed and gathered into a varargs array
-     * <em>at the call site</em>, before the logger can decide the level is off — an allocation on
+     * <em>at the call site</em>, before the logger can decide the level is off: an allocation on
      * the one path whose rate an attacker chooses, which is precisely the path that must not
      * allocate. Hence primitives in the signatures and the boxing inside the guard.
      */
@@ -307,23 +299,24 @@ public final class MessageDecoder {
     private boolean drop(DropReason reason, String detail, int argument) {
         stats.onDatagramDropped(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+            log.debug("dropped datagram ({}): " + detail, reason, argument);
         }
         return false;
     }
 
-    private boolean drop(DropReason reason, String detail, String argument) {
+    private boolean drop(DropReason reason, String detail, MessageType type, int expected, int length) {
         stats.onDatagramDropped(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+            log.debug("dropped datagram ({}): " + detail, reason, type, expected, length);
         }
         return false;
     }
 
-    private boolean drop(DropReason reason, String detail, MessageType type, int length) {
-        stats.onDatagramDropped(reason);
+    private boolean dropForeignApplication(ByteBuffer datagram) {
+        stats.onDatagramDropped(DropReason.WRONG_APPLICATION);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {} {}", reason, detail, type, length);
+            log.debug("dropped datagram ({}): addressed to application '{}'", DropReason.WRONG_APPLICATION,
+                    readApplicationName(datagram));
         }
         return false;
     }

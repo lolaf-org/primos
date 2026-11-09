@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assumptions.assumeThat;
 /**
  * A metrics binder runs on the node thread, on paths that turn at heartbeat rate and, for drops,
  * per datagram. {@code LoopAllocationTest} in the library pins a node's steady state at zero bytes
- * a turn with a counting listener attached; this is the other end of that claim — that the real
+ * a turn with a counting listener attached; this is the other end of that claim: that the real
  * listener is the counting one.
  *
  * <p>It is why every meter is resolved in the constructor and none is looked up by name or tag when

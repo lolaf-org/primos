@@ -22,7 +22,7 @@ package org.lolaf.primos.wire;
  * validation work: one length comparison rejects every truncated, padded or malformed datagram
  * before a field is read, and the parser contains no loops, so there is nothing in it to attack.
  *
- * <p>There is no length prefix and no framing state machine, because UDP gives us the frame — a
+ * <p>There is no length prefix and no framing state machine, because UDP gives us the frame: a
  * datagram arrives whole or not at all.
  *
  * <pre>
@@ -106,6 +106,12 @@ public final class WireFormat {
      * standing, which is what it does.
      */
     public static final int FLAG_DECLINES_CANDIDACY = 0x0002;
+
+    /**
+     * Marks a real {@code RequestVote} as campaigning on a leader's own {@code TimeoutNow}, so a voter that has just
+     * heard from that leader does not refuse it.
+     */
+    public static final int FLAG_HANDOVER = 0x0004;
 
     private WireFormat() {
     }

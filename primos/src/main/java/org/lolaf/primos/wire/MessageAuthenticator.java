@@ -29,7 +29,7 @@ import java.util.Objects;
 /**
  * Appends and verifies the tag that proves a datagram came from a cluster member.
  *
- * <p>HMAC-SHA256 unless a cluster chooses otherwise — see {@link #hmac(String, byte[], byte[])},
+ * <p>HMAC-SHA256 unless a cluster chooses otherwise; see {@link #hmac(String, byte[], byte[])},
  * and note that the choice is local policy every member has to share, because nothing on the wire
  * says which algorithm was used.
  *
@@ -37,20 +37,21 @@ import java.util.Objects;
  * "is this from a configured peer?" is not a security control on its own: an attacker who guesses
  * the port can inject a message carrying an enormous term, and every node that sees it steps down
  * and adopts that term. That is a permanent, trivially repeatable denial of service. The reply
- * direction matters at least as much — a forged vote grant plus a candidate's own vote is a
+ * direction matters at least as much: a forged vote grant plus a candidate's own vote is a
  * majority in a three-voter cluster, which manufactures a leader outright.
  *
  * <p><strong>There is deliberately no "authentication present" flag in the header.</strong> If a
  * datagram declared whether it was authenticated, an attacker would clear the bit and strip
- * authentication — a downgrade attack. Whether a tag is expected is local policy, and the length
+ * authentication: a downgrade attack. Whether a tag is expected is local policy, and the length
  * check enforces it: an unauthenticated datagram is simply the wrong size for a node expecting 32
  * more bytes.
  *
  * <p>What this does not provide: confidentiality (it authenticates, it does not encrypt) and
  * replay protection (a captured datagram resent verbatim still verifies). Replay is absorbed by
- * the protocol rather than here — old-term replays fail the term check, current-term replays are
+ * the protocol rather than here: old-term replays fail the term check, current-term replays are
  * duplicates UDP already forced us to tolerate, and a replayed vote grant is a no-op because votes
- * are counted in a set.
+ * are counted in a set. The exception is a learned address: the tag does not cover the source, so
+ * a captured datagram resent from elsewhere moves that peer's address until it next speaks.
  *
  * <p>Not thread-safe: {@link Mac} is stateful, and each instance is owned by one node thread.
  */
@@ -59,7 +60,7 @@ public final class MessageAuthenticator {
     /**
      * What a cluster authenticates with unless it says otherwise. Every Java platform has it, its
      * tag is the 32 bytes the wire format was drawn around, and nothing has been found wrong with
-     * it — a cluster that has no opinion should keep this one.
+     * it: a cluster that has no opinion should keep this one.
      */
     public static final String DEFAULT_ALGORITHM = "HmacSHA256";
 
@@ -67,7 +68,7 @@ public final class MessageAuthenticator {
      * The shortest tag this will accept, whatever the algorithm produces.
      *
      * <p>128 bits. A tag is the whole of what stops a forged datagram, and a forged reply here does
-     * not merely corrupt a message — it manufactures a leader. No standard {@code Mac} is below
+     * not merely corrupt a message: it manufactures a leader. No standard {@code Mac} is below
      * this; the check exists for the exotic provider that is.
      */
     private static final int MIN_TAG_BYTES = 16;
@@ -145,7 +146,7 @@ public final class MessageAuthenticator {
      * Bytes this adds to every datagram: the tag length of the key in force, 0 when disabled.
      *
      * <p><strong>Read this only after {@link #verify}</strong>, which is what selects the key. The
-     * receive pipeline does exactly that — it verifies, then checks the length against the type —
+     * receive pipeline does exactly that (it verifies, then checks the length against the type)
      * and with a ring of mixed algorithms that ordering stops being tidiness and becomes load
      * bearing, because the expected length depends on which key accepted the datagram.
      */
@@ -165,9 +166,7 @@ public final class MessageAuthenticator {
     /**
      * Authentication with a shared cluster secret.
      *
-     * <p>The key is initialised once, because the key schedule is the expensive part of HMAC;
-     * tagging a datagram thereafter costs roughly a microsecond, against heartbeats every tens of
-     * milliseconds.
+     * <p>The key is initialised once, because the key schedule is the expensive part of HMAC.
      */
     public static MessageAuthenticator hmacSha256(byte[] secret) {
         return hmac(DEFAULT_ALGORITHM, secret, null);
@@ -176,7 +175,7 @@ public final class MessageAuthenticator {
     /**
      * Authentication during a secret rotation: tags with {@code secret}, accepts either.
      *
-     * <p>Without this, changing a secret is a flag day — every node in the cluster has to be
+     * <p>Without this, changing a secret is a flag day: every node in the cluster has to be
      * restarted at the same instant, because the moment one holds the new secret and another holds
      * the old one they stop being able to talk at all. That is the worst possible time to lose a
      * cluster's consensus traffic, and the pressure it creates is what makes people leave secrets
@@ -196,7 +195,7 @@ public final class MessageAuthenticator {
     }
 
     /**
-     * Authentication with a chosen {@link Mac} algorithm — any name the platform's JCE knows, such
+     * Authentication with a chosen {@link Mac} algorithm: any name the platform's JCE knows, such
      * as {@code HmacSHA256} or {@code HmacSHA512}.
      *
      * <p><strong>The algorithm is not on the wire, and deliberately so.</strong> A datagram that
@@ -205,7 +204,7 @@ public final class MessageAuthenticator {
      * "authentication present" flag already avoids. It is local policy instead, exactly like the
      * secret: <em>every node of a cluster, its witness included, must be configured with the same
      * one</em>. A cluster that disagrees with itself here behaves precisely as though it disagreed
-     * about the secret — every datagram fails verification and is counted under
+     * about the secret: every datagram fails verification and is counted under
      * {@link org.lolaf.primos.DropReason#BAD_TAG}, which is the number to look at when a cluster
      * that should be talking is silent.
      *
@@ -239,14 +238,14 @@ public final class MessageAuthenticator {
     /**
      * Authentication against several keys at once, accepting any of them.
      *
-     * <p>This is what {@link #hmac(String, byte[], byte[])} already was — a current key and its
-     * predecessor are a two-key ring — generalised to the case a witness server has: <em>keys
+     * <p>This is what {@link #hmac(String, byte[], byte[])} already was (a current key and its
+     * predecessor are a two-key ring) generalised to the case a witness server has: <em>keys
      * belonging to different parties</em>, not one key and its own past. A datagram is authentic
      * if any key accepts it, and replies are signed with whichever key last did.
      *
      * <p>Two consequences worth knowing before relying on it. <strong>A ring is not isolation:</strong>
      * any key in it verifies any datagram given to this authenticator, so whoever decides which
-     * keys go in a ring is deciding who can speak for whom — a caller wanting one party's traffic
+     * keys go in a ring is deciding who can speak for whom: a caller wanting one party's traffic
      * checked against only that party's key must build a ring holding only that key. And
      * <strong>the keys may use different algorithms</strong>, so the tag length varies with the key
      * that matched; see {@link #tagBytes()}.
@@ -370,15 +369,15 @@ public final class MessageAuthenticator {
         try {
             mac.doFinal(out, 0);
         } catch (ShortBufferException e) {
-            throw new IllegalStateException("a 32-byte buffer always fits an HMAC-SHA256 tag", e);
+            throw new IllegalStateException("the buffer is sized to this Mac's tag", e);
         }
     }
 
     /**
-     * Whether more than one key is accepted — a rotation window, or a witness's several tenants.
+     * How many keys are accepted: one, two during a rotation, more for a witness's several tenants.
      */
-    public boolean hasPreviousSecret() {
-        return keys.length > 1;
+    public int keyCount() {
+        return keys.length;
     }
 
     /**
@@ -435,7 +434,7 @@ public final class MessageAuthenticator {
      * Whether one key accepts this datagram, at that key's own tag length.
      *
      * <p>The length test is not only a bounds check. A ring may mix algorithms, and a tag length
-     * that would leave less than a header behind cannot be this key's — so a datagram tagged with
+     * that would leave less than a header behind cannot be this key's, so a datagram tagged with
      * a 32-byte key is rejected by a 64-byte key without hashing anything, which is what keeps a
      * mixed ring from costing a hash per key on every datagram.
      */

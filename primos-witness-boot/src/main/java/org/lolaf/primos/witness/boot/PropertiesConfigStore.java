@@ -28,8 +28,8 @@ import java.util.*;
  * The whole configuration from Spring properties, bound once at boot and never re-read.
  *
  * <p><strong>Opt-in, and it costs the thing this SPI exists for.</strong> {@link ConfigStore} is a
- * seam because restarting a witness is the one genuinely risky operation in its lifecycle — while
- * it is down, every two-node cluster it serves tolerates zero failures — so onboarding a tenant
+ * seam because restarting a witness is the one genuinely risky operation in its lifecycle (while
+ * it is down, every two-node cluster it serves tolerates zero failures) so onboarding a tenant
  * must not need one. This implementation trades that away: adding a cluster, or rotating a secret,
  * means a restart. It is a legitimate choice for a single-tenant deployment whose served set
  * genuinely never changes, and it is a bad one for anything else, which is why choosing it logs a
@@ -44,7 +44,7 @@ public class PropertiesConfigStore implements ConfigStore {
 
     /**
      * How far ahead "never" is. A finite interval rather than {@link Long#MAX_VALUE}, because the
-     * server computes {@code deadline - now} and {@code System.nanoTime()} may be negative — where
+     * server computes {@code deadline - now} and {@code System.nanoTime()} may be negative, where
      * the maximum would overflow into a negative wait and turn the select loop into a spin.
      */
     private static final long NEVER_NANOS = Duration.ofDays(1).toNanos();
@@ -56,7 +56,7 @@ public class PropertiesConfigStore implements ConfigStore {
         log.warn("this witness is configured from Spring properties, so its served set and its keys"
                         + " are fixed until the process restarts: onboarding a cluster or rotating a"
                         + " secret now needs one. That is the risky operation in a witness's"
-                        + " lifecycle — while it is down, every two-node cluster it serves tolerates"
+                        + " lifecycle, while it is down, every two-node cluster it serves tolerates"
                         + " zero failures. Serving {} application(s): {}",
                 snapshot.applicationNames().size(), snapshot.applicationNames());
     }
@@ -66,7 +66,7 @@ public class PropertiesConfigStore implements ConfigStore {
             throw new IllegalStateException("primos.witness.state-directory is required with"
                     + " config-store=properties: a witness must be able to remember its term and"
                     + " vote across a restart, or it can grant a second vote in a term it has"
-                    + " already voted in and elect two leaders — the exact failure it was deployed"
+                    + " already voted in and elect two leaders: the exact failure it was deployed"
                     + " to prevent.");
         }
         WitnessSettings.Builder settings = WitnessSettings.builder()
@@ -112,7 +112,7 @@ public class PropertiesConfigStore implements ConfigStore {
     }
 
     /**
-     * A profile, or the intervals spelled out, or whatever the level above decided — never a
+     * A profile, or the intervals spelled out, or whatever the level above decided, never a
      * mixture.
      *
      * <p>The same rule and the same reasoning as the file store's {@code timings.*} block: a
@@ -122,7 +122,7 @@ public class PropertiesConfigStore implements ConfigStore {
      * environment variable or the command line.
      *
      * @param prefix   how an operator spells these keys, so an error names what they wrote
-     * @param fallback what applies when nothing here is set — the witness-wide values for an
+     * @param fallback what applies when nothing here is set: the witness-wide values for an
      *                 application, and the LAN profile for the witness itself
      */
     private static Timings timings(WitnessProperties.TimingsProperties timings, String prefix,
@@ -145,37 +145,15 @@ public class PropertiesConfigStore implements ConfigStore {
         if (explicit.isEmpty()) {
             return fallback;
         }
-        // The two bounds are a pair: setting one against the other's default is how an invalid
-        // range is built. Timings rejects that at build(), but naming the property is a better
-        // error than naming a Java field, so it is caught here first.
-        boolean hasMin = timings.electionTimeoutMin() != null;
-        boolean hasMax = timings.electionTimeoutMax() != null;
-        if (hasMin != hasMax) {
-            throw new IllegalStateException(prefix + ".election-timeout-" + (hasMin ? "min" : "max")
-                    + " is set without its pair. The election timeout is a range drawn from afresh"
-                    + " on every reset, and setting one end against the other's default is how an"
-                    + " invalid or too-narrow range is built. Set both.");
-        }
-        Timings.TimingsBuilder builder = Timings.builder();
-        if (timings.heartbeatInterval() != null) {
-            builder.heartbeatInterval(timings.heartbeatInterval());
-        }
-        if (hasMin) {
-            builder.electionTimeoutMin(timings.electionTimeoutMin());
-            builder.electionTimeoutMax(timings.electionTimeoutMax());
-        }
-        if (timings.probeInterval() != null) {
-            builder.probeInterval(timings.probeInterval());
-        }
-        if (timings.advertisementInterval() != null) {
-            builder.advertisementInterval(timings.advertisementInterval());
-        }
-        if (timings.failureThreshold() != null) {
-            builder.failureThreshold(timings.failureThreshold());
-        }
-        // Every relationship between these — the election timeout above five heartbeats, the range
-        // wider than one heartbeat, the probe ceiling — is checked in here, with its own message.
-        return builder.build();
+        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                prefix + ".election-timeout-min", prefix + ".election-timeout-max");
+        return Timings.builder()
+                .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
+                .probeIntervalIfSet(timings.probeInterval())
+                .advertisementIntervalIfSet(timings.advertisementInterval())
+                .failureThresholdIfSet(timings.failureThreshold())
+                .build();
     }
 
     private static Keyring keyring(WitnessProperties properties) {
@@ -192,7 +170,7 @@ public class PropertiesConfigStore implements ConfigStore {
         if (keys.isEmpty()) {
             log.warn("no keys are configured. An unauthenticated witness answers anybody who asks,"
                     + " and one forged vote grant plus a candidate's own vote is a majority in a"
-                    + " three-voter cluster — so this is a route to a false leader, not merely a"
+                    + " three-voter cluster, so this is a route to a false leader, not merely a"
                     + " denial of service.");
         }
         return new Keyring(keys);

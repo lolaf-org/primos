@@ -34,6 +34,7 @@ import org.lolaf.primos.Peer;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.witness.ConfigStore;
 import org.lolaf.primos.witness.FileConfigStore;
+import org.lolaf.primos.witness.WitnessKey;
 import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -74,7 +75,7 @@ class ConfigStoreChoiceTest {
         application("billing");
 
         assertThat(awaitServing(server, "billing"))
-                .as("a file drop, no restart — the whole reason the configuration is not bound"
+                .as("a file drop, no restart: the whole reason the configuration is not bound"
                         + " from Spring properties")
                 .isTrue();
         try (WitnessTestClient voter = new WitnessTestClient("billing", 1, SECRET, WITNESS_ID,
@@ -117,6 +118,24 @@ class ConfigStoreChoiceTest {
     }
 
     @Test
+    void a_key_claiming_everything_claims_nothing_here_too() {
+        start(propertiesStore("primos.witness.keys.wild.value=also-general",
+                "primos.witness.keys.wild.applications=*"));
+
+        assertThat(context.getBean(ConfigStore.class).current().settings().keyring().candidatesFor("payments"))
+                .as("otherwise one '*' entry silently takes every unscoped key out of use")
+                .extracting(WitnessKey::name)
+                .containsExactlyInAnyOrder("shared", "wild");
+    }
+
+    @Test
+    void a_pattern_no_application_name_could_match_is_refused_here_too() {
+        assertThatStartupFails(propertiesStore("primos.witness.keys.bad.value=x",
+                "primos.witness.keys.bad.applications=not a name"))
+                .contains("key 'bad' claims 'not a name'");
+    }
+
+    @Test
     void the_properties_store_never_reports_a_change() {
         start("primos.witness.config-store=properties",
                 "primos.witness.state-directory=" + directory.resolve("state"),
@@ -138,7 +157,7 @@ class ConfigStoreChoiceTest {
 
     /**
      * The intervals are the file store's, in Spring's spelling: a profile, or every value named,
-     * and never a mixture — the rule that stops a half-overridden profile becoming a custom set
+     * and never a mixture: the rule that stops a half-overridden profile becoming a custom set
      * whose author never saw the other values.
      */
     @Test
@@ -196,8 +215,8 @@ class ConfigStoreChoiceTest {
 
     /**
      * The witness-wide value is a default rather than something a served node runs, and it has two
-     * consumers: an application that names no intervals of its own, and — the one that only exists
-     * here — an application auto-registered under {@code config.source=cluster}, which has no file
+     * consumers: an application that names no intervals of its own, and (the one that only exists
+     * here) an application auto-registered under {@code config.source=cluster}, which has no file
      * to fall back to. Leaving it unset would silently give those the LAN profile instead of what
      * the operator configured.
      */

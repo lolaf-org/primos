@@ -88,7 +88,7 @@ class ClusterConfigTest {
     void the_witness_counts_as_a_voter_but_not_as_an_application_node() {
         // Through Quorum, which is what production reads. ClusterConfig used to carry a
         // voterCount() of its own that nothing but this assertion called, computing the same sum a
-        // second time — two places to keep in step for one number.
+        // second time: two places to keep in step for one number.
         ClusterConfig config = valid().witness(Peer.witness(9, "referee", 7000)).build();
 
         assertThat(config.applicationNodeCount()).isEqualTo(2);

@@ -33,7 +33,7 @@ import java.util.Objects;
  * another, where a fifty-millisecond round trip makes the LAN defaults marginal.
  *
  * <p><strong>A node runs three independent periodic mechanisms, and they are easy to confuse.</strong>
- * They differ in who sends, what is at stake, and therefore in rate — three orders of magnitude
+ * They differ in who sends, what is at stake, and therefore in rate: three orders of magnitude
  * between the fastest and the slowest, and the reason is entirely in the last column:
  *
  * <table border="1">
@@ -43,7 +43,7 @@ import java.util.Objects;
  *     <td>{@link #heartbeatInterval()} (50ms)</td>
  *     <td>the leader only</td>
  *     <td>stopping followers campaigning</td>
- *     <td><strong>an election</strong> — a real failover</td>
+ *     <td><strong>an election</strong>: a real failover</td>
  *   </tr>
  *   <tr>
  *     <td>{@link #probeInterval()} (1s)</td>
@@ -111,8 +111,8 @@ public class Timings {
      * How often <strong>every</strong> node probes <strong>every</strong> peer, with a
      * {@code Ping} that is answered with the sequence number it carried.
      *
-     * <p>This is reachability — what turns into {@code onPeerUp} and {@code onPeerDown} after
-     * {@link #failureThreshold()} consecutive misses — and it is deliberately far slower than the
+     * <p>This is reachability (what turns into {@code onPeerUp} and {@code onPeerDown} after
+     * {@link #failureThreshold()} consecutive misses) and it is deliberately far slower than the
      * heartbeat, because losing one costs nothing immediately. Every node probes rather than the
      * leader reporting who it can see, so the answer still exists during an election, when nobody
      * is leading and somebody is asking who is up.
@@ -133,7 +133,7 @@ public class Timings {
      *
      * <p>Slower than everything else here by a wide margin, because the values it carries
      * <em>cannot change while a process runs</em>. In principle one datagram would do; it repeats
-     * only because this is UDP and a single datagram may never arrive — and the case where it is
+     * only because this is UDP and a single datagram may never arrive, and the case where it is
      * dropped is exactly the misconfigured cluster it exists to report. The first goes out one
      * {@link #probeInterval()} after start, so a mismatch surfaces within a second or two whatever
      * this is set to: what this governs is how quickly a <em>changed</em> configuration is noticed,
@@ -149,7 +149,7 @@ public class Timings {
      * How many consecutive probes a peer may miss before it is reported down.
      *
      * <p>Multiplied by {@link #probeInterval()}, this is how long a peer may be silent before
-     * anyone says so — and on the JVM that product has to clear the worst stop-the-world pause,
+     * anyone says so, and on the JVM that product has to clear the worst stop-the-world pause,
      * because a collecting process is indistinguishable from a dead one.
      */
     @lombok.Builder.Default
@@ -176,6 +176,20 @@ public class Timings {
                 .build();
     }
 
+    /**
+     * Refuses one election bound given without the other, naming the key as the operator wrote it. Checked before
+     * building because {@link TimingsBuilder#build()} can only name a Java field.
+     *
+     * @throws IllegalArgumentException if exactly one of the bounds is set
+     */
+    public static void requireElectionBoundsTogether(Duration min, Duration max, String minKey, String maxKey) {
+        if ((min == null) != (max == null)) {
+            throw new IllegalArgumentException((min != null ? minKey : maxKey) + " is set without its pair. The"
+                    + " election timeout is a range drawn from afresh on every reset, and setting one end against the"
+                    + " other's default is how an invalid or too-narrow range is built. Set both.");
+        }
+    }
+
     private static void requirePositive(Duration value, String what) {
         Objects.requireNonNull(value, what);
         if (value.isZero() || value.isNegative()) {
@@ -196,7 +210,7 @@ public class Timings {
      * Every rule, checked before a {@link Timings} escapes its builder.
      *
      * <p>Called from {@link TimingsBuilder#build()} rather than from a constructor, because the
-     * constructor is Lombok's now — which is also why the generated build method is named
+     * constructor is Lombok's, which is also why the generated build method is named
      * {@code buildUnvalidated} and wrapped: it is the only seam where this can run without
      * hand-writing the {@code @Builder.Default} machinery.
      */
@@ -224,7 +238,7 @@ public class Timings {
                             + "ms) is above electionTimeoutMax (" + electionTimeoutMax.toMillis()
                             + "ms), so no timeout could ever be drawn from that range. Setting one"
                             + " bound on its own leaves the other at its default, which is the"
-                            + " usual way to arrive here — set both.");
+                            + " usual way to arrive here: set both.");
         }
         // Only equality can still reach this, the inverted case having been rejected above. The
         // comparison stays <= rather than == so that deleting the check above would fail loudly
@@ -261,7 +275,30 @@ public class Timings {
         return this;
     }
 
+    /**
+     * The {@code IfSet} setters are for values an operator may have left out: a null keeps the default.
+     */
     public static class TimingsBuilder {
+
+        public TimingsBuilder heartbeatIntervalIfSet(Duration interval) {
+            return interval == null ? this : heartbeatInterval(interval);
+        }
+
+        public TimingsBuilder electionTimeoutIfSet(Duration min, Duration max) {
+            return min == null ? this : electionTimeoutMin(min).electionTimeoutMax(max);
+        }
+
+        public TimingsBuilder probeIntervalIfSet(Duration interval) {
+            return interval == null ? this : probeInterval(interval);
+        }
+
+        public TimingsBuilder advertisementIntervalIfSet(Duration interval) {
+            return interval == null ? this : advertisementInterval(interval);
+        }
+
+        public TimingsBuilder failureThresholdIfSet(Integer threshold) {
+            return threshold == null ? this : failureThreshold(threshold);
+        }
 
         public Timings build() {
             return buildUnvalidated().validate();

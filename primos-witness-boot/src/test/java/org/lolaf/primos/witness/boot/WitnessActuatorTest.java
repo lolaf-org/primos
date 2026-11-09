@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The endpoint as an operator meets it: over HTTP, from the packaged application.
  *
  * <p>Worth a test of its own rather than trusting the indicator's unit tests, because everything
- * between them and a readable answer is configuration — exposure, and whether the detail an
+ * between them and a readable answer is configuration: exposure, and whether the detail an
  * operator needs is rendered at all. {@code show-details} defaults to {@code never}, so without the
  * default this module ships, a quarantined tenant would be invisible at exactly the moment somebody
  * went looking for it.
@@ -92,7 +92,7 @@ class WitnessActuatorTest {
      * which is why the test asserts a 404 rather than documenting one.
      *
      * <p>A Kubernetes user who finds {@code /actuator/health/liveness} will point a
-     * {@code livenessProbe} at it, because that is what it is for — and on a witness that is a
+     * {@code livenessProbe} at it, because that is what it is for, and on a witness that is a
      * mechanism for causing the outage it is watching for: restarting one is the risky operation in
      * its lifecycle, since while it is down every two-node cluster it serves tolerates zero
      * failures. Readiness is fine and needs no group: {@code /actuator/health} is UP exactly while
@@ -105,7 +105,7 @@ class WitnessActuatorTest {
 
     /**
      * The JDK's own client rather than a Spring test one, so this test says nothing about which
-     * HTTP client happens to be on the classpath — it is about what the endpoint returns.
+     * HTTP client happens to be on the classpath: it is about what the endpoint returns.
      */
     private HttpResponse<String> get(String path) {
         try {

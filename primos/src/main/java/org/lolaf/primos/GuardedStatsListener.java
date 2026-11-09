@@ -21,13 +21,13 @@ import lombok.extern.slf4j.Slf4j;
  * Keeps a throwing stats listener from taking the node down with it.
  *
  * <p>Without this, an exception from a metrics binder would reach {@code runOnce}'s catch-all,
- * which marks the node permanently {@code FAILED} — so a bug in a counter would cost a cluster a
+ * which marks the node permanently {@code FAILED}, so a bug in a counter would cost a cluster a
  * voter. A binder must not be able to stop consensus, and it is the one thing here that is not
  * load-bearing.
  *
  * <p>Applied once at the boundary rather than at each call site, so the algorithm calls its sink
  * plainly. The try blocks cost nothing while nothing throws, and a caught exception is logged
- * without arguments beyond the event name — building a message with the values would allocate on
+ * without arguments beyond the event name: building a message with the values would allocate on
  * the path this whole SPI is shaped to keep allocation-free.
  */
 @Slf4j

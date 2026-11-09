@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * An in-JVM network that really blocks, for tests that need real threads.
  *
- * <p>The deterministic simulation deliberately never blocks — the harness owns time there — which
+ * <p>The deterministic simulation deliberately never blocks (the harness owns time there) which
  * makes it useless for exercising a node that owns a thread and waits on its socket. This fills
  * that gap without needing a real port: {@link Transport#poll} waits on a queue exactly as the UDP
  * transport waits on a datagram channel, and {@link Transport#wakeup()} makes it return promptly

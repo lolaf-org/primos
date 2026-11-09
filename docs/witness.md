@@ -69,6 +69,9 @@ timeout, and closes its state stores before exiting. Give it the time to do that
 One inbound UDP port (7420 by default) from every node of every served cluster. Replies leave from the same socket, so
 no separate outbound rule is needed, and that is also what keeps NAT pinholes open in both directions.
 
+Restrict that port to those nodes. Under a flood the witness keeps running its timers, but the operating system drops
+datagrams once its socket buffer is full, genuine ones included, and only the network can stop that.
+
 ## Configuring
 
 A directory, not a single file:
@@ -201,8 +204,8 @@ application file carrying `secret` is *refused* rather than ignored: an operator
 while the keyring decides otherwise is the worst failure available here, so the witness will not start.
 
 `value` takes four forms, so configuration can go into version control while the key does not: inline, `env:NAME`,
-`file:/path`, `base64:...`. The loader warns about world-readable files the way `ssh` does; keep them `0640` and owned
-by the service user.
+`file:/path`, `base64:...`. The loader warns the way `ssh` does when `witness.properties` holds a secret or a `file:` secret is
+world-readable; keep them `0640` and owned by the service user.
 
 `algorithm` is per key, because a witness serves clusters it does not own and one of them moving to another algorithm
 must not be a flag day for the rest. **It has to match what that cluster's nodes were built with.** Nothing on the wire
@@ -251,15 +254,19 @@ Rotation is list membership. No restart, no flag day:
 
 Do not skip step 3. Two keys is a rotation window, not a permanent second key.
 
+Removing the last key that claims an application takes effect the same way, and falls back to the keys that claim
+nothing. If there are none, that application is served **without authentication** and the witness logs a warning, so
+always add the replacement first.
+
 ### Hot reload
 
 The configuration directory is re-read while the witness runs. **This is the point of the design**, because
 restarting a witness is the one genuinely risky operation in its lifecycle: while it is down, every two-node cluster it
 serves is back to tolerating zero failures.
 
-- **Every few seconds the configuration is checksummed**, and nothing further happens unless a file has actually
-  changed. There is no file watcher.
-- **There used to be one, and it was deleted because it could stop working silently.** On a Kubernetes ConfigMap the
+- **Every few seconds the configuration is checksummed**, `file:` secrets included, and nothing further happens unless
+  a file has actually changed.
+- **There is no file watcher, because one can stop working silently.** On a Kubernetes ConfigMap the
   volume is a symlink farm: an update writes a new timestamped directory, swaps `..data` atomically and deletes the old
   one, so a watch registered on the resolved directory is watching something deleted. It never fires again and nothing
   says so. A check that always runs is worth more than a notification that might have stopped.
@@ -273,6 +280,9 @@ serves is back to tolerating zero failures.
 Serves exactly the applications configured in `applications/`, and drops everything else, counted and logged once per
 unseen name. Nothing arriving over the network changes any configuration here. This is the mode for a deployment whose
 operator has a hard constraint against automatic change.
+
+Switching a running witness from `cluster` to `file` takes effect on the next reload: applications no file names stop
+being served, with their state left on disk, and the rest go back to the intervals the files give them.
 
 ### `cluster`
 
@@ -350,7 +360,7 @@ Worth alerting on:
 |---|---|---|
 | WARN | `no applications configured` | `config.source=file` with an empty `applications/` serves nobody. Under `cluster` this is INFO, because empty is the intended shape |
 | WARN | `no keys are configured` | see rule 3 |
-| WARN | `... is world-readable and may contain a cluster secret` | fix the file mode |
+| WARN | `... is world-readable and holds a cluster secret` | fix the file mode |
 | WARN | `dropping traffic for unserved application 'X'` | a cluster is asking and being refused |
 | WARN | `'X' is one or two characters from 'Y'` | **near miss: check both configurations** |
 | WARN | `auto-registering application 'X'` | `config.source=cluster` serving someone unconfigured |
@@ -365,7 +375,8 @@ With metrics, the counters worth alerting on are in [Micrometer](micrometer.md#a
 
 ### One application failing does not stop the witness
 
-If an application's state store fails (a full or broken disk), that application is **quarantined**: it stops being
+If an application's state store fails (a full or broken disk), including while it is being opened or reconfigured,
+that application is **quarantined**: it stops being
 served, and every other tenant keeps working. One team's storage problem must not be every team's failover outage.
 
 The clusters relying on that application's witness are back to the fault tolerance they have without one. Fix the

@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.Role;
+import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.MonotonicClock;
 
@@ -70,7 +72,7 @@ class WitnessServerTest {
      * intervals for all of them.
      *
      * <p>Asserted through the advertisement rather than by reaching inside the server, because that
-     * is the mechanism this exists to serve — a node compares what the witness sends against its
+     * is the mechanism this exists to serve: a node compares what the witness sends against its
      * own, and before this change one of these two tenants would always have been told the wrong
      * thing, in an error nobody could act on.
      */
@@ -346,6 +348,58 @@ class WitnessServerTest {
     }
 
     @Test
+    void switching_to_file_stops_serving_what_only_a_cluster_asked_for() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server);
+        }
+        assertThat(server.servedApplications()).containsExactly("orders");
+
+        settings("config.source=file\nsecret.shared.value=" + SECRET);
+        reloadConfiguration();
+
+        assertThat(server.servedApplications()).isEmpty();
+    }
+
+    @Test
+    void an_unrelated_reload_keeps_what_a_cluster_asked_for() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server);
+        }
+
+        settings("config.source=cluster\nconfig.cluster.limit=10\nsecret.shared.value=" + SECRET);
+        reloadConfiguration();
+
+        assertThat(server.servedApplications()).containsExactly("orders");
+    }
+
+    @Test
+    void switching_to_file_puts_a_configured_application_back_on_the_files_intervals() {
+        settings("config.source=cluster\nsecret.shared.value=" + SECRET);
+        application("orders");
+        start();
+        try (WitnessClient orders = client("orders", 1)) {
+            orders.announceConfig(server, 200, 1500, 3000, 2000, 4);
+            assertThat(orders.awaitNodeConfig(server).heartbeatMillis).isEqualTo(200);
+
+            settings(String.join("\n", "config.source=file", "secret.shared.value=" + SECRET,
+                    "timings.heartbeat.millis=20",
+                    "timings.election.min.millis=100",
+                    "timings.election.max.millis=200",
+                    "timings.probe.millis=100",
+                    "timings.advertisement.millis=100",
+                    "timings.failure.threshold=3"));
+            reloadConfiguration();
+            orders.discardReceived();
+
+            assertThat(orders.awaitNodeConfig(server).heartbeatMillis).isEqualTo(20);
+        }
+    }
+
+    @Test
     void two_clusters_stating_different_intervals_each_get_their_own() {
         settings("config.source=cluster\nsecret.shared.value=" + SECRET);
         start();
@@ -370,7 +424,7 @@ class WitnessServerTest {
 
     @Test
     void intervals_that_do_not_hold_together_are_ignored_rather_than_adopted() {
-        // The advertisement interval is not on the wire, so a witness keeps its own — and this
+        // The advertisement interval is not on the wire, so a witness keeps its own, and this
         // test needs two of them. Both profiles here are deliberately fast so it does not spend
         // thirty seconds waiting for the second.
         settings(String.join("\n", "config.source=cluster", "secret.shared.value=" + SECRET,
@@ -601,6 +655,77 @@ class WitnessServerTest {
         }
     }
 
+    @Test
+    void a_key_rotated_on_a_running_witness_takes_effect_without_a_restart() {
+        settings("secret.old.value = " + SECRET);
+        applicationWith("orders", "");
+        start();
+
+        assertRotationReachesTheServedNode("orders", "");
+    }
+
+    @Test
+    void a_key_rotated_on_a_running_witness_reaches_an_auto_registered_application() {
+        settings("config.source=cluster\nsecret.old.value = " + SECRET);
+        start();
+        try (WitnessClient registering = client("orders", 3)) {
+            registering.announceConfig(server);
+        }
+        assertThat(server.servedApplications()).containsExactly("orders");
+
+        assertRotationReachesTheServedNode("orders", "config.source=cluster\n");
+    }
+
+    @Test
+    void a_rotation_rebuilds_only_the_applications_whose_keys_changed() {
+        String billingKey = "secret.billing.value = billing-secret\n"
+                + "secret.billing.applications = billing\n";
+        settings(billingKey + "secret.orders.value = orders-secret\n"
+                + "secret.orders.applications = orders");
+        applicationWith("orders", "");
+        applicationWith("billing", "");
+        start();
+        ElectionNode ordersBefore = server.nodeOf("orders");
+        ElectionNode billingBefore = server.nodeOf("billing");
+
+        settings(billingKey + "secret.orders.value = orders-rotated\n"
+                + "secret.orders.applications = orders");
+        reloadConfiguration();
+
+        assertThat(server.nodeOf("orders"))
+                .as("the same key name with a new secret is still a rotation")
+                .isNotSameAs(ordersBefore);
+        assertThat(server.nodeOf("billing"))
+                .as("rebuilding clears a tenant's quarantine, so another tenant's rotation must"
+                        + " not reach it")
+                .isSameAs(billingBefore);
+    }
+
+    private void assertRotationReachesTheServedNode(String application, String otherSettings) {
+        try (WitnessClient onTheOldKey = new WitnessClient(application, 1, SECRET,
+                WITNESS_ID, server.boundAddress());
+             WitnessClient onTheNewKey = new WitnessClient(application, 2, "new-secret",
+                     WITNESS_ID, server.boundAddress())) {
+
+            settings(otherSettings + "secret.new.value = new-secret\nsecret.old.value = " + SECRET);
+            reloadConfiguration();
+            assertThat(onTheNewKey.requestVote(server, 1L))
+                    .as("step 1 of a rotation: the added key is accepted at once")
+                    .isTrue();
+            assertThat(onTheOldKey.requestVote(server, 2L))
+                    .as("and the old one still works until it is removed")
+                    .isTrue();
+
+            settings(otherSettings + "secret.new.value = new-secret");
+            reloadConfiguration();
+            assertThat(onTheOldKey.requestVote(server, 3L))
+                    .as("a removed key has to stop working, or rotating after a leak achieves"
+                            + " nothing")
+                    .isNull();
+            assertThat(onTheNewKey.requestVote(server, 4L)).isTrue();
+        }
+    }
+
     // ------------------------------------------------------------------- storage
 
     @Test
@@ -631,6 +756,19 @@ class WitnessServerTest {
                 .bindAddress(loopback())
                 .build())
                 .hasMessageContaining("already using the state directory");
+    }
+
+    @Test
+    void a_second_witness_on_the_same_port_refuses_to_start() {
+        start();
+
+        assertThatThrownBy(() -> WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(server.boundAddress())
+                .build())
+                .hasMessageContaining("cannot open its socket")
+                .hasCauseInstanceOf(BindException.class);
     }
 
     @Test

@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.spring.PrimosProperties.NodeLifecycle;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
@@ -29,7 +30,7 @@ import org.springframework.context.event.EventListener;
  * <p><strong>The node is started on {@link ContextRefreshedEvent}, not from {@link #start()}, and
  * the reason is not a matter of taste.</strong> A {@code SmartLifecycle} bean that does not
  * override {@code getPhase()} sits at {@link SmartLifecycle#DEFAULT_PHASE}, which is
- * {@link Integer#MAX_VALUE} — so no phase exists that runs after an ordinary auto-starting bean,
+ * {@link Integer#MAX_VALUE}, so no phase exists that runs after an ordinary auto-starting bean,
  * and a message listener container is exactly such a bean. Refresh is therefore the only hook that
  * is genuinely after everything has auto-started, which is where the gated beans have to be
  * quiesced and where the node can first safely be told to join.
@@ -51,17 +52,20 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
     private final NodeLifecycle mode;
     private final boolean gatingEnabled;
     private final LeaderLifecycleController controller;
+    private final ApplicationContext context;
 
     private volatile boolean running;
 
     PrimosNodeLifecycle(PrimosNode node,
                         NodeLifecycle mode,
                         boolean gatingEnabled,
-                        LeaderLifecycleController controller) {
+                        LeaderLifecycleController controller,
+                        ApplicationContext context) {
         this.node = node;
         this.mode = mode;
         this.gatingEnabled = gatingEnabled;
         this.controller = controller;
+        this.context = context;
     }
 
     /**
@@ -72,8 +76,12 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
      * is stopped <em>before</em> anything can tell this node it is in charge. Quiescing happens in
      * both modes, because a manually started node is started later, not never.
      */
-    @EventListener(ContextRefreshedEvent.class)
-    void onContextRefreshed() {
+    @EventListener
+    void onContextRefreshed(ContextRefreshedEvent event) {
+        // A child context's refresh reaches this listener too, and would quiesce a running leader's beans.
+        if (event.getApplicationContext() != context) {
+            return;
+        }
         if (controller != null) {
             controller.prepare();
         }
@@ -98,7 +106,7 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
         running = false;
         // Both modes, deliberately: only the start is ever manual. This is what sends TimeoutNow to
         // a successor and Leaving to everyone, turning a deploy into about a round trip of
-        // leaderlessness instead of a full election timeout — far too valuable to leave to an
+        // leaderlessness instead of a full election timeout, far too valuable to leave to an
         // application that has to remember. Idempotent, and a no-op on a node never started.
         node.stop();
     }
@@ -116,7 +124,7 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
     /**
      * The one silent failure {@code manual} introduces: configured, never started, gating enabled,
      * so the gated beans wait for leadership that cannot arrive. No election, no error, and nothing
-     * in any log — the application simply does nothing for ever.
+     * in any log: the application simply does nothing for ever.
      *
      * <p>Only when gating is on. Without it, a node deliberately started later is ordinary and
      * correct, and warning about it would be noise.

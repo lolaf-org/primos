@@ -42,6 +42,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ElectionNodeTest {
 
+    /** These vote the moment a node starts, inside the window an ordinary candidate is refused for. */
+    private static final boolean HANDOVER = true;
+
     private final VirtualClock clock = new VirtualClock();
     private final SimulatedNetwork network = new SimulatedNetwork(1L, clock);
     private final RecordingStats recorded = new RecordingStats();
@@ -53,6 +56,45 @@ class ElectionNodeTest {
             peers.add(Peer.application(id, "sim", 7000 + id));
         }
         return peers;
+    }
+
+    @Test
+    void a_probe_reply_reordered_behind_the_peers_departure_does_not_bring_it_back() {
+        List<String> events = new ArrayList<>();
+        ElectionNode node = startedNode(peers(2), new PrimosListener() {
+            @Override
+            public void onPeerUp(Peer peer) {
+                events.add("up");
+            }
+
+            @Override
+            public void onPeerDown(Peer peer, PeerDownReason reason) {
+                events.add("down/" + reason);
+            }
+        });
+        long sequence = awaitProbeTo(2, node);
+        MessageEncoder peer = new MessageEncoder("t", 2, MessageAuthenticator.disabled());
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+        network.transportFor(2).send(1, peer.leaving(buffer, node.currentTerm()));
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        node.runOnce(0L);
+
+        assertThat(events).containsExactly("down/LEFT");
+    }
+
+    @Test
+    void a_duplicated_probe_reply_is_one_sample() {
+        ElectionNode node = startedNode(peers(2));
+        long sequence = awaitProbeTo(2, node);
+        MessageEncoder peer = new MessageEncoder("t", 2, MessageAuthenticator.disabled());
+        ByteBuffer buffer = ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES);
+
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        network.transportFor(2).send(1, peer.pingReply(buffer, node.currentTerm(), sequence));
+        node.runOnce(0L);
+
+        assertThat(recorded.probeRoundTrips).hasSize(1);
     }
 
     private static int countNodeConfigs(CapturedReply seen) {
@@ -122,7 +164,7 @@ class ElectionNodeTest {
     @Test
     void a_vote_granted_before_a_crash_is_still_binding_after_it() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
 
         assertThat(node.currentTerm()).isEqualTo(5);
         assertThat(node.votedFor()).isEqualTo(2);
@@ -134,7 +176,7 @@ class ElectionNodeTest {
                 .isEqualTo(5);
         assertThat(restarted.votedFor()).isEqualTo(2);
 
-        restarted.onRequestVote(3, 5, false);
+        restarted.onRequestVote(3, 5, false, HANDOVER);
 
         assertThat(restarted.votedFor())
                 .as("granting a second vote in term 5 would let two candidates each win")
@@ -145,8 +187,8 @@ class ElectionNodeTest {
     void a_second_request_from_the_same_candidate_is_answered_the_same_way() {
         ElectionNode node = startedNode();
 
-        node.onRequestVote(2, 5, false);
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
+        node.onRequestVote(2, 5, false, HANDOVER);
 
         assertThat(node.votedFor())
                 .as("a duplicated request must be idempotent, not a refusal")
@@ -156,7 +198,7 @@ class ElectionNodeTest {
     @Test
     void a_higher_term_clears_the_vote_that_belonged_to_the_old_one() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 5, false);
+        node.onRequestVote(2, 5, false, HANDOVER);
         assertThat(node.votedFor()).isEqualTo(2);
 
         node.onAppendEntries(3, 6, 0, 0);
@@ -219,7 +261,7 @@ class ElectionNodeTest {
     @Test
     void a_heartbeat_from_a_stale_leader_is_refused_and_does_not_move_the_term() {
         ElectionNode node = startedNode();
-        node.onRequestVote(2, 7, false);
+        node.onRequestVote(2, 7, false, HANDOVER);
 
         node.onAppendEntries(3, 4, 0, 0);
 
@@ -273,8 +315,8 @@ class ElectionNodeTest {
      * Not a tidiness check, which is why it is worth a test and worth its place on the loop path.
      *
      * <p>{@link ElectionNode#start()} is what reads {@code currentTerm} and {@code votedFor} back
-     * from the store. A turn of the loop taken without it would run on term 0 with no vote — a node
-     * that has forgotten what it promised in a previous life — and would then time out, campaign
+     * from the store. A turn of the loop taken without it would run on term 0 with no vote (a node
+     * that has forgotten what it promised in a previous life) and would then time out, campaign
      * and vote for itself in a term it may already have voted in. That is the double-vote bug,
      * reached by calling two methods in the wrong order.
      *
@@ -316,7 +358,7 @@ class ElectionNodeTest {
         }, recorded);
         witness.start();
 
-        witness.onRequestVote(1, 3, false);
+        witness.onRequestVote(1, 3, false, HANDOVER);
 
         assertThat(witness.votedFor()).isEqualTo(1);
         assertThat(witness.currentTerm()).isEqualTo(3);
@@ -327,7 +369,7 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
         node.onAppendEntries(2, 1, 0, 0);
 
-        node.onRequestVote(3, 99, true);
+        node.onRequestVote(3, 99, true, false);
 
         CapturedReply reply = new CapturedReply("t").drain(network.transportFor(3));
         assertThat(reply.granted())
@@ -342,7 +384,7 @@ class ElectionNodeTest {
         node.onAppendEntries(2, 1, 0, 0);
         clock.advance(Duration.ofSeconds(1));
 
-        node.onRequestVote(3, 2, true);
+        node.onRequestVote(3, 2, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted()).isTrue();
     }
@@ -351,9 +393,9 @@ class ElectionNodeTest {
     void a_pre_vote_is_refused_for_an_election_timeout_after_granting_a_vote() {
         ElectionNode node = startedNode();
         clock.advance(Duration.ofSeconds(1));
-        node.onRequestVote(2, 1, false);
+        node.onRequestVote(2, 1, false, HANDOVER);
 
-        node.onRequestVote(3, 2, true);
+        node.onRequestVote(3, 2, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).granted())
                 .as("node 2 may lead from its election on, and its lease counts on this refusal")
@@ -366,7 +408,7 @@ class ElectionNodeTest {
         clock.advance(Duration.ofSeconds(1));
         long termBefore = node.currentTerm();
 
-        node.onRequestVote(3, 500, true);
+        node.onRequestVote(3, 500, true, false);
 
         assertThat(node.currentTerm())
                 .as("a pre-vote carrying a huge term must not inflate ours: that is the whole point")
@@ -385,7 +427,7 @@ class ElectionNodeTest {
         node.onRequestVoteReply(3, node.currentTerm(), true, false);
         assertThat(node.role()).isEqualTo(Role.LEADER);
 
-        node.onRequestVote(4, node.currentTerm() + 1, true);
+        node.onRequestVote(4, node.currentTerm() + 1, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(4)).granted()).isFalse();
     }
@@ -395,7 +437,7 @@ class ElectionNodeTest {
         ElectionNode node = startedNode();
         clock.advance(Duration.ofSeconds(1));
 
-        node.onRequestVote(3, 42, true);
+        node.onRequestVote(3, 42, true, false);
 
         assertThat(new CapturedReply("t").drain(network.transportFor(3)).replyTerm())
                 .isEqualTo(42);
@@ -517,7 +559,7 @@ class ElectionNodeTest {
 
     /**
      * The whole safety argument for this message. A mismatch makes failover slower, never unsafe,
-     * so acting on one would turn an ordinary rolling timing change into a partition — a worse
+     * so acting on one would turn an ordinary rolling timing change into a partition: a worse
      * failure than the one being detected, and one nobody could roll forward out of.
      */
     @Test
@@ -550,7 +592,7 @@ class ElectionNodeTest {
 
     /**
      * One statement every thirty seconds is the right steady state and the wrong bootstrap: this is
-     * UDP, and the case where the first is dropped is the case that most needs it — a witness taking
+     * UDP, and the case where the first is dropped is the case that most needs it: a witness taking
      * its configuration from the cluster cannot serve one it has never heard state itself.
      */
     @Test
@@ -567,7 +609,7 @@ class ElectionNodeTest {
 
     /**
      * The negative pair, and without it the test above passes on a node that simply states itself
-     * constantly — which would be the same bug wearing the fix's clothes.
+     * constantly, which would be the same bug wearing the fix's clothes.
      */
     @Test
     void it_settles_to_the_advertisement_interval_once_every_peer_has_answered() {
@@ -615,7 +657,7 @@ class ElectionNodeTest {
 
     /**
      * The pair to the tests above: a witness told to follow reports nothing, because there is
-     * nothing to report — the difference it sees is the value it is about to be rebuilt with, so
+     * nothing to report: the difference it sees is the value it is about to be rebuilt with, so
      * an ERROR on every retune would describe a state lasting one turn as a fault.
      */
     @Test
@@ -683,6 +725,26 @@ class ElectionNodeTest {
                 .as("down, and still tracked; those are different questions")
                 .isFalse();
         assertThat(witness.peersForgotten()).isZero();
+    }
+
+    @Test
+    void a_witness_forgets_a_quiet_voter_on_a_clock_that_reads_negative() {
+        VirtualClock negative = new VirtualClock(-Duration.ofHours(1).toNanos());
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .asWitness()
+                .learnedMembership()
+                .build();
+        ElectionNode witness = new ElectionNode(config, store, new SimulatedNetwork(1L, negative).transportFor(1),
+                negative, new Random(1L), MessageAuthenticator.disabled());
+        witness.start();
+        witness.learnPeer(Peer.application(7, "h", 1));
+
+        negative.advance(Duration.ofMinutes(2));
+        witness.runOnce(0L);
+
+        assertThat(witness.peersForgotten()).isEqualTo(1);
     }
 
     @Test
@@ -778,7 +840,7 @@ class ElectionNodeTest {
 
     /**
      * Delivers a real datagram rather than calling the handler, so the decoder, the size check and
-     * {@code runOnce}'s wrapping are all on the path — which is the only way this is the production
+     * {@code runOnce}'s wrapping are all on the path, which is the only way this is the production
      * path rather than a shape that resembles it.
      */
     private void advertise(int fromPeer, ElectionNode to, int heartbeat, int electionMin,
@@ -796,6 +858,11 @@ class ElectionNodeTest {
     }
 
     private ElectionNode startedNode(List<Peer> peers) {
+        return startedNode(peers, new PrimosListener() {
+        });
+    }
+
+    private ElectionNode startedNode(List<Peer> peers, PrimosListener listener) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
@@ -803,9 +870,19 @@ class ElectionNodeTest {
                 .build();
         Transport transport = network.transportFor(1);
         ElectionNode node = new ElectionNode(config, store, transport, clock,
-                new Random(1L), MessageAuthenticator.disabled(), new PrimosListener() {
-        }, recorded);
+                new Random(1L), MessageAuthenticator.disabled(), listener, recorded);
         node.start();
         return node;
+    }
+
+    private long awaitProbeTo(int peerId, ElectionNode node) {
+        clock.advance(Duration.ofSeconds(1));
+        node.runOnce(0L);
+        CapturedReply seen = new CapturedReply("t").drain(network.transportFor(peerId));
+        return seen.messages().stream()
+                .filter(message -> message.startsWith("ping/"))
+                .mapToLong(message -> Long.parseLong(message.substring("ping/".length())))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no probe was sent; saw " + seen.messages()));
     }
 }

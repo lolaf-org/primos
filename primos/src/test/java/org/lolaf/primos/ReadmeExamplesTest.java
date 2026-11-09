@@ -228,7 +228,7 @@ class ReadmeExamplesTest {
         // docs/timings.md tells operators to use one profile cluster-wide. This is the number behind
         // that: a node refuses a pre-vote while it has heard from a leader within
         // electionTimeoutMin, so the witness's own profile decides when it will agree to a
-        // failover — which, for a two-node pair, is the vote everything is waiting on.
+        // failover, which, for a two-node pair, is the vote everything is waiting on.
         assertThat(Timings.wan().electionTimeoutMin())
                 .isEqualTo(Timings.lan().electionTimeoutMin().multipliedBy(5));
     }

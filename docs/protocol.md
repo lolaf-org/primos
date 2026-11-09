@@ -34,7 +34,7 @@ Every message starts with the same 52 bytes. Integers are big-endian (network by
 | 0 | 4 | magic | ASCII `PRMS` |
 | 4 | 1 | version | `1`. An unknown version is dropped, never guessed |
 | 5 | 1 | message type | see the table below. Never `0`, so a zeroed buffer is not a message |
-| 6 | 2 | flags | bit 0: pre-vote. Bit 1: declines candidacy, on `AppendEntriesReply`. Other bits are reserved, sent as zero and ignored on receive |
+| 6 | 2 | flags | bit 0: pre-vote. Bit 1: declines candidacy, on `AppendEntriesReply`. Bit 2: handover, on `RequestVote`. Other bits are reserved, sent as zero and ignored on receive |
 | 8 | 32 | application name | UTF-8, zero-padded. 1 to 32 bytes of printable ASCII, no spaces |
 | 40 | 8 | term | signed 64-bit, the sender's current term (with one exception, below) |
 | 48 | 4 | sender id | signed 32-bit, the sender's node id |
@@ -75,6 +75,11 @@ election. A node refuses a pre-vote while it has heard from a leader within its 
 
 Without the flag it is Raft's ordinary vote request. **Departure from the paper:** there is no `lastLogIndex` or
 `lastLogTerm`, because there is no log. Every voter is equally up to date, so the only rule is one vote per term.
+
+**Departure from the paper:** a voter also refuses a real vote while it has heard from a leader within its own minimum
+election timeout, without adopting the term, as in thesis section 4.2.3. A repeat of the vote it already gave in this
+term is answered as before. With the **handover flag** set the request comes from a candidate a leader handed over to,
+and this check is skipped; one vote per term still applies.
 
 ### `RequestVoteReply` (`0x02`)
 
@@ -184,6 +189,11 @@ wrong key.
 It authenticates and does not encrypt, and it does not stop a captured datagram being replayed. Replay is absorbed by
 the protocol instead: an old-term replay fails the term check, a current-term replay is a duplicate UDP already forces
 the protocol to tolerate, and a replayed vote grant is a no-op because votes are counted in a set.
+
+**A known limit: a replay can move a learned address.** The tag does not cover the source address, so an attacker on
+the network path who resends a captured datagram from another address moves that peer's learned address until the peer
+next speaks, and repeating it faster than the peer's own traffic cuts that peer off. It takes a position on the path,
+and it applies only where addresses are learned: always on a witness, and on a node with `addressLearning` set.
 
 ## The receive pipeline
 

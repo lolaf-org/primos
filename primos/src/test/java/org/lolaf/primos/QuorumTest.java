@@ -202,7 +202,7 @@ class QuorumTest {
         assertThat(quorum.isKnown()).isFalse();
         assertThat(quorum.isReached(1)).isFalse();
         assertThat(quorum.isReached(Integer.MAX_VALUE))
-                .as("it never campaigns and never leads, so it never counts votes — and if some"
+                .as("it never campaigns and never leads, so it never counts votes, and if some"
                         + " path ever asked, 'no' is the only answer that cannot invent a leader")
                 .isFalse();
     }

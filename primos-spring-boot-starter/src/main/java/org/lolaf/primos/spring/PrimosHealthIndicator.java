@@ -25,13 +25,13 @@ import org.springframework.boot.health.contributor.HealthIndicator;
  * Reports this node's role, term and leader.
  *
  * <p><strong>A healthy follower is {@code UP}.</strong> Only {@link Role#FAILED} is {@code DOWN}.
- * Getting that backwards takes every follower out of a load balancer during an ordinary election —
+ * Getting that backwards takes every follower out of a load balancer during an ordinary election:
  * a whole-cluster outage caused by the health check rather than detected by it, and the single most
  * expensive mistake this class could make.
  *
  * <p>A node that has not been started reports {@code UP} with a state of its own. It is not a
- * failure — under {@code primos.lifecycle=manual} it is the expected state until the application is
- * ready — but it must not read as an ordinary follower, because a deployment that forgot to start
+ * failure (under {@code primos.lifecycle=manual} it is the expected state until the application is
+ * ready) but it must not read as an ordinary follower, because a deployment that forgot to start
  * its node looks identical to a healthy one from every other angle.
  */
 public class PrimosHealthIndicator implements HealthIndicator {

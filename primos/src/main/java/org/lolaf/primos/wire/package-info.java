@@ -24,13 +24,13 @@
  *
  * <p>They are {@code public} only because {@code primos-witness} is a separate artifact that
  * encodes and decodes the same datagrams, and primos ships an {@code Automatic-Module-Name} rather
- * than a module descriptor — so there is no way to export a package to one consumer without
+ * than a module descriptor, so there is no way to export a package to one consumer without
  * exporting it to everyone. Read the modifier as a limitation of the packaging, not as an
  * invitation.
  *
  * <p>{@link org.lolaf.primos.wire.WireFormat} documents the byte layout and the arithmetic behind
  * the 508-byte ceiling. Both paths allocate nothing, decoding reads at constant offsets, and the
- * receive pipeline verifies the tag before parsing a single field — with exactly one documented
+ * receive pipeline verifies the tag before parsing a single field: with exactly one documented
  * exception, on the witness, explained at
  * {@link org.lolaf.primos.wire.MessageDecoder#peekApplicationName}.
  */

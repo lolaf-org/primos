@@ -26,18 +26,17 @@ import java.io.UncheckedIOException;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
-import java.util.function.Supplier;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.*;
-import java.util.Collections;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * The real transport: one bound {@link DatagramChannel}, one {@link Selector}, no connections.
  *
  * <p>Raft already assumes a network that drops, delays, duplicates and reorders, and it recovers
- * from all of it with its own timers — a lost vote request is retried by the next election
+ * from all of it with its own timers: a lost vote request is retried by the next election
  * timeout, a lost heartbeat by the next heartbeat interval. TCP's retransmission would duplicate
  * that work while adding head-of-line blocking and connection state that can make failure
  * detection slower. So: UDP, and every message small enough that a datagram is never fragmented.
@@ -51,19 +50,14 @@ import java.util.concurrent.TimeUnit;
  * authentication tag; this class only learns where a known peer is currently speaking from.
  *
  * <p><strong>Every peer's hostname is resolved once, when this is built, and a name that does not
- * resolve is a startup failure.</strong> Not a warning, not a retry: a node that cannot work out
- * where a peer is could never reach it, and the earlier design — drop the datagram, count it, and
- * retry the lookup on a background thread — made broken DNS indistinguishable from a partition or
- * a dead process from every vantage point outside this class. It is better to refuse to start,
- * loudly, on the thread that called {@code build()}, while somebody is still watching.
+ * resolve is a startup failure</strong>: a node that cannot work out where a peer is could never
+ * reach it, and broken DNS must not look like a partition. Resolution is the one blocking call
+ * here and it happens on the caller's thread, so DNS never touches the node thread.
  *
- * <p>Two things follow. Resolution is the one blocking call here, and it happens on the caller's
- * thread before the node has one of its own, so the rule that DNS never touches the node thread
- * still holds with no exceptions. And <strong>address learning is now the only thing that changes
- * an address at runtime</strong>: a peer that moves is reached again because its own datagrams
- * arrive and say so, which needs {@link Builder#addressLearning} and therefore authentication. A
- * cluster without a secret whose peers change address needs a restart, and that is the deliberate
- * trade for never silently failing to send.
+ * <p><strong>Address learning is the only thing that changes an address at runtime</strong>: a peer
+ * that moves is reached again because its own datagrams arrive and say so, which needs
+ * {@link Builder#addressLearning} and therefore authentication. A cluster without a secret whose
+ * peers change address needs a restart.
  */
 @Slf4j
 public final class UdpTransport implements Transport {
@@ -73,6 +67,9 @@ public final class UdpTransport implements Transport {
      * failing the size check rather than being silently accepted as a shorter message.
      */
     private static final int RECEIVE_CAPACITY = WireFormat.MAX_DATAGRAM_BYTES + 1;
+
+    /** A bound on one turn's reading, or a sustained flood keeps the loop from ever reaching its timers. */
+    static final int MAX_DATAGRAMS_PER_POLL = 256;
 
     private final DatagramChannel channel;
     private final Selector selector;
@@ -99,7 +96,7 @@ public final class UdpTransport implements Transport {
     /**
      * Sends addressed to a peer this transport was not configured with.
      *
-     * <p>Should stay at zero. Unlike the others this is not a network condition — it means
+     * <p>Should stay at zero. Unlike the others this is not a network condition: it means
      * something asked for a peer id that was never in the configuration.
      */
     @Getter
@@ -124,14 +121,18 @@ public final class UdpTransport implements Transport {
         resolveAll(builder.peers);
 
         this.channel = DatagramChannel.open();
-        this.channel.configureBlocking(false);
-        setIfSupported(StandardSocketOptions.SO_REUSEADDR, Boolean.TRUE);
-        if (builder.receiveBufferBytes > 0) {
-            setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+        try {
+            this.channel.configureBlocking(false);
+            if (builder.receiveBufferBytes > 0) {
+                setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+            }
+            this.channel.bind(builder.bindAddress);
+            this.selector = Selector.open();
+            this.channel.register(selector, SelectionKey.OP_READ);
+        } catch (IOException | RuntimeException e) {
+            this.channel.close();
+            throw e;
         }
-        this.channel.bind(builder.bindAddress);
-        this.selector = Selector.open();
-        this.channel.register(selector, SelectionKey.OP_READ);
 
         log.info("cluster '{}': bound to {}", clusterName, channel.getLocalAddress());
     }
@@ -183,9 +184,9 @@ public final class UdpTransport implements Transport {
     @Override
     public void send(int peerId, ByteBuffer datagram) {
         // Every path out of here that does not put bytes on the wire is counted, because the SPI
-        // promises a failed send is counted and logged rather than propagated — and a send that
-        // returns without doing either is indistinguishable from a working one. Logging is at
-        // debug throughout: heartbeats are every 50ms per peer, so a visible level would turn a
+        // promises a failed send is counted and logged rather than propagated, and a send that
+        // returns without doing either is indistinguishable from a working one. A failed send is
+        // logged at debug: heartbeats are every 50ms per peer, so a visible level would turn a
         // broken peer into a second outage.
         if (closed) {
             sendsWhileClosed++;
@@ -204,13 +205,21 @@ public final class UdpTransport implements Transport {
             // Always from the bound socket, never a transient one, so a peer sees this node's
             // listening endpoint as the source. That is what makes address learning correct and
             // keeps a NAT pinhole usable in both directions.
-            channel.send(datagram, target);
+            int bytes = datagram.remaining();
+            if (channel.send(datagram, target) < bytes) {
+                sendFailures++;
+                if (log.isDebugEnabled()) {
+                    log.debug("cluster '{}': no room in the socket to send to peer {} at {}", clusterName, peerId, target);
+                }
+            }
         } catch (IOException | RuntimeException e) {
             // Sends fail routinely on UDP, and an ICMP port-unreachable can surface here long
             // after the fact. The algorithm's timers are the retry mechanism, so this must never
             // become a node failure.
             sendFailures++;
-            log.warn("cluster '{}': send to peer {} at {} failed", clusterName, peerId, target, e);
+            if (log.isDebugEnabled()) {
+                log.debug("cluster '{}': send to peer {} at {} failed: {}", clusterName, peerId, target, e.toString());
+            }
         }
     }
 
@@ -237,7 +246,7 @@ public final class UdpTransport implements Transport {
 
     private int drain(DatagramHandler handler) throws IOException {
         int delivered = 0;
-        while (!closed) {
+        while (!closed && delivered < MAX_DATAGRAMS_PER_POLL) {
             receiveBuffer.clear();
             SocketAddress source = channel.receive(receiveBuffer);
             if (source == null) {
@@ -259,7 +268,9 @@ public final class UdpTransport implements Transport {
      * operator editing configuration, and since hostnames are resolved once at construction it is
      * the only thing that updates an address at all. It is gated on authentication for a reason:
      * learning from an unauthenticated datagram would let a single spoofed packet redirect a
-     * peer's traffic and partition it, without the attacker forging any content at all.
+     * peer's traffic and partition it, without the attacker forging any content at all. The tag
+     * does not cover the source address, so a captured datagram replayed from elsewhere still
+     * redirects that peer until it next speaks.
      */
     @Override
     public void confirmSender(int senderId) {
@@ -308,7 +319,7 @@ public final class UdpTransport implements Transport {
      *
      * <p>The one number worth alerting on. A healthy node's is flat: the individual counters below
      * separate a network that is refusing traffic from a bug in the caller, and those want very
-     * different responses. A name that will not resolve is not among them — that is refused at
+     * different responses. A name that will not resolve is not among them: that is refused at
      * construction rather than counted here.
      */
     @Override
@@ -371,7 +382,7 @@ public final class UdpTransport implements Transport {
          *
          * @throws IllegalStateException if a peer's hostname does not resolve. Deliberately fatal
          *                               and deliberately here, on the calling thread, before the
-         *                               node has one of its own — see the class javadoc.
+         *                               node has one of its own; see the class javadoc.
          * @throws IOException           if the socket cannot be opened or bound
          */
         public UdpTransport build() throws IOException {

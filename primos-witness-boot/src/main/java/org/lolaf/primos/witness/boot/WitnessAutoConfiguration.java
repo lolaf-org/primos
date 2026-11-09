@@ -82,7 +82,7 @@ public class WitnessAutoConfiguration {
      *
      * <p>Ignoring them would be the failure this module's whole precedence rule exists to prevent,
      * arriving from the other direction: an operator sets {@code primos.witness.state-directory},
-     * nothing complains, and the state goes wherever {@code witness.properties} says instead — which
+     * nothing complains, and the state goes wherever {@code witness.properties} says instead, which
      * is discovered when a restart cannot find a vote. There is no half of this worth guessing at,
      * so it is a refusal rather than a warning.
      */
@@ -104,7 +104,7 @@ public class WitnessAutoConfiguration {
                 misplaced) + " " + (misplaced.size() == 1 ? "is" : "are") + " only read with"
                 + " primos.witness.config-store=properties. Under the default file store these come"
                 + " from witness.properties in the configuration directory, which is re-read while"
-                + " the server runs — so binding them here would freeze them at boot and change"
+                + " the server runs, so binding them here would freeze them at boot and change"
                 + " nothing an operator could see. Move them into witness.properties, or switch the"
                 + " store and accept that onboarding a cluster then needs a restart.");
     }
@@ -147,7 +147,7 @@ public class WitnessAutoConfiguration {
      * <p>The bound on the stop is Spring's own budget for this shutdown phase rather than a number
      * invented here, so an operator who lengthens one has lengthened both. Read from the
      * {@link Environment} rather than through a {@code @Value} placeholder, because placeholders
-     * need a resolver that an auto-configuration cannot assume is there — and the first thing that
+     * need a resolver that an auto-configuration cannot assume is there, and the first thing that
      * finds out is a test context, which is exactly where this bean must also work.
      */
     @Bean
@@ -176,8 +176,8 @@ public class WitnessAutoConfiguration {
     /**
      * What {@code primos.witness.bind.*} overrides, or null to leave the file alone.
      *
-     * <p>Either half may be given by itself — a container setting the port and nothing else is the
-     * common case — so the half that was not given is taken from the address the file already
+     * <p>Either half may be given by itself (a container setting the port and nothing else is the
+     * common case) so the half that was not given is taken from the address the file already
      * produced rather than from a default invented here. That keeps one answer to "what does this
      * witness bind to?" instead of two that can disagree.
      */

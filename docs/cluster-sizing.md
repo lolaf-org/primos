@@ -70,7 +70,7 @@ So primos warns at startup whenever it is configured this way:
 ```
 cluster 'orders': 1 voter (1 node), quorum 1, tolerates 0 failures
 cluster 'orders': one node and no witness, so this node is the only voter. It elects itself about
-one election timeout after starting and leads for as long as it runs, and nothing can depose it —
+one election timeout after starting and leads for as long as it runs, and nothing can depose it:
 there is no majority to lose contact with. That is a legitimate single instance deployment, and it
 is also what a mistyped or unread peer list looks like, in which case every node of the intended
 cluster is doing this at once and each of them is the leader. Check that peers were meant to be

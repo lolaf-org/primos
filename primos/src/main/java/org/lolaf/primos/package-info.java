@@ -15,7 +15,7 @@
  */
 
 /**
- * The public API — the entry point, and the only package most applications import.
+ * The public API: the entry point, and the only package most applications import.
  *
  * <p>Start at {@link org.lolaf.primos.PrimosNode}. Its builder takes the cluster's membership and
  * timings, {@link org.lolaf.primos.PrimosNode#start()} joins, and

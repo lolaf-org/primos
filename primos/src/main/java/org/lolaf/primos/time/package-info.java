@@ -19,7 +19,7 @@
  *
  * <p>Public and supported, though most applications never touch it: the node defaults to the real
  * clock. It is an interface rather than a direct call to {@link java.lang.System#nanoTime()} for
- * two reasons — a wall clock that jumps backwards under NTP correction would freeze every timeout
+ * two reasons: a wall clock that jumps backwards under NTP correction would freeze every timeout
  * in the cluster or fire them all at once, and the deterministic simulation needs to advance time
  * by hand to run a whole cluster reproducibly on one thread.
  *

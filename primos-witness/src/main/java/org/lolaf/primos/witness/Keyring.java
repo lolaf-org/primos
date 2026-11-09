@@ -17,6 +17,7 @@ package org.lolaf.primos.witness;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import org.lolaf.primos.wire.MessageAuthenticator;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,16 +38,16 @@ import java.util.Objects;
  * <p>The spectrum that produces, along one axis and orthogonal to {@link ConfigSource}:
  *
  * <ul>
- *   <li>every key unscoped — any cluster may arrive, and every keyholder can speak for every other,
+ *   <li>every key unscoped: any cluster may arrive, and every keyholder can speak for every other,
  *       which is one team running many clusters from one template;</li>
- *   <li>some scoped — a general key for the fleet, dedicated keys for the tenants that matter;</li>
- *   <li>every key scoped — nothing but the named families can be served at all, and no keyholder
+ *   <li>some scoped: a general key for the fleet, dedicated keys for the tenants that matter;</li>
+ *   <li>every key scoped: nothing but the named families can be served at all, and no keyholder
  *       can reach another's names.</li>
  * </ul>
  *
  * <p>What it is not, and the boundary is worth stating because the shape suggests otherwise: two
- * keys covering the same name — through overlapping patterns, or a pattern beside an unscoped key
- * where none claims that name — means either key verifies it. Overlap is not detected, because for
+ * keys covering the same name (through overlapping patterns, or a pattern beside an unscoped key
+ * where none claims that name) means either key verifies it. Overlap is not detected, because for
  * patterns the answer would be advisory anyway; it is documented, and the remedy is not to overlap.
  */
 @Getter
@@ -92,6 +93,23 @@ public final class Keyring {
     }
 
     /**
+     * An authenticator over {@link #candidatesFor the keys for this application}, disabled when there are none.
+     *
+     * <p>A ring rather than a single key, so a rotation is a key added and removed later rather than a flag day.
+     */
+    public MessageAuthenticator authenticatorFor(String application) {
+        List<WitnessKey> candidates = candidatesFor(application);
+        if (candidates.isEmpty()) {
+            return MessageAuthenticator.disabled();
+        }
+        List<MessageAuthenticator.KeySpec> ring = new ArrayList<>(candidates.size());
+        for (WitnessKey key : candidates) {
+            ring.add(MessageAuthenticator.KeySpec.of(key.name(), key.algorithm(), key.secret()));
+        }
+        return MessageAuthenticator.keyring(ring);
+    }
+
+    /**
      * Whether a name nobody has configured could be served, which needs a key claiming nothing.
      */
     public boolean canServeUnclaimedNames() {
@@ -106,7 +124,7 @@ public final class Keyring {
     /**
      * One line for the startup log, answering the question an operator actually has.
      *
-     * <p>A keyring with nothing unscoped is a legitimate lockdown and somebody will want it — but
+     * <p>A keyring with nothing unscoped is a legitimate lockdown and somebody will want it, but
      * from the outside it is indistinguishable from a witness that is quietly broken, since every
      * cluster it was not told about is simply never answered. So it says which it is.
      */

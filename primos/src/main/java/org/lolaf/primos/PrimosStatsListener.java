@@ -19,20 +19,20 @@ package org.lolaf.primos;
  * Told what a node did, as it does it. The whole observability seam.
  *
  * <p>primos depends on nothing but SLF4J, so it cannot export metrics itself. It tells you instead,
- * and you increment whatever you already run — {@code primos-micrometer} is exactly that, and this
+ * and you increment whatever you already run: {@code primos-micrometer} is exactly that, and this
  * interface is what it is written against.
  *
  * <p><strong>Push rather than a snapshot, and there are three reasons a poller cannot substitute.</strong>
  * A <em>distribution</em>: a p99 of probe round trips needs every sample, and no sampling interval
  * recovers one from a last-value gauge. A <em>duration between two samples</em>: how long a campaign
- * took, how long the cluster had no leader — the two numbers most wanted after a failover, and both
+ * took, how long the cluster had no leader: the two numbers most wanted after a failover, and both
  * gone before anybody looks. And an <em>event already superseded</em>: leadership going A to B to A
  * inside one sampling interval is invisible to a poller and is exactly the flap worth alerting on.
  *
  * <h2>The contract, which is harder than {@link PrimosListener}'s</h2>
  *
  * <p><strong>Callbacks must not block, and must not allocate.</strong> They run on the node thread,
- * and some of them run per datagram — a listener that allocates turns the node's steady state from
+ * and some of them run per datagram: a listener that allocates turns the node's steady state from
  * zero bytes a turn into whatever it allocates, and one that blocks stalls consensus, misses
  * heartbeats and causes the election it was watching for. That is why every method here takes
  * primitives and enums and never an event object, why there is <em>one</em> sink fixed at build
@@ -70,7 +70,7 @@ public interface PrimosStatsListener {
 
     /**
      * Wraps a sink so that an exception from it is logged rather than reaching the algorithm's
-     * catch-all, which would mark the node permanently {@code FAILED} — a bug in a counter costing
+     * catch-all, which would mark the node permanently {@code FAILED}: a bug in a counter costing
      * a cluster a voter.
      *
      * @param application the cluster name, for the log line when a call does throw
@@ -87,13 +87,14 @@ public interface PrimosStatsListener {
      * @param campaignNanos how long from first wanting to lead to leading. Measured from the
      *                      <em>pre-vote</em> rather than the election, because the question an
      *                      operator is asking is how long the failover took, and a pre-vote that
-     *                      had to be retried is part of that.
+     *                      had to be retried is part of that. A handover has no pre-vote, so it
+     *                      counts from the election.
      */
     default void onElectionWon(long term, long campaignNanos) {
     }
 
     /**
-     * This node stopped campaigning without winning — a lost election, or a pre-vote refused.
+     * This node stopped campaigning without winning: a lost election, or a pre-vote refused.
      *
      * <p>The twin of {@link #onElectionWon}, and the more interesting of the two when a cluster
      * will not fail over: a pre-vote refused is <em>why no election happened</em>, and nothing else
@@ -112,7 +113,7 @@ public interface PrimosStatsListener {
     }
 
     /**
-     * This node stood itself down because it could no longer reach a majority — CheckQuorum.
+     * This node stood itself down because it could no longer reach a majority: CheckQuorum.
      *
      * <p>Worth alerting on. A leader that repeatedly relinquishes is one whose network is
      * marginal, and it is the difference between "elections happen" and "this node keeps losing
@@ -155,7 +156,7 @@ public interface PrimosStatsListener {
      * A peer said it was shutting down.
      *
      * <p>Against the peer-down events: departures that were announced are orderly shutdowns, and
-     * the rest were inferred from silence — a crash, a partition, or a garbage collection long
+     * the rest were inferred from silence: a crash, a partition, or a garbage collection long
      * enough to look like one. Very different things on a dashboard.
      */
     default void onDepartureObserved(int peerId) {

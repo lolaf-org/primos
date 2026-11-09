@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assumptions.assumeThat;
  * rate.
  *
  * <p>The transport is a stub that discards sends and replays one prepared datagram, so what is
- * measured is the node and not the harness — a simulated network copies buffers into queues, and
+ * measured is the node and not the harness: a simulated network copies buffers into queues, and
  * that noise would drown the thing under test.
  *
  * <p>The bound is a ratchet rather than a target: it is set just under what this cost before the
@@ -119,7 +119,7 @@ class LoopAllocationTest {
     }
 
     /**
-     * The timer path with no campaign in it — a witness has no election timer, so this is the probe
+     * The timer path with no campaign in it: a witness has no election timer, so this is the probe
      * round and the advertisement alone.
      */
     @Test
@@ -134,7 +134,7 @@ class LoopAllocationTest {
      * rather than by traffic: a set entry per round of pre-votes, and a boxed term in a log call
      * that is built whether or not the level is enabled. A node that cannot reach a leader
      * campaigns here on every turn, which is an election storm and not a steady state, so this is
-     * pinned loosely — it exists to catch something new appearing, not to be optimised against.
+     * pinned loosely: it exists to catch something new appearing, not to be optimised against.
      */
     @Test
     void campaigning_allocates_only_what_an_election_costs() {
@@ -146,12 +146,12 @@ class LoopAllocationTest {
      * The box the whole {@link org.lolaf.primos.PrimosStatsListener} shape exists for.
      *
      * <p>That SPI takes primitives and enums, has one sink rather than a list, and offers no
-     * executor — every one of those is to keep a listener from allocating, because it is called on
+     * executor: every one of those is to keep a listener from allocating, because it is called on
      * the loop path and, for drops, per datagram. Stated as a rule it is a comment; this is the
      * thing that fails when it is broken.
      *
-     * <p>A counting listener is what a real one does — {@code primos-micrometer} increments meters
-     * and records timers and nothing else — so if that costs bytes per turn, the contract is
+     * <p>A counting listener is what a real one does ({@code primos-micrometer} increments meters
+     * and records timers and nothing else) so if that costs bytes per turn, the contract is
      * unmeetable and the shape was pointless.
      */
     @Test
@@ -162,7 +162,7 @@ class LoopAllocationTest {
 
         // The delta, not the total, and deliberately: the claim this SPI makes is that a listener
         // costs nothing, and measuring the whole path would fold in whatever else refusing a
-        // datagram costs. Measured 2026-09-02 at 34 bytes a turn either way — so the listener is
+        // datagram costs. Measured 2026-09-02 at 34 bytes a turn either way, so the listener is
         // free, and those 34 are the refusal path's own, on a path whose rate an attacker chooses.
         // Worth its own look; it is not this SPI's, and test logging runs at ERROR so it is not the
         // guarded debug line either.
@@ -187,7 +187,7 @@ class LoopAllocationTest {
         }
 
         assertThat(counting.events)
-                .as("without this the measurement above is vacuous — it would pass on a node that"
+                .as("without this the measurement above is vacuous: it would pass on a node that"
                         + " had stopped calling its listener at all")
                 .isPositive();
     }

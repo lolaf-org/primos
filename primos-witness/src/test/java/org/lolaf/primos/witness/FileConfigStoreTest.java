@@ -22,10 +22,13 @@ import org.lolaf.primos.Timings;
 import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -184,12 +187,117 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_secret_file_replaced_in_place_is_picked_up() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "before-rotation".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:" + secretFile);
+
+        try (FileConfigStore store = open()) {
+            Files.write(secretFile, "after-rotation!".getBytes(StandardCharsets.UTF_8));
+
+            assertThat(rescan(store)).isTrue();
+            assertThat(new String(store.current().settings().keyring().keys().get(0).secret(),
+                    StandardCharsets.UTF_8)).isEqualTo("after-rotation!");
+        }
+    }
+
+    @Test
+    void a_secret_file_left_alone_is_not_a_change() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "unchanged".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:" + secretFile);
+
+        try (FileConfigStore store = open()) {
+            assertThat(rescan(store)).isFalse();
+        }
+    }
+
+    @Test
+    void a_world_readable_witness_file_holding_a_secret_is_warned_about() throws IOException {
+        settings("secret.orders.value = s3cret");
+        worldReadable(directory.resolve("witness.properties"), true);
+
+        assertThat(loggedWhileOpening()).contains("witness.properties is world-readable");
+    }
+
+    @Test
+    void a_world_readable_secret_file_is_warned_about() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
+        worldReadable(secretFile, true);
+        settings("secret.orders.value = file:" + secretFile);
+
+        assertThat(loggedWhileOpening()).contains("orders.key is world-readable");
+    }
+
+    @Test
+    void files_that_hold_no_secret_or_are_private_are_not_warned_about() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "from-a-file".getBytes(StandardCharsets.UTF_8));
+        worldReadable(secretFile, false);
+        settings("secret.orders.value = file:" + secretFile);
+        worldReadable(directory.resolve("witness.properties"), true);
+        application("orders", "");
+        worldReadable(applicationFile("orders"), true);
+
+        assertThat(loggedWhileOpening()).doesNotContain("world-readable");
+    }
+
+    private static void worldReadable(Path file, boolean readable) throws IOException {
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(readable ? "rw-r--r--" : "rw-------"));
+    }
+
+    private String loggedWhileOpening() {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        try (FileConfigStore ignored = open()) {
+            return captured.toString(StandardCharsets.UTF_8);
+        } finally {
+            System.setErr(original);
+        }
+    }
+
+    @Test
     void a_key_without_a_secret_is_refused() throws IOException {
         settings("secret.orders.algorithm = HmacSHA512");
 
         assertThatThrownBy(this::open)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("has no secret.orders.value");
+    }
+
+    @Test
+    void a_key_naming_an_algorithm_the_platform_lacks_is_refused_at_load() throws IOException {
+        settings("secret.orders.value = s3cret\nsecret.orders.algorithm = HmacSHA265");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("key 'orders'")
+                .hasMessageContaining("HmacSHA265");
+    }
+
+    @Test
+    void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
+        settings("secret.orders.value = base64:");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("key 'orders'")
+                .hasMessageContaining("must not be empty");
+    }
+
+    @Test
+    void a_reload_with_an_unusable_key_keeps_the_keys_already_in_force() throws IOException {
+        settings("secret.orders.value = s3cret");
+        try (FileConfigStore store = open()) {
+            Keyring running = store.current().settings().keyring();
+
+            settings("secret.orders.value = s3cret\nsecret.orders.algorithm = HmacSHA265");
+            rescan(store);
+
+            assertThat(store.current().settings().keyring()).isEqualTo(running);
+        }
     }
 
     @Test
@@ -327,7 +435,7 @@ class FileConfigStoreTest {
      * The reason these moved out of {@code witness.properties}: a witness serves clusters it does
      * not own, and one of them being on another network must not decide the intervals for all of
      * them. Before this, a witness serving a LAN cluster and a WAN one was configured wrongly for
-     * whichever it was not — and, since nodes advertise their intervals, said so in an error
+     * whichever it was not, and, since nodes advertise their intervals, said so in an error
      * nobody could act on.
      */
     @Test
@@ -471,7 +579,7 @@ class FileConfigStoreTest {
     }
 
     /**
-     * Onboarding a tenant, or moving one to another network, must not need a witness restart —
+     * Onboarding a tenant, or moving one to another network, must not need a witness restart:
      * that is the one genuinely risky operation in its lifecycle, since every two-node cluster it
      * serves tolerates zero failures while it is down.
      */
@@ -599,7 +707,7 @@ class FileConfigStoreTest {
 
     /**
      * A witness in full cluster mode needs exactly one file. Keys are in the keyring, timings come
-     * from the clusters, applications create themselves — so the per-tenant directory that cannot
+     * from the clusters, applications create themselves, so the per-tenant directory that cannot
      * fit a single Kubernetes ConfigMap need not exist at all.
      */
     @Test
@@ -653,7 +761,7 @@ class FileConfigStoreTest {
      *
      * <p>A Kubernetes ConfigMap volume is a symlink farm: an update writes a new timestamped
      * directory, points {@code ..data} at it and deletes the old one. A watch registered on the
-     * resolved directory is then watching something deleted — it never fires again and nothing
+     * resolved directory is then watching something deleted: it never fires again and nothing
      * says so. Reading through the link sees the new bytes like any other edit.
      */
     @Test

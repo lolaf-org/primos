@@ -28,7 +28,7 @@ import org.lolaf.primos.time.VirtualClock;
  * Proves each invariant actually fires.
  *
  * <p>An invariant that has never failed is a comment, not a check. Every safety property here is
- * given a node that deliberately breaks it, and is asserted to notice — otherwise the whole
+ * given a node that deliberately breaks it, and is asserted to notice: otherwise the whole
  * simulation could be quietly asserting nothing while thousands of seeds go green.
  */
 class InvariantsTest {
@@ -245,6 +245,40 @@ class InvariantsTest {
 
         assertThatCode(() -> simulation.run(java.time.Duration.ofMillis(500)))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void a_successor_during_an_older_leader_s_lease_is_caught() {
+        ScriptedNode older = add(1);
+        ScriptedNode newer = add(2);
+        simulation.checking(Invariants.noSuccessorDuringALease(java.time.Duration.ofSeconds(1),
+                node -> node == older ? clock.nanoTime() : Long.MIN_VALUE));
+
+        older.forceTerm(3);
+        older.becomeLeader();
+        simulation.step();
+        newer.forceTerm(4);
+        newer.becomeLeader();
+
+        assertThatThrownBy(simulation::step)
+                .isInstanceOf(SimulationFailure.class)
+                .hasMessageContaining("node 2 leads term 4 while node 1 still holds a lease in term 3");
+    }
+
+    @Test
+    void a_successor_after_the_lease_has_ended_is_fine() {
+        ScriptedNode older = add(1);
+        ScriptedNode newer = add(2);
+        long confirmedAt = clock.nanoTime() - java.time.Duration.ofSeconds(2).toNanos();
+        simulation.checking(Invariants.noSuccessorDuringALease(java.time.Duration.ofSeconds(1),
+                node -> node == older ? confirmedAt : Long.MIN_VALUE));
+
+        older.forceTerm(3);
+        older.becomeLeader();
+        newer.forceTerm(4);
+        newer.becomeLeader();
+
+        assertThatCode(simulation::step).doesNotThrowAnyException();
     }
 
     @Test

@@ -17,17 +17,28 @@ package org.lolaf.primos;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.lolaf.primos.store.FileStateStore;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.store.StateStore;
+import org.lolaf.primos.store.StateStoreException;
+import org.lolaf.primos.transport.DatagramHandler;
 import org.lolaf.primos.transport.LoopbackNetwork;
+import org.lolaf.primos.transport.Transport;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -50,6 +61,9 @@ class PrimosNodeTest {
     private final LoopbackNetwork network = new LoopbackNetwork();
     private final List<PrimosNode> started = new ArrayList<>();
     private ExecutorService executor;
+
+    @TempDir
+    Path stateDirectory;
 
     private static ClusterConfig cluster(int id, int... peerIds) {
         List<Peer> peers = new ArrayList<>();
@@ -123,7 +137,7 @@ class PrimosNodeTest {
 
         assertThat(node.isRunning()).isTrue();
         assertThat(recorded.electionsWon.get())
-                .as("the running node was left alone, not torn down and rebuilt — a replacement"
+                .as("the running node was left alone, not torn down and rebuilt: a replacement"
                         + " would have had to win an election of its own")
                 .isEqualTo(wonBefore);
     }
@@ -175,17 +189,18 @@ class PrimosNodeTest {
     }
 
     @Test
-    void the_node_runs_one_daemon_thread_named_after_the_cluster() {
-        start(builder(1));
+    void the_node_s_threads_are_daemons_named_after_the_cluster() {
+        Recording events = new Recording();
+        start(builder(1).listener(events));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !events.threads.isEmpty());
 
         List<Thread> ours = Thread.getAllStackTraces().keySet().stream()
                 .filter(thread -> thread.getName().startsWith("primos-orders-1"))
                 .collect(java.util.stream.Collectors.toList());
 
-        assertThat(ours).hasSize(1);
-        assertThat(ours.get(0).isDaemon())
-                .as("a forgotten node must never hold a JVM open")
-                .isTrue();
+        assertThat(ours).extracting(Thread::getName)
+                .contains("primos-orders-1", "primos-orders-1-events");
+        assertThat(ours).as("a forgotten node must never hold a JVM open").allMatch(Thread::isDaemon);
     }
 
     @Test
@@ -292,6 +307,7 @@ class PrimosNodeTest {
         Recording late = new Recording();
         node.addListener(late);
 
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !late.leaders.isEmpty());
         assertThat(late.roles)
                 .as("it registered too late for the transition, so it is told where things stand")
                 .containsExactly("LEADER->LEADER");
@@ -318,14 +334,184 @@ class PrimosNodeTest {
     }
 
     @Test
-    void callbacks_run_on_the_node_thread_by_default() {
+    void callbacks_run_on_the_node_s_events_thread_by_default() {
         Recording events = new Recording();
         start(builder(1).listener(events));
 
         await().atMost(5, TimeUnit.SECONDS).until(() -> !events.threads.isEmpty());
 
         assertThat(events.threads).allSatisfy(name ->
-                assertThat(name).startsWith("primos-orders-1"));
+                assertThat(name).isEqualTo("primos-orders-1-events"));
+    }
+
+    @Test
+    void a_blocked_listener_does_not_stall_the_node_by_default() {
+        CountDownLatch release = new CountDownLatch(1);
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                awaitQuietly(release);
+            }
+        }));
+        try {
+            await().atMost(5, TimeUnit.SECONDS).until(() -> node.leadershipConfirmedNanos().isPresent());
+            long first = node.leadershipConfirmedNanos().getAsLong();
+
+            await().atMost(5, TimeUnit.SECONDS)
+                    .alias("the loop keeps turning while the only listener is stuck")
+                    .until(() -> node.leadershipConfirmedNanos().getAsLong() > first);
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void a_listener_can_transfer_leadership_and_gets_a_real_answer() {
+        List<PrimosNode> nodes = new ArrayList<>();
+        nodes.add(start(builder(1, 2, 3)));
+        nodes.add(start(builder(2, 1, 3)));
+        nodes.add(start(builder(3, 1, 2)));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> leaderCount(nodes.toArray(new PrimosNode[0])) == 1);
+        PrimosNode leader = nodes.stream().filter(n -> n.role().isLeader()).findFirst().get();
+        await().atMost(5, TimeUnit.SECONDS).until(() -> leader.leadershipConfirmedNanos().isPresent());
+        AtomicReference<Boolean> answer = new AtomicReference<>();
+        leader.addListener(new PrimosListener() {
+            @Override
+            public void onLeaderVersion(Leader who, long term, long version) {
+                answer.compareAndSet(null, leader.transferLeadership());
+            }
+        });
+
+        long startedAt = System.nanoTime();
+        leader.publishChange();
+
+        await().atMost(4, TimeUnit.SECONDS).until(() -> answer.get() != null);
+        assertThat(answer.get()).isTrue();
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt))
+                .as("far short of the stop timeout a self-wait would burn")
+                .isLessThan(Duration.ofSeconds(3));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !leader.role().isLeader());
+    }
+
+    @Test
+    void transferring_from_the_node_thread_is_refused_at_once() {
+        AtomicReference<Throwable> anyFollower = new AtomicReference<>();
+        AtomicReference<Throwable> chosen = new AtomicReference<>();
+        AtomicReference<Long> tookNanos = new AtomicReference<>();
+        AtomicReference<PrimosNode> self = new AtomicReference<>();
+        PrimosNode node = builder(1).listenerExecutor(Runnable::run).listener(new PrimosListener() {
+            @Override
+            public void onLeaderVersion(Leader who, long term, long version) {
+                long startedAt = System.nanoTime();
+                anyFollower.compareAndSet(null, thrownBy(() -> self.get().transferLeadership()));
+                chosen.compareAndSet(null, thrownBy(() -> self.get().transferLeadership(2)));
+                tookNanos.compareAndSet(null, System.nanoTime() - startedAt);
+            }
+        }).build();
+        self.set(node);
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.publishChange();
+
+        await().atMost(4, TimeUnit.SECONDS).until(() -> tookNanos.get() != null);
+        assertThat(anyFollower.get()).isInstanceOf(IllegalStateException.class).hasMessageContaining("node thread");
+        assertThat(chosen.get()).isInstanceOf(IllegalStateException.class);
+        assertThat(Duration.ofNanos(tookNanos.get())).isLessThan(Duration.ofSeconds(1));
+        assertThat(node.role().isLeader()).isTrue();
+    }
+
+    @Test
+    void stop_returns_after_the_callbacks_already_queued() {
+        List<String> delivered = new CopyOnWriteArrayList<>();
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                sleepQuietly(100);
+                delivered.add(previous + "->" + current);
+            }
+        }));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.stop();
+
+        assertThat(delivered).last().isEqualTo("LEADER->FOLLOWER");
+    }
+
+    @Test
+    void a_stuck_listener_cannot_hold_stop_past_its_timeout() {
+        CountDownLatch release = new CountDownLatch(1);
+        PrimosNode node = start(builder(1).stopTimeout(Duration.ofMillis(300)).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                awaitQuietly(release);
+            }
+        }));
+        try {
+            await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+            long startedAt = System.nanoTime();
+
+            node.stop();
+
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(3));
+            assertThat(node.isRunning()).isFalse();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void stop_from_a_listener_does_not_wait_on_itself() {
+        AtomicReference<PrimosNode> self = new AtomicReference<>();
+        AtomicReference<Long> tookNanos = new AtomicReference<>();
+        PrimosNode node = builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                if (current == Role.LEADER) {
+                    long startedAt = System.nanoTime();
+                    self.get().stop();
+                    tookNanos.set(System.nanoTime() - startedAt);
+                }
+            }
+        }).build();
+        self.set(node);
+        node.start();
+        started.add(node);
+
+        await().atMost(10, TimeUnit.SECONDS).until(() -> tookNanos.get() != null);
+
+        assertThat(Duration.ofNanos(tookNanos.get())).isLessThan(Duration.ofSeconds(3));
+        assertThat(node.isRunning()).isFalse();
+    }
+
+    private static Throwable thrownBy(Runnable action) {
+        try {
+            action.run();
+            return null;
+        } catch (Throwable thrown) {
+            return thrown;
+        }
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void reject(Runnable task) {
+        throw new RejectedExecutionException("this executor has been shut down");
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---------------------------------------------------------------- stats
@@ -341,6 +527,39 @@ class PrimosNodeTest {
 
         assertThat(events.threads).allSatisfy(name ->
                 assertThat(name).isEqualTo("my-listener-thread"));
+    }
+
+    @Test
+    void an_executor_that_rejects_events_costs_the_node_nothing() {
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+        }).listenerExecutor(PrimosNodeTest::reject));
+
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+        node.publishChange();
+        sleepQuietly(100);
+
+        assertThat(node.role()).isEqualTo(Role.LEADER);
+        assertThat(node.isRunning()).isTrue();
+    }
+
+    @Test
+    void stop_releases_the_transport_even_when_the_executor_rejects_the_last_events() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(MemoryStateStore::new)
+                .transport(() -> transport)
+                .listener(new PrimosListener() {
+                })
+                .listenerExecutor(PrimosNodeTest::reject)
+                .build();
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.stop();
+
+        assertThat(transport.closed).isTrue();
     }
 
     @Test
@@ -388,7 +607,7 @@ class PrimosNodeTest {
             public void onRoleChanged(Role previous, Role current, long term) {
                 if (current == Role.LEADER) {
                     // A callback runs on the node thread, mid-turn, and reads the node's own
-                    // published role — which is what it is doing now, not last turn.
+                    // published role, which is what it is doing now, not last turn.
                     seen.set(node[0].role());
                 }
             }
@@ -519,6 +738,90 @@ class PrimosNodeTest {
                 .hasMessageContaining("has failed and cannot be restarted");
     }
 
+    // -------------------------------------------------------- failing to start
+
+    @Test
+    void a_corrupt_state_file_fails_start_and_the_node_says_it_is_not_running() throws IOException {
+        Files.write(stateDirectory.resolve("state"), new byte[] {1, 2, 3});
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = fileBackedNode(transport);
+
+        assertThatThrownBy(node::start).isInstanceOf(StateStoreException.class);
+
+        assertThat(node.isRunning()).as("nothing is voting, so nothing may claim to be").isFalse();
+        assertThat(node.role().isLeader()).isFalse();
+        assertThat(transport.closed).as("a socket left bound blocks the retry").isTrue();
+    }
+
+    @Test
+    void a_repaired_state_file_lets_the_same_node_start_with_its_term() throws IOException {
+        Files.write(stateDirectory.resolve("state"), new byte[] {1, 2, 3});
+        PrimosNode node = fileBackedNode(network.transportFor(1));
+        assertThatThrownBy(node::start).isInstanceOf(StateStoreException.class);
+
+        try (FileStateStore repair = new FileStateStore(stateDirectory)) {
+            repair.save(7, -1);
+        }
+
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+        assertThat(node.roleAndTerm().term()).isGreaterThan(7);
+    }
+
+    @Test
+    void a_valid_state_file_starts_normally() {
+        try (FileStateStore seeded = new FileStateStore(stateDirectory)) {
+            seeded.save(7, -1);
+        }
+        PrimosNode node = fileBackedNode(network.transportFor(1));
+
+        node.start();
+        started.add(node);
+
+        assertThat(node.isRunning()).isTrue();
+    }
+
+    @Test
+    void any_exception_from_loading_fails_start_too() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(() -> new FailingStore() {
+                    @Override
+                    public org.lolaf.primos.store.PersistentState load() {
+                        throw new IllegalArgumentException("not a storage exception at all");
+                    }
+                })
+                .transport(() -> transport)
+                .build();
+
+        assertThatThrownBy(node::start).isInstanceOf(IllegalArgumentException.class);
+        assertThat(node.isRunning()).isFalse();
+        assertThat(transport.closed).isTrue();
+    }
+
+    @Test
+    void an_error_escaping_the_loop_leaves_the_node_not_running() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = fileBackedNode(transport);
+        node.start();
+        started.add(node);
+
+        transport.failNextPoll = new StackOverflowError("a deliberately fatal poll");
+
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role() == Role.FAILED);
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(node.isRunning()).isFalse());
+    }
+
+    private PrimosNode fileBackedNode(Transport transport) {
+        return PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(() -> new FileStateStore(stateDirectory))
+                .transport(() -> transport)
+                .build();
+    }
+
     private PrimosNode start(org.lolaf.primos.PrimosNodeBuilder builder) {
         PrimosNode node = builder.build();
         node.start();
@@ -536,7 +839,7 @@ class PrimosNodeTest {
     /**
      * Persists nothing and refuses, which drives the node into FAILED through its own loop.
      */
-    private static final class FailingStore implements StateStore {
+    private static class FailingStore implements StateStore {
 
         @Override
         public org.lolaf.primos.store.PersistentState load() {
@@ -556,6 +859,47 @@ class PrimosNodeTest {
         @Override
         public void close() {
             // nothing to do
+        }
+    }
+
+    private static final class TrackingTransport implements Transport {
+
+        private final Transport delegate;
+        private volatile boolean closed;
+        private volatile Error failNextPoll;
+
+        private TrackingTransport(Transport delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void send(int peerId, ByteBuffer datagram) {
+            delegate.send(peerId, datagram);
+        }
+
+        @Override
+        public int poll(long timeoutNanos, DatagramHandler handler) {
+            Error failure = failNextPoll;
+            if (failure != null) {
+                throw failure;
+            }
+            return delegate.poll(Math.min(timeoutNanos, TimeUnit.MILLISECONDS.toNanos(5)), handler);
+        }
+
+        @Override
+        public long sendsDropped() {
+            return delegate.sendsDropped();
+        }
+
+        @Override
+        public void wakeup() {
+            delegate.wakeup();
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+            delegate.close();
         }
     }
 

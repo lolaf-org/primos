@@ -32,7 +32,7 @@ import java.time.Duration;
  *
  * <p>Deliberately not the witness module's own client, which drives {@code runOnce} between sends:
  * here the loop is Spring's to run, so the whole point is to wait for datagrams that arrive without
- * this thread turning any handle. That is also what makes these tests the production path — nothing
+ * this thread turning any handle. That is also what makes these tests the production path: nothing
  * here reaches into the server.
  */
 final class WitnessTestClient implements AutoCloseable {
@@ -72,7 +72,7 @@ final class WitnessTestClient implements AutoCloseable {
      * test.
      */
     Boolean requestVote(long term, Duration timeout) {
-        write(encoder.requestVote(send, term, false));
+        write(encoder.handoverVote(send, term));
         Reply reply = awaitReply(timeout, received -> received.answered);
         return reply == null ? null : reply.granted;
     }
@@ -153,7 +153,7 @@ final class WitnessTestClient implements AutoCloseable {
         }
 
         @Override
-        public void onRequestVote(int senderId, long term, boolean preVote) {
+        public void onRequestVote(int senderId, long term, boolean preVote, boolean handover) {
             // nothing to do
         }
 

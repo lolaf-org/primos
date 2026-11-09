@@ -34,11 +34,12 @@ When the external system cannot check a term, the best left is to stop before a 
 takes, and check it when it ends, not on your next poll. Handing leadership over (`stop()`, `transferLeadership()`,
 `setCandidate(false)`) lets the successor campaign at once: stop the guarded work before.
 
-## Do not block the node thread
+## Keep callbacks short
 
-Listener callbacks arrive on the node thread, the same thread that sends heartbeats and answers votes. Hand real work to
-your own executor. A callback slower than half the heartbeat interval is logged, because a slow enough one makes this
-node miss its own heartbeats and triggers the failover it was trying to react to.
+Listener callbacks run one at a time on a dedicated events thread, not the node thread, so a slow one cannot make this
+node miss heartbeats. It does delay every event behind it, so by the time a callback runs the role may have moved on:
+act on the term it was given, and hand long work to your own executor. A callback slower than half the heartbeat
+interval is logged.
 
 ## Treat `FAILED` as a restart signal
 

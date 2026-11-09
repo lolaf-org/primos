@@ -55,7 +55,7 @@ final class ApplicationNames {
      * {@code orders-prod}. Accepting regex syntax here would make the file say one thing and mean
      * another, and fail silently in both directions.
      *
-     * <p>Linear with backtracking only at stars, so nothing here can be driven hard — and the
+     * <p>Linear with backtracking only at stars, so nothing here can be driven hard, and the
      * input is a 32-byte field in any case.
      */
     static boolean matchesPattern(String pattern, String name) {
@@ -104,7 +104,7 @@ final class ApplicationNames {
      * drop each other's datagrams for a mismatched name, so each sees the other as unreachable and
      * asks the witness instead. Under {@link ConfigSource#CLUSTER} it auto-creates <em>two</em>
      * buckets and grants a
-     * vote from each — two leaders out of one typo, with the cross-talk protection hiding the
+     * vote from each: two leaders out of one typo, with the cross-talk protection hiding the
      * cause. Nothing else in the system can see that, because from every other vantage point the
      * two clusters are simply unrelated.
      */
@@ -129,7 +129,7 @@ final class ApplicationNames {
      * Levenshtein distance, answered only as "is it at most two".
      *
      * <p>Two rows rather than a full matrix, and an early exit once every cell in a row exceeds the
-     * threshold — names are short, but this runs on the first sighting of a name from the network,
+     * threshold: names are short, but this runs on the first sighting of a name from the network,
      * so it should not be something an attacker can make expensive by choosing long ones.
      */
     private static boolean editDistanceAtMostTwo(String a, String b) {

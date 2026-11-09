@@ -26,15 +26,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Random;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.Supplier;
 
 /**
  * A node with a thread: the election algorithm, run for real.
  *
  * <p>Exactly one thread, and it is a daemon, so a forgotten node never holds a JVM open. It blocks
- * in one place — the transport's poll, bounded by the next timer deadline — which is what lets the
+ * in one place (the transport's poll, bounded by the next timer deadline) which is what lets the
  * whole design be single-threaded without busy-waiting.
  *
  * <p>{@link #role()} is answerable from any thread because the node publishes an immutable
@@ -62,6 +61,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      */
     private final PrimosStatsListener stats;
     private final Object transfer = new Object();
+    /**
+     * Null when the application supplied its own, which this node then knows nothing about.
+     */
+    private final ThreadPoolExecutor ownedEvents;
     private StateStore store;
     private Transport transport;
     private ElectionNode election;
@@ -77,7 +80,8 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private volatile boolean candidate = true;
     private boolean transferServed;
     private boolean transferSent;
-    private Thread thread;
+    private volatile Thread thread;
+    private volatile Thread eventsThread;
 
     PrimosNodeImpl(ClusterConfig config,
                    Supplier<StateStore> stores,
@@ -97,7 +101,9 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         this.authenticator = authenticator;
         this.stopTimeoutNanos = stopTimeoutNanos;
         this.stats = stats;
-        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock, listenerExecutor, slowCallbackNanos);
+        this.ownedEvents = listenerExecutor == null ? newEventsExecutor() : null;
+        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock,
+                listenerExecutor == null ? ownedEvents : listenerExecutor, slowCallbackNanos);
         this.roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
     }
 
@@ -110,6 +116,23 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         } catch (Exception e) {
             log.info("closing a node's {} failed", resource.getClass().getSimpleName(), e);
         }
+    }
+
+    private ThreadPoolExecutor newEventsExecutor() {
+        String name = "primos-" + config.applicationName() + "-" + config.nodeId() + "-events";
+        // One worker for ordering, and an unbounded queue because the submitter is the node thread, which must never
+        // wait. Events are state changes, never per datagram, and dropping a leadership event is worse than queueing it.
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
+                task -> {
+                    Thread worker = new Thread(task, name);
+                    worker.setDaemon(true);
+                    worker.setUncaughtExceptionHandler((thread, throwable) -> log.error("Failure in thread {}", thread, throwable));
+                    eventsThread = worker;
+                    return worker;
+                });
+        // Nothing to shut down, so a node that is restarted or simply dropped needs no lifecycle for this.
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 
     @Override
@@ -131,6 +154,14 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             throw e;
         }
         election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
+        try {
+            election.setCandidate(candidate);
+            // Here rather than on the node thread, so a state file it cannot read fails this call.
+            election.start();
+        } catch (RuntimeException e) {
+            closeQuietly();
+            throw e;
+        }
         running = true;
         thread = new Thread(this::loop, "primos-" + config.applicationName() + "-" + config.nodeId());
         thread.setDaemon(true);
@@ -142,7 +173,31 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public synchronized void stop() {
+    public void stop() {
+        stopNode();
+        awaitQueuedCallbacks();
+    }
+
+    /**
+     * Outside the node's lock, so a callback calling {@code publishChange()} cannot wait behind this.
+     */
+    private void awaitQueuedCallbacks() {
+        if (ownedEvents == null || Thread.currentThread() == eventsThread) {
+            return;
+        }
+        CountDownLatch drained = new CountDownLatch(1);
+        ownedEvents.execute(drained::countDown);
+        try {
+            if (!drained.await(stopTimeoutNanos, TimeUnit.NANOSECONDS)) {
+                log.warn("cluster '{}': node {} stopped with listener callbacks still queued behind a slow one",
+                        config.applicationName(), config.nodeId());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private synchronized void stopNode() {
         if (!running) {
             // Never started, or already stopped. Either way the store and the transport are this
             // node's to release: it made them, and a generation that never ran is still holding a
@@ -188,12 +243,21 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return requestTransfer(targetId);
     }
 
+    private boolean requestTransfer(int target) {
+        if (Thread.currentThread() == thread) {
+            throw new IllegalStateException("transferLeadership() waits for the node thread, so it cannot be called on"
+                    + " it. A listener executor that runs callbacks on the caller's thread does that; use the default,"
+                    + " or call this from another thread.");
+        }
+        return awaitTransfer(target);
+    }
+
     /**
      * Waits for the node thread to serve the request, bounded by the stop timeout in case the
      * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
      * the transport under it, and one caller at a time uses the single request slot.
      */
-    private synchronized boolean requestTransfer(int target) {
+    private synchronized boolean awaitTransfer(int target) {
         synchronized (transfer) {
             if (!running) {
                 return false;
@@ -235,12 +299,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         }
     }
 
-    @Override
-    public void setCandidate(boolean candidate) {
-        this.candidate = candidate;
-        wakeUp();
-    }
-
     private synchronized void wakeUp() {
         if (running) {
             transport.wakeup();
@@ -250,6 +308,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     @Override
     public boolean isCandidate() {
         return candidate && !config.isWitness();
+    }
+
+    @Override
+    public void setCandidate(boolean candidate) {
+        this.candidate = candidate;
+        wakeUp();
     }
 
     @Override
@@ -322,19 +386,22 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     private void loop() {
-        election.setCandidate(candidate);
-        election.start();
-        log.info("cluster '{}': node {} is rejoining the cluster", config.applicationName(), config.nodeId());
-        while (running) {
-            // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
-            // the socket, so there is no polling interval to tune and no latency to trade away.
-            election.runOnce(Long.MAX_VALUE);
-            election.setCandidate(candidate);
-            serveTransfer();
-            publish();
-            if (election.isFailed()) {
-                running = false;
+        log.info("cluster '{}': node {} is joining the cluster", config.applicationName(), config.nodeId());
+        try {
+            while (running) {
+                // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
+                // the socket, so there is no polling interval to tune and no latency to trade away.
+                election.runOnce(Long.MAX_VALUE);
+                election.setCandidate(candidate);
+                serveTransfer();
+                publish();
+                if (election.isFailed()) {
+                    running = false;
+                }
             }
+        } catch (Error fatal) {
+            running = false;
+            throw fatal;
         }
         announceShutdown();
         publish();

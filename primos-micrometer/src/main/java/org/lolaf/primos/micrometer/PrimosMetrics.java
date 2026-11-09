@@ -62,8 +62,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </pre>
  *
  * <p>{@link #bind} also registers for role, leader and peer events, which is why there is nothing
- * to pass to {@code listener(...)}: those may be added after {@code start()}, because
- * {@link PrimosNode#addListener} replays the current state to a late listener.
+ * to pass to {@code listener(...)}.
  *
  * <h2>Tags</h2>
  *
@@ -124,7 +123,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
      * <p>The peer tag is resolved from the configured peer set here, once, and an id that is not in
      * it is counted under {@code peer=other}. A witness server learns its voters from traffic, so
      * there is no configured set to resolve against and every peer-scoped meter collapses to
-     * {@code peer=learned} — an unbounded label set driven by whatever arrives on the socket is the
+     * {@code peer=learned}: an unbounded label set driven by whatever arrives on the socket is the
      * metrics version of a memory leak an attacker controls.
      */
     public static PrimosMetrics create(MeterRegistry registry, ClusterConfig cluster) {
@@ -217,10 +216,15 @@ public final class PrimosMetrics implements PrimosStatsListener {
     /**
      * Registers the gauges, and starts counting role, leader and peer events.
      *
-     * @throws IllegalStateException if called twice, which would double-count every event
+     * @throws IllegalStateException if called twice, which would double-count every event, or on a running node,
+     *                               whose peers already up would never report it
      */
     public void bind(PrimosNode node) {
         Objects.requireNonNull(node, "node");
+        if (node.isRunning()) {
+            throw new IllegalStateException("bind these metrics before starting the node: a peer already up never"
+                    + " reports it again, so its gauge would read 0 for as long as it stayed up");
+        }
         if (!bound.compareAndSet(false, true)) {
             throw new IllegalStateException("these metrics are already bound to a node");
         }
@@ -250,7 +254,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
         }
         for (int i = 0; i < peerUp.length; i++) {
             gauge("primos.peer.up", peerUp[i], AtomicInteger::get,
-                    "1 while a peer answers probes. 0 until its first reply after binding",
+                    "1 while a peer answers probes. 0 until its first reply",
                     peerTags[i]);
         }
 

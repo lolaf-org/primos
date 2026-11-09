@@ -47,18 +47,17 @@ import java.util.concurrent.TimeUnit;
  * <p><strong>Gated beans must not be running when the context finishes refreshing.</strong> A
  * {@link SmartLifecycle} bean that auto-starts is already running before the first election has
  * concluded, so a follower would be consuming from its queues within a second of boot with nothing
- * anywhere to say so. This class runs at a phase just below {@link PrimosNodeLifecycle}, and its
- * own {@code start()} stops whatever auto-started — so the beans are quiesced before the node can
- * possibly be told it leads, in both node lifecycle modes.
+ * anywhere to say so. {@link #prepare()} stops whatever auto-started, so the beans are quiesced
+ * before the node can possibly be told it leads, in both node lifecycle modes.
  *
  * <p><strong>Transitions never run on the node thread.</strong> Stopping a message listener
  * container drains it and can take tens of seconds; on the node thread that stalls consensus,
- * misses heartbeats and triggers a spurious election — which loses leadership, which triggers
+ * misses heartbeats and triggers a spurious election, which loses leadership, which triggers
  * another stop. A single-threaded executor is also what stops a start and a stop from interleaving.
  *
  * <p><strong>Stale transitions are dropped by term.</strong> Leadership can be lost and regained
  * faster than a stop completes, and a stop from term 5 landing after the start for term 6 would
- * leave a leader with everything switched off — silent, indefinite, and the worst failure this
+ * leave a leader with everything switched off: silent, indefinite, and the worst failure this
  * class can have.
  *
  * <p><strong>It stops beans, never the context.</strong> Even under {@code scope=context}: calling
@@ -70,8 +69,7 @@ import java.util.concurrent.TimeUnit;
 public class LeaderLifecycleController implements PrimosListener, SmartLifecycle {
 
     /**
-     * Just below {@link PrimosNodeLifecycle#PHASE}, so gated beans are quiesced before the node
-     * starts and this outlives the node on the way down.
+     * Just below {@link PrimosNodeLifecycle#PHASE}, so this outlives the node on the way down.
      */
     public static final int PHASE = PrimosNodeLifecycle.PHASE - 1000;
 
@@ -82,7 +80,7 @@ public class LeaderLifecycleController implements PrimosListener, SmartLifecycle
     private volatile boolean running;
 
     /**
-     * Confined to the transition thread — every one of them, with no startup exception. That is
+     * Confined to the transition thread: every one of them, with no startup exception. That is
      * what {@link #prepare()} blocking on the executor buys, and it is the whole reason it does.
      */
     private List<GatedBean> gated = List.of();
@@ -105,7 +103,7 @@ public class LeaderLifecycleController implements PrimosListener, SmartLifecycle
      * Beans that must never be gated, however wide the scope.
      *
      * <p>Two of them are primos' own: gating the node on leadership would stop the very thing that
-     * reports it. The third is the one that had to be found rather than predicted — Spring's
+     * reports it. The third is the one that had to be found rather than predicted: Spring's
      * {@link LifecycleProcessor} is itself a {@link Lifecycle} bean, so a sweep of every
      * {@code Lifecycle} in the context picks it up, and stopping it stops <em>every</em> lifecycle
      * bean there is. That is {@code context.stop()} by another name, re-entrant, and it takes the
@@ -136,8 +134,8 @@ public class LeaderLifecycleController implements PrimosListener, SmartLifecycle
      * <p><strong>The work happens on the transition thread and this blocks until it is done</strong>,
      * rather than running on the caller's thread. Without that, {@code gated}, {@code appliedTerm}
      * and {@code beansRunning} would be written here and read there with no happens-before between
-     * them in every case. Under {@code primos.lifecycle=context} there is a chain — refresh starts
-     * the node thread, which hands to the listener executor, which hands here — but under
+     * them in every case. Under {@code primos.lifecycle=context} there is a chain (refresh starts
+     * the node thread, which hands to the listener executor, which hands here) but under
      * {@code manual} the application may call {@code start()} from any thread it likes, and then
      * nothing orders these writes against those reads. Blocking costs nothing: this runs once, and
      * the work is a bean lookup and the {@code stop()} calls that would have run on this thread

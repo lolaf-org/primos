@@ -105,7 +105,7 @@ class WitnessMainTest {
         int status = new CommandLine(command).execute("--config", "/no/such/directory/anywhere");
 
         assertThat(status)
-                .as("exit 2 with the usage text, the way a mistyped option is reported — an init"
+                .as("exit 2 with the usage text, the way a mistyped option is reported: an init"
                         + " system reading this must not be told the software failed")
                 .isEqualTo(CommandLine.ExitCode.USAGE);
     }

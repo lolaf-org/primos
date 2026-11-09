@@ -41,8 +41,8 @@ import java.util.concurrent.TimeUnit;
  * and quietly is not doing its job.
  *
  * <p>The two exit codes are the ones an init system reads: <strong>2</strong> for anything the
- * operator typed or configured wrongly — reported as a sentence and the usage text, never a stack
- * trace — and <strong>1</strong> for a failure to start, which is logged with its cause because
+ * operator typed or configured wrongly (reported as a sentence and the usage text, never a stack
+ * trace) and <strong>1</strong> for a failure to start, which is logged with its cause because
  * that one needs the detail.
  */
 @Command(

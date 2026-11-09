@@ -26,7 +26,7 @@ import org.lolaf.primos.store.StateStore;
  * <p>A seam with one shipped implementation, and it exists for the check rather than for the
  * choice: whatever it returns, {@link WitnessServer} refuses a store that reports itself
  * non-durable. A witness that forgets a vote and restarts can vote twice in one term and elect two
- * leaders — which is exactly the failure it was deployed to prevent — so a stateless witness is
+ * leaders (which is exactly the failure it was deployed to prevent) so a stateless witness is
  * not a deployment shortcut, it is the bug.
  */
 @FunctionalInterface
