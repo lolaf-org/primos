@@ -99,7 +99,7 @@ public class ClusterConfig {
      * whose log ingestion is charged by the line. The decisions are still logged at DEBUG.
      */
     @Builder.Default
-    boolean voteLogging = true;
+    private final boolean voteLogging = true;
 
     /**
      * Whether a character may appear in an application name: printable ASCII with no space, which
