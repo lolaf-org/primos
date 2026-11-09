@@ -38,6 +38,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -501,6 +502,10 @@ class PrimosNodeTest {
         }
     }
 
+    private static void reject(Runnable task) {
+        throw new RejectedExecutionException("this executor has been shut down");
+    }
+
     private static void sleepQuietly(long millis) {
         try {
             Thread.sleep(millis);
@@ -522,6 +527,39 @@ class PrimosNodeTest {
 
         assertThat(events.threads).allSatisfy(name ->
                 assertThat(name).isEqualTo("my-listener-thread"));
+    }
+
+    @Test
+    void an_executor_that_rejects_events_costs_the_node_nothing() {
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+        }).listenerExecutor(PrimosNodeTest::reject));
+
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+        node.publishChange();
+        sleepQuietly(100);
+
+        assertThat(node.role()).isEqualTo(Role.LEADER);
+        assertThat(node.isRunning()).isTrue();
+    }
+
+    @Test
+    void stop_releases_the_transport_even_when_the_executor_rejects_the_last_events() {
+        TrackingTransport transport = new TrackingTransport(network.transportFor(1));
+        PrimosNode node = PrimosNode.builder()
+                .clusterConfig(cluster(1))
+                .store(MemoryStateStore::new)
+                .transport(() -> transport)
+                .listener(new PrimosListener() {
+                })
+                .listenerExecutor(PrimosNodeTest::reject)
+                .build();
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.stop();
+
+        assertThat(transport.closed).isTrue();
     }
 
     @Test

@@ -105,7 +105,12 @@ final class ListenerDispatcher implements PrimosListener {
     }
 
     private void deliverTo(PrimosListener listener, String event, Runnable delivery) {
-        executor.execute(() -> invoke(listener, event, delivery));
+        try {
+            executor.execute(() -> invoke(listener, event, delivery));
+        } catch (RuntimeException rejected) {
+            log.warn("cluster '{}': node {} listener {} missed {}: its executor refused the task: {}",
+                    cluster, nodeId, listener.getClass().getName(), event, rejected.toString());
+        }
     }
 
     private void invoke(PrimosListener listener, String event, Runnable delivery) {
