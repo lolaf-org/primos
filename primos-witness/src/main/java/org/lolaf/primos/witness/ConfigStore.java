@@ -38,11 +38,6 @@ public interface ConfigStore extends AutoCloseable {
     ConfigSnapshot current();
 
     /**
-     * Registers a listener for changes to the served set.
-     */
-    void addListener(ConfigChangeListener listener);
-
-    /**
      * Checks for changes without blocking, and publishes a new snapshot if there are any.
      *
      * <p>Folded into the server's own loop rather than given a thread: the witness runs on one

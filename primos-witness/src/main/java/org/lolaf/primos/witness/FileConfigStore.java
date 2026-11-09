@@ -31,7 +31,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.zip.CRC32;
 
 /**
@@ -65,7 +64,6 @@ public final class FileConfigStore implements ConfigStore {
 
     private final Path directory;
     private final Path applicationsDirectory;
-    private final List<ConfigChangeListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
      * Names already told that their timing keys are being ignored, so it is said once each.
@@ -325,11 +323,6 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     @Override
-    public void addListener(ConfigChangeListener listener) {
-        listeners.add(listener);
-    }
-
-    @Override
     public boolean poll(long nowNanos) {
         if (closed || nowNanos < nextRescanNanos) {
             return false;
@@ -386,7 +379,7 @@ public final class FileConfigStore implements ConfigStore {
             reportRestartRequired(previous.settings(), candidate.settings());
         }
         if (applicationsChanged) {
-            announce(previous, candidate);
+            logApplicationChanges(previous, candidate);
         }
         return true;
     }
@@ -413,15 +406,13 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    private void announce(ConfigSnapshot previous, ConfigSnapshot candidate) {
+    private void logApplicationChanges(ConfigSnapshot previous, ConfigSnapshot candidate) {
         for (ApplicationConfig application : candidate.applications().values()) {
             ApplicationConfig before = previous.application(application.name());
             if (before == null) {
                 log.info("now serving application '{}'", application.name());
-                listeners.forEach(listener -> listener.onApplicationAdded(application));
             } else if (!before.equals(application)) {
                 log.info("configuration changed for application '{}'", application.name());
-                listeners.forEach(listener -> listener.onApplicationChanged(before, application));
             }
         }
         for (ApplicationConfig application : previous.applications().values()) {
@@ -429,7 +420,6 @@ public final class FileConfigStore implements ConfigStore {
                 log.info("no longer serving application '{}'. Its state is kept: a cluster that"
                                 + " returns still needs the vote it was given remembered.",
                         application.name());
-                listeners.forEach(listener -> listener.onApplicationRemoved(application));
             }
         }
     }

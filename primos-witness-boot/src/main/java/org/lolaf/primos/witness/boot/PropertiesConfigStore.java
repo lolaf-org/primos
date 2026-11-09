@@ -206,15 +206,6 @@ public class PropertiesConfigStore implements ConfigStore {
         return snapshot;
     }
 
-    /**
-     * Accepted and never called, because nothing here ever changes. Refusing a listener would make
-     * this store a different SPI rather than a different implementation of the same one.
-     */
-    @Override
-    public void addListener(ConfigChangeListener listener) {
-        // nothing to do
-    }
-
     @Override
     public boolean poll(long nowNanos) {
         return false;
