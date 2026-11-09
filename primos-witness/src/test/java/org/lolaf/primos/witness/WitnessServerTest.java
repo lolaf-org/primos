@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -703,6 +704,19 @@ class WitnessServerTest {
                 .bindAddress(loopback())
                 .build())
                 .hasMessageContaining("already using the state directory");
+    }
+
+    @Test
+    void a_second_witness_on_the_same_port_refuses_to_start() {
+        start();
+
+        assertThatThrownBy(() -> WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(server.boundAddress())
+                .build())
+                .hasMessageContaining("cannot open its socket")
+                .hasCauseInstanceOf(BindException.class);
     }
 
     @Test

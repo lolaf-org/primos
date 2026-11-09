@@ -121,14 +121,18 @@ public final class UdpTransport implements Transport {
         resolveAll(builder.peers);
 
         this.channel = DatagramChannel.open();
-        this.channel.configureBlocking(false);
-        setIfSupported(StandardSocketOptions.SO_REUSEADDR, Boolean.TRUE);
-        if (builder.receiveBufferBytes > 0) {
-            setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+        try {
+            this.channel.configureBlocking(false);
+            if (builder.receiveBufferBytes > 0) {
+                setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+            }
+            this.channel.bind(builder.bindAddress);
+            this.selector = Selector.open();
+            this.channel.register(selector, SelectionKey.OP_READ);
+        } catch (IOException | RuntimeException e) {
+            this.channel.close();
+            throw e;
         }
-        this.channel.bind(builder.bindAddress);
-        this.selector = Selector.open();
-        this.channel.register(selector, SelectionKey.OP_READ);
 
         log.info("cluster '{}': bound to {}", clusterName, channel.getLocalAddress());
     }

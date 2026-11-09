@@ -20,6 +20,7 @@ import org.lolaf.primos.Peer;
 import org.lolaf.primos.wire.WireFormat;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -59,6 +60,15 @@ class UdpTransportTest extends TransportContractTest {
     @Test
     void it_binds_where_it_was_told_to() {
         assertThat(((UdpTransport) a).boundAddress().getPort()).isEqualTo(portA);
+    }
+
+    @Test
+    void a_port_already_in_use_is_refused_rather_than_shared() {
+        assertThatThrownBy(() -> UdpTransport.builder()
+                .bindAddress(((UdpTransport) a).boundAddress())
+                .peers(Collections.emptyList())
+                .build())
+                .isInstanceOf(BindException.class);
     }
 
     @Test

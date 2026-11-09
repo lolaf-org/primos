@@ -213,7 +213,6 @@ public final class WitnessServer implements AutoCloseable {
         try {
             this.channel = DatagramChannel.open();
             this.channel.configureBlocking(false);
-            setIfSupported(StandardSocketOptions.SO_REUSEADDR, Boolean.TRUE);
             setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
             this.channel.bind(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress());
             this.selector = Selector.open();
