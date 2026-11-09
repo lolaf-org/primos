@@ -133,6 +133,8 @@ class LeadershipConfirmationTest {
             simulation.network().delayRange(Duration.ofMillis(1).toNanos(), Duration.ofMillis(10).toNanos());
             ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
             simulation.runUntil(cluster::hasSingleLeader, SETTLE);
+            // Past the new leader's grace, which outlasts a lease counted from the vote requests.
+            simulation.run(TIMINGS.electionTimeoutMin());
             ElectionCluster.NodeUnderTest old = cluster.leader().get();
             long[] lastConfirmed = {Long.MIN_VALUE};
             long[] stoodDown = {Long.MIN_VALUE};

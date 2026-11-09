@@ -94,6 +94,7 @@ public final class ElectionNode implements MessageHandler {
     private final Object publication = new Object();
     private long campaignStartedNanos = NO_CONTACT;
     private long electionStartedNanos;
+    private long leaderSinceNanos;
     private long leaderlessSinceNanos = NO_CONTACT;
     private TrackedPeer[] peers;
     private long[] confirmationScratch = new long[0];
@@ -420,7 +421,7 @@ public final class ElectionNode implements MessageHandler {
         }
         long deadline = Math.min(probeDeadlineNanos, nodeConfigDeadlineNanos);
         if (role == Role.LEADER) {
-            deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, leaseEndNanos()));
+            deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, quorumContactDeadlineNanos()));
         } else if (campaigns()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
@@ -728,6 +729,7 @@ public final class ElectionNode implements MessageHandler {
         setRole(Role.LEADER);
         setLeader(config.nodeId());
         endCampaign(true);
+        leaderSinceNanos = clock.nanoTime();
 
         // Start the contact clock, or a new leader would step down before its first heartbeat had a
         // chance to be answered. From the vote requests, not the win: a voter's stickiness counts from
@@ -1364,12 +1366,16 @@ public final class ElectionNode implements MessageHandler {
         return confirmed == NO_CONTACT ? Long.MIN_VALUE : confirmed;
     }
 
-    private long leaseEndNanos() {
-        return leadershipConfirmedNanos() + electionTimeoutMinNanos;
+    private long quorumContactDeadlineNanos() {
+        return Math.max(leadershipConfirmedNanos(), leaderSinceNanos) + electionTimeoutMinNanos;
     }
 
     private boolean hasQuorumContact(long now) {
         long window = timings.electionTimeoutMin().toNanos();
+        // From the win, not the vote requests the lease counts from: a first heartbeat cannot be answered any sooner.
+        if (now - leaderSinceNanos < window) {
+            return true;
+        }
         int inContact = 1;
         for (TrackedPeer trackedPeer : peers) {
             long lastHeard = trackedPeer.lastRoundTripNanos;
