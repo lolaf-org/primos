@@ -193,6 +193,39 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_key_naming_an_algorithm_the_platform_lacks_is_refused_at_load() throws IOException {
+        settings("secret.orders.value = s3cret\nsecret.orders.algorithm = HmacSHA265");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("key 'orders'")
+                .hasMessageContaining("HmacSHA265");
+    }
+
+    @Test
+    void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
+        settings("secret.orders.value = base64:");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("key 'orders'")
+                .hasMessageContaining("must not be empty");
+    }
+
+    @Test
+    void a_reload_with_an_unusable_key_keeps_the_keys_already_in_force() throws IOException {
+        settings("secret.orders.value = s3cret");
+        try (FileConfigStore store = open()) {
+            Keyring running = store.current().settings().keyring();
+
+            settings("secret.orders.value = s3cret\nsecret.orders.algorithm = HmacSHA265");
+            rescan(store);
+
+            assertThat(store.current().settings().keyring()).isEqualTo(running);
+        }
+    }
+
+    @Test
     void a_pattern_that_could_never_match_a_name_is_refused() throws IOException {
         settings(String.join("\n",
                 "secret.orders.value = k",

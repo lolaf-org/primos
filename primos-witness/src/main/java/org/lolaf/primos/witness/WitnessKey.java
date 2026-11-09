@@ -67,6 +67,10 @@ public final class WitnessKey {
      */
     private final List<String> applications;
 
+    /**
+     * @throws IllegalArgumentException if the secret is empty or the platform cannot use the algorithm, so a bad key
+     *                                  fails the configuration read rather than the server loop on its first use
+     */
     public WitnessKey(String name, byte[] secret, String algorithm, List<String> applications) {
         this.name = Objects.requireNonNull(name, "name");
         this.secret = Objects.requireNonNull(secret, "secret").clone();
@@ -74,6 +78,16 @@ public final class WitnessKey {
                 ? MessageAuthenticator.DEFAULT_ALGORITHM : algorithm.trim();
         this.applications = applications == null
                 ? Collections.emptyList() : Collections.unmodifiableList(new java.util.ArrayList<>(applications));
+        requireUsable();
+    }
+
+    private void requireUsable() {
+        try {
+            MessageAuthenticator.keyring(Collections.singletonList(
+                    MessageAuthenticator.KeySpec.of(name, algorithm, secret)));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("key '" + name + "' cannot be used: " + e.getMessage(), e);
+        }
     }
 
     public byte[] secret() {
