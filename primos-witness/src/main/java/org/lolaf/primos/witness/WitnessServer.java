@@ -452,7 +452,12 @@ public final class WitnessServer implements AutoCloseable {
      * <p>The name is read from unverified bytes; see this class's own documentation for why that is
      * safe and why there is no alternative.
      */
-    private void route(ByteBuffer datagram, InetSocketAddress source) {
+    void route(ByteBuffer datagram, InetSocketAddress source) {
+        // No socket sends from port 0, so this is forged, and it could not be answered anyway.
+        if (source.getPort() == 0) {
+            unroutable++;
+            return;
+        }
         String application = MessageDecoder.peekApplicationName(datagram);
         if (application == null) {
             unroutable++;
@@ -1015,7 +1020,7 @@ public final class WitnessServer implements AutoCloseable {
     public static class RoutingStats {
 
         /**
-         * Datagrams too short or too malformed to carry a readable application name.
+         * Datagrams too short or too malformed to carry a readable application name, or claiming source port 0.
          */
         long unroutable;
 

@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +38,9 @@ import org.lolaf.primos.store.PersistentState;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.store.StateStoreException;
 import org.lolaf.primos.time.MonotonicClock;
+import org.lolaf.primos.wire.MessageAuthenticator;
+import org.lolaf.primos.wire.MessageEncoder;
+import org.lolaf.primos.wire.WireFormat;
 
 /**
  * One tenant's storage failing while its node is being created or rebuilt costs that tenant and nobody else.
@@ -195,6 +199,24 @@ class TenantIsolationTest {
         }
 
         assertThat(turns).as("an abandoned node's expired deadlines must not wake the loop").isLessThan(100);
+    }
+
+    @Test
+    void a_datagram_from_source_port_zero_costs_its_tenant_nothing() {
+        cluster();
+        start();
+        announce(ORDERS);
+        long unroutableBefore = server.routing().unroutable();
+        ByteBuffer ping = new MessageEncoder(ORDERS, 3, MessageAuthenticator.hmacSha256(SECRET.getBytes(StandardCharsets.UTF_8)))
+                .ping(ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 0L, 1L);
+
+        // Straight at route(), because no socket can send from port 0: only a forged header can claim it.
+        server.route(ping, new InetSocketAddress("127.0.0.1", 0));
+        server.runOnce(0L);
+
+        assertThat(server.quarantinedApplications()).isEmpty();
+        assertThat(server.routing().unroutable()).isEqualTo(unroutableBefore + 1);
+        assertThat(voteFor(ORDERS, SECRET, 1L)).isTrue();
     }
 
     @Test
