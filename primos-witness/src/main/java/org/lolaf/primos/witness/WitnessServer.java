@@ -38,7 +38,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
@@ -214,7 +213,7 @@ public final class WitnessServer implements AutoCloseable {
         try {
             this.channel = DatagramChannel.open();
             this.channel.configureBlocking(false);
-            setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+            setReceiveBuffer(builder.receiveBufferBytes);
             this.channel.bind(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress());
             this.selector = Selector.open();
             this.channel.register(selector, SelectionKey.OP_READ);
@@ -379,8 +378,7 @@ public final class WitnessServer implements AutoCloseable {
      * The term one application currently holds, for tests and diagnostics.
      */
     public long currentTerm(String application) {
-        Served found = require(application);
-        return found.node.currentTerm();
+        return require(application).node.currentTerm();
     }
 
     /** Identity changes on a rebuild, which is how a test tells one happened. */
@@ -392,8 +390,7 @@ public final class WitnessServer implements AutoCloseable {
      * Which node this application's vote is currently spent on, or -1.
      */
     public int votedFor(String application) {
-        Served found = require(application);
-        return found.node.votedFor();
+        return require(application).node.votedFor();
     }
 
     private Served require(String application) {
@@ -941,11 +938,11 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    private <T> void setIfSupported(SocketOption<T> option, T value) {
+    private void setReceiveBuffer(int bytes) {
         try {
-            channel.setOption(option, value);
+            channel.setOption(StandardSocketOptions.SO_RCVBUF, bytes);
         } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
-            log.debug("this platform does not support {}: {}", option.name(), e.toString());
+            log.debug("this platform does not support SO_RCVBUF: {}", e.toString());
         }
     }
 

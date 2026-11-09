@@ -36,8 +36,6 @@ import org.springframework.context.annotation.Configuration;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -73,12 +71,6 @@ public class PrimosAutoConfiguration {
         String secret = properties.secret();
         return secret == null || secret.isEmpty()
                 ? null : secret.getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static List<Peer> toPeers(List<PeerProperties> peers, boolean witness) {
-        List<Peer> result = new ArrayList<>();
-        peers.forEach(peer -> result.add(toPeer(peer, witness)));
-        return result;
     }
 
     /**
@@ -126,7 +118,7 @@ public class PrimosAutoConfiguration {
                 .nodeId(properties.nodeId())
                 .timings(timings)
                 .voteLogging(properties.voteLogging())
-                .peers(toPeers(properties.peers(), false));
+                .peers(properties.peers().stream().map(peer -> toPeer(peer, false)).toList());
         if (properties.witness() != null) {
             cluster.witness(toPeer(properties.witness(), true));
         }

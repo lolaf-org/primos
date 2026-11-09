@@ -96,7 +96,7 @@ public class Leader {
      * A leader known only by its id: the witness server's case, described on the class.
      */
     public static Leader byId(int id) {
-        return new Leader(id, "node-" + id, false, null);
+        return new Leader(id, Peer.defaultName(id, PeerType.APPLICATION), false, null);
     }
 
     /**

@@ -126,7 +126,7 @@ public final class UdpTransport implements Transport {
         try {
             this.channel.configureBlocking(false);
             if (builder.receiveBufferBytes > 0) {
-                setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
+                setReceiveBuffer(builder.receiveBufferBytes);
             }
             this.channel.bind(builder.bindAddress);
             this.selector = Selector.open();
@@ -329,11 +329,11 @@ public final class UdpTransport implements Transport {
         return sendFailures + sendsWhileClosed + sendsToUnknownPeer;
     }
 
-    private <T> void setIfSupported(SocketOption<T> option, T value) {
+    private void setReceiveBuffer(int bytes) {
         try {
-            channel.setOption(option, value);
+            channel.setOption(StandardSocketOptions.SO_RCVBUF, bytes);
         } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
-            log.debug("this platform does not support {}: {}", option.name(), e.toString());
+            log.debug("this platform does not support SO_RCVBUF: {}", e.toString());
         }
     }
 

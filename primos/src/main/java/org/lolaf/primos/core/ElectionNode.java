@@ -288,14 +288,14 @@ public final class ElectionNode implements MessageHandler {
         // this a new peer would look infinitely silent and be forgotten on the next probe round.
         tracked.lastHeardNanos = clock.nanoTime();
 
-        int evicted = peers.length < MAX_LEARNED_PEERS ? -1 : leastRecentlyHeard();
-        if (evicted < 0) {
+        if (peers.length < MAX_LEARNED_PEERS) {
             peers = Arrays.copyOf(peers, peers.length + 1);
             peers[peers.length - 1] = tracked;
         } else {
             // At the bound, so the quietest peer makes room. The bound is what stops a set keyed on
             // something arriving from the network being a leak somebody else controls; eviction is
             // cheap for the same reason forgetting is, since the next datagram teaches it again.
+            int evicted = leastRecentlyHeard();
             Peer gone = peers[evicted].peer;
             log.info("cluster '{}': witness {} is tracking {} voters, so voter {} makes room for voter {}",
                     config.applicationName(), config.nodeId(), MAX_LEARNED_PEERS, gone.id(), peer.id());
@@ -326,7 +326,6 @@ public final class ElectionNode implements MessageHandler {
         PersistentState state = store.load();
         currentTerm = state.currentTerm();
         votedFor = state.votedFor();
-        role = Role.FOLLOWER;
 
         if (config.isLearnedMembership()) {
             // There is no quorum summary to print: this witness does not know how many voters the
@@ -353,15 +352,16 @@ public final class ElectionNode implements MessageHandler {
                             + " elect two leaders. Use this only for tests.",
                     config.applicationName(), config.nodeId());
         }
-        lastLeaderContactNanos = clock.nanoTime();
-        probeDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        long now = clock.nanoTime();
+        lastLeaderContactNanos = now;
+        probeDeadlineNanos = now + timings.probeInterval().toNanos();
         // One probe interval, not immediately. A node starting up has peers that may not be
         // listening yet, so an advert sent on the first turn is likely to be thrown away and the
         // next one is half a minute off, while a second later they are up and a mismatch is
         // reported almost as promptly. Not zero for a second reason: a deadline of "now" is shared
         // by every node in the cluster, which would make nextDeadlineNanos() identical everywhere
         // at startup and hide the randomised election timeout behind it.
-        nodeConfigDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        nodeConfigDeadlineNanos = now + timings.probeInterval().toNanos();
         resetElectionTimer();
     }
 
@@ -1193,8 +1193,7 @@ public final class ElectionNode implements MessageHandler {
                     + " election to transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
             return false;
         }
-        logTransferTo(target, retry);
-        transferTo(target);
+        transferTo(target, retry);
         return true;
     }
 
@@ -1216,14 +1215,8 @@ public final class ElectionNode implements MessageHandler {
                     config.nodeId(), currentTerm, targetId, refusal);
             return false;
         }
-        logTransferTo(trackedPeer.peer, false);
-        transferTo(trackedPeer.peer);
+        transferTo(trackedPeer.peer, false);
         return true;
-    }
-
-    private void logTransferTo(Peer target, boolean retry) {
-        logTransfer(retry, "cluster '{}': node {} is transferring leadership of term {} to node {}",
-                config.applicationName(), config.nodeId(), currentTerm, target.id());
     }
 
     private void logTransfer(boolean retry, String message, Object... args) {
@@ -1234,7 +1227,9 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    private void transferTo(Peer target) {
+    private void transferTo(Peer target, boolean retry) {
+        logTransfer(retry, "cluster '{}': node {} is transferring leadership of term {} to node {}",
+                config.applicationName(), config.nodeId(), currentTerm, target.id());
         stats.onLeadershipTransferSent(target.id());
         sendTimeoutNow(target);
     }
