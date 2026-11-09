@@ -473,11 +473,6 @@ public final class WitnessServer implements AutoCloseable {
         target.transport.offer(datagram, source);
     }
 
-    /**
-     * Decides what to do with a name this witness is not currently serving.
-     *
-     * @return the application now serving it, or null if the datagram is to be dropped
-     */
     private Tenant admit(String application, ByteBuffer datagram, MessageType claimed,
                          InetSocketAddress source) {
         boolean firstSighting = rememberName(application);
@@ -631,9 +626,6 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * @return whether this name had not been seen before, so it is worth a log line
-     */
     private boolean rememberName(String application) {
         if (namesSeen.size() >= MAX_REMEMBERED_NAMES) {
             // Full. Stop logging rather than stop working: the counters still tell the story, and
@@ -714,11 +706,6 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * {@link #open} for a server already running, where one tenant's broken storage must not end the loop.
-     *
-     * @return null if it could not be opened; a reload or its next announcement tries again
-     */
     private Tenant tryOpen(ApplicationConfig applicationConfig) {
         try {
             Tenant opened = open(applicationConfig);
@@ -733,21 +720,13 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * Replaces an application's node after its configuration changed, most often a rotated secret.
-     *
-     * <p>The node is rebuilt rather than mutated because the secret is baked into its codec, and
-     * that is safe precisely because the node holds nothing that matters: the term and the vote
-     * live in the store, which is kept and re-read, so a rebuilt node comes back knowing exactly
-     * what it had promised. Learned addresses are kept too, in the transport, so replies keep
-     * flowing without waiting for every node to speak again.
-     */
     private void rebuild(Tenant tenant, ApplicationConfig updated) {
         log.info("application '{}' was reconfigured", updated.name());
         tenant.config = updated;
         tenant.keys = keysFor(updated.name());
         ElectionNode replacement;
         try {
+            // The term and the vote are in the store, kept and re-read, so the new node remembers its promises.
             replacement = newNode(tenant);
             replacement.start();
         } catch (RuntimeException e) {
@@ -759,38 +738,23 @@ public final class WitnessServer implements AutoCloseable {
         }
         tenant.node = replacement;
         tenant.failed = false;
+        relearnEndpoints(tenant);
+    }
+
+    private static void relearnEndpoints(Tenant tenant) {
         for (Map.Entry<Integer, InetSocketAddress> known : tenant.transport.endpoints()) {
             tenant.node.learnPeer(Peer.application(known.getKey(),
                     known.getValue().getHostString(), known.getValue().getPort()));
         }
     }
 
-    /**
-     * Which profile this application's node runs, in the order that settles who wins.
-     *
-     * <p>The builder override first, because a caller assembling a server in code (a test driving
-     * deliberately fast intervals among them) means it and has no file to say so. Then what the
-     * cluster stated, which is the point of {@link ConfigSource#CLUSTER}. Then the files.
-     */
-    private Timings timings(ApplicationConfig applicationConfig, Timings adopted) {
+    private Timings effectiveTimings(Tenant tenant) {
         if (timingsOverride != null) {
             return timingsOverride;
         }
-        return adopted != null ? adopted : applicationConfig.timings();
+        return tenant.adoptedTimings != null ? tenant.adoptedTimings : tenant.config.timings();
     }
 
-    /**
-     * Follows a cluster's own intervals, when its operator has asked this witness to.
-     *
-     * <p>This is the whole of what {@link ConfigSource#CLUSTER} buys beyond registration: a tenant
-     * retunes its own nodes and its witness follows, with nobody editing a file here. The witness
-     * is the one member of a cluster whose configuration is owned by the wrong party (the tenant
-     * owns the profile, the witness operator owns the file) and this is what closes that.
-     *
-     * <p>The rebuild is the existing reconfiguration path, so it keeps the state store and every
-     * learned address: the term and the vote are on disk and are re-read, so the node comes back
-     * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
-     */
     private void adoptStatedTimings(Tenant tenant) {
         if (tenant.failed || !followsStatedTimings()) {
             return;
@@ -808,19 +772,6 @@ public final class WitnessServer implements AutoCloseable {
         rebuild(tenant, tenant.config);
     }
 
-    /**
-     * The sink for one application, resolved once when it starts being served and kept across
-     * every rebuild.
-     *
-     * <p>Once per application rather than once per node, because a node is rebuilt whenever a
-     * secret rotates or a cluster states new intervals, and a binder that registers its meters
-     * when it is created would register them again on each rebuild.
-     *
-     * <p>A factory that throws or returns null is a bug in the embedding application, and it is
-     * reported as one, but it does not stop this witness serving. The rule the SPI already states
-     * for a listener that throws holds for the call that produces it: a metrics binder must not be
-     * able to take a cluster's witness away from it.
-     */
     private PrimosStatsListener statsListenerFor(String application) {
         PrimosStatsListener sink;
         try {
@@ -851,7 +802,7 @@ public final class WitnessServer implements AutoCloseable {
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
-                .timings(timings(tenant.config, tenant.adoptedTimings))
+                .timings(effectiveTimings(tenant))
                 .voteLogging(voteLogging);
         if (followsStatedTimings()) {
             config.followsStatedTimings();
@@ -860,13 +811,6 @@ public final class WitnessServer implements AutoCloseable {
                 authenticatorFor(tenant.name), NO_EVENTS, tenant.stats);
     }
 
-    /**
-     * Whether this witness applies what its clusters state, rather than only reporting it.
-     *
-     * <p>The builder override is part of the question, not beside it: a caller that passed
-     * intervals in code gets them whatever any datagram says, so nothing is being followed and a
-     * mismatch is a real one worth reporting.
-     */
     private boolean followsStatedTimings() {
         return timingsOverride == null
                 && configStore.current().settings().configSource().isCluster();
@@ -883,13 +827,6 @@ public final class WitnessServer implements AutoCloseable {
         return authenticator;
     }
 
-    /**
-     * Stops serving an application whose node has failed, without stopping the server.
-     *
-     * <p>The realistic cause is storage that can no longer make a vote durable. Continuing to
-     * answer for that application would mean voting on state it may forget, so it stops; every
-     * other tenant keeps its failover, because one broken disk must not be a shared outage.
-     */
     private void quarantineIfFailed(Tenant tenant) {
         if (tenant.failed || !tenant.node.isFailed()) {
             return;
@@ -992,13 +929,6 @@ public final class WitnessServer implements AutoCloseable {
             this.stats = stats;
         }
 
-        /**
-         * Tells this application's cluster the witness is going away, then releases everything.
-         *
-         * <p>Worth the datagram. A cluster whose witness has silently gone is back to the fault
-         * tolerance it has without one, and the sooner it says so the sooner somebody looks: a
-         * two-node pair in that state tolerates zero failures and looks perfectly healthy.
-         */
         private void close() {
             if (!failed && node != null) {
                 try {

@@ -91,6 +91,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
      * allocate, which is the same trade {@code ElectionNode} makes for the same reason.
      */
     private final int[] peerIds;
+    private final int otherPeersSlot;
     private final Tags[] peerTags;
 
     private final AtomicInteger[] peerUp;
@@ -143,7 +144,8 @@ public final class PrimosMetrics implements PrimosStatsListener {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.base = Tags.of("application", application, "node", String.valueOf(nodeId));
 
-        int slots = peers.size() + 1;
+        this.otherPeersSlot = peers.size();
+        int slots = otherPeersSlot + 1;
         this.peerIds = new int[peers.size()];
         this.peerTags = new Tags[slots];
         for (int i = 0; i < peers.size(); i++) {
@@ -152,7 +154,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
             peerTags[i] = base.and(PEER, String.valueOf(peer.id()))
                     .and(PEER_TYPE, peer.isWitness() ? "witness" : "application");
         }
-        peerTags[slots - 1] = base.and(PEER, learnedMembership ? "learned" : "other")
+        peerTags[otherPeersSlot] = base.and(PEER, learnedMembership ? "learned" : "other")
                 .and(PEER_TYPE, "unknown");
 
         this.peerUp = new AtomicInteger[peers.size()];
@@ -309,12 +311,12 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
     @Override
     public void onDepartureObserved(int peerId) {
-        departures[slot(peerId)].increment();
+        departures[peerSlot(peerId)].increment();
     }
 
     @Override
     public void onProbeRoundTrip(int peerId, long nanos) {
-        probeRtt[slot(peerId)].record(nanos, TimeUnit.NANOSECONDS);
+        probeRtt[peerSlot(peerId)].record(nanos, TimeUnit.NANOSECONDS);
     }
 
     @Override
@@ -329,12 +331,12 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
     @Override
     public void onTimingMismatch(int peerId) {
-        timingMismatches[slot(peerId)].increment();
+        timingMismatches[peerSlot(peerId)].increment();
     }
 
     @Override
     public void onUnusableNodeConfig(int peerId) {
-        unusableNodeConfig[slot(peerId)].increment();
+        unusableNodeConfig[peerSlot(peerId)].increment();
     }
 
     @Override
@@ -342,16 +344,13 @@ public final class PrimosMetrics implements PrimosStatsListener {
         peersForgotten.increment();
     }
 
-    /**
-     * Which set of peer-tagged meters an id belongs to, or the bucket past the end.
-     */
-    private int slot(int peerId) {
+    private int peerSlot(int peerId) {
         for (int i = 0; i < peerIds.length; i++) {
             if (peerIds[i] == peerId) {
                 return i;
             }
         }
-        return peerIds.length;
+        return otherPeersSlot;
     }
 
     private Timer campaign(String outcome) {
@@ -366,16 +365,12 @@ public final class PrimosMetrics implements PrimosStatsListener {
         return Counter.builder(name).description(description).tags(tags).register(registry);
     }
 
-    /**
-     * A gauge holding its subject strongly. Micrometer's default is a weak reference, which is
-     * right for a cache and wrong here: nothing else need hold this object, and a collected gauge
-     * reports NaN forever with nothing to say why.
-     */
     private <T> void gauge(String name, T subject, java.util.function.ToDoubleFunction<T> value,
                            String description, Tags tags) {
         Gauge.builder(name, subject, value)
                 .description(description)
                 .tags(tags)
+                // Micrometer holds the subject weakly by default, and a collected gauge reads NaN for ever.
                 .strongReference(true)
                 .register(registry);
     }
@@ -408,16 +403,16 @@ public final class PrimosMetrics implements PrimosStatsListener {
 
         @Override
         public void onPeerUp(Peer peer) {
-            int slot = slot(peer.id());
-            if (slot < peerUp.length) {
+            int slot = peerSlot(peer.id());
+            if (slot != otherPeersSlot) {
                 peerUp[slot].set(1);
             }
         }
 
         @Override
         public void onPeerDown(Peer peer, PeerDownReason reason) {
-            int slot = slot(peer.id());
-            if (slot < peerUp.length) {
+            int slot = peerSlot(peer.id());
+            if (slot != otherPeersSlot) {
                 peerUp[slot].set(0);
             }
             peerDown[slot].increment();

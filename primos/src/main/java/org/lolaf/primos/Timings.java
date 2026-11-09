@@ -228,14 +228,6 @@ public class Timings {
         return electionTimeoutMax.minus(electionTimeoutMin);
     }
 
-    /**
-     * Every rule, checked before a {@link Timings} escapes its builder.
-     *
-     * <p>Called from {@link TimingsBuilder#build()} rather than from a constructor, because the
-     * constructor is Lombok's, which is also why the generated build method is named
-     * {@code buildUnvalidated} and wrapped: it is the only seam where this can run without
-     * hand-writing the {@code @Builder.Default} machinery.
-     */
     private Timings validate() {
         requirePositive(heartbeatInterval, "heartbeatInterval");
         requirePositive(electionTimeoutMin, "electionTimeoutMin");

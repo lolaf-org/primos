@@ -76,16 +76,6 @@ public class WitnessAutoConfiguration {
         return new FileConfigStore(properties.configDirectory(), MonotonicClock.SYSTEM);
     }
 
-    /**
-     * Refuses to start when settings that only the properties store reads are set under the file
-     * store.
-     *
-     * <p>Ignoring them would be the failure this module's whole precedence rule exists to prevent,
-     * arriving from the other direction: an operator sets {@code primos.witness.state-directory},
-     * nothing complains, and the state goes wherever {@code witness.properties} says instead, which
-     * is discovered when a restart cannot find a vote. There is no half of this worth guessing at,
-     * so it is a refusal rather than a warning.
-     */
     private void refuseSettingsThatTheFileOwns(WitnessProperties properties) {
         List<String> misplaced = new ArrayList<>();
         if (properties.stateDirectory() != null) {
@@ -124,9 +114,8 @@ public class WitnessAutoConfiguration {
         WitnessServer.Builder server = WitnessServer.builder()
                 .configStore(configStore)
                 .nodeId(properties.nodeId());
-        InetSocketAddress bind = bindAddress(configStore, properties);
-        if (bind != null) {
-            server.bindAddress(bind);
+        if (properties.bind().isSet()) {
+            server.bindAddress(bindAddress(properties.bind(), configStore.current().settings().bindAddress()));
         }
         // A tenant's sink has to be in place before build(), because the constructor opens every
         // application the configuration directory already names.
@@ -173,20 +162,8 @@ public class WitnessAutoConfiguration {
         return new WitnessHealthIndicator(server, lifecycle);
     }
 
-    /**
-     * What {@code primos.witness.bind.*} overrides, or null to leave the file alone.
-     *
-     * <p>Either half may be given by itself (a container setting the port and nothing else is the
-     * common case) so the half that was not given is taken from the address the file already
-     * produced rather than from a default invented here. That keeps one answer to "what does this
-     * witness bind to?" instead of two that can disagree.
-     */
-    private InetSocketAddress bindAddress(ConfigStore configStore, WitnessProperties properties) {
-        WitnessProperties.BindProperties bind = properties.bind();
-        if (!bind.isSet()) {
-            return null;
-        }
-        InetSocketAddress configured = configStore.current().settings().bindAddress();
+    private static InetSocketAddress bindAddress(WitnessProperties.BindProperties bind, InetSocketAddress configured) {
+        // Either half may be given alone; the other comes from the file rather than from a default invented here.
         int port = bind.port() != null ? bind.port() : configured.getPort();
         if (bind.host() == null) {
             return new InetSocketAddress(configured.getAddress(), port);

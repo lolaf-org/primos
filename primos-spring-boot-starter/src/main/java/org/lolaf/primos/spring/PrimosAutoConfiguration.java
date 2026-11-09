@@ -73,13 +73,6 @@ public class PrimosAutoConfiguration {
                 ? null : secret.getBytes(StandardCharsets.UTF_8);
     }
 
-    /**
-     * The name is passed through untouched, including when it is null.
-     *
-     * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
-     * and substituting anything here (the bare id, say) would give a peer configured through
-     * Spring a different default from the identical peer configured through the library.
-     */
     private static Peer toPeer(PeerProperties peer, boolean witness) {
         return witness
                 ? Peer.witness(peer.id(), peer.name(), peer.host(), peer.port())

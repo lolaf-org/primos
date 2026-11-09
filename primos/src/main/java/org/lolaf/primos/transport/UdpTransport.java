@@ -123,15 +123,6 @@ public final class UdpTransport implements Transport {
         return new Builder();
     }
 
-    /**
-     * Resolves every peer, or refuses to build.
-     *
-     * <p>All of them are tried before anything is thrown, and the failures are reported together.
-     * Stopping at the first would make an operator who mistyped three hostnames find them one
-     * restart at a time.
-     *
-     * @throws IllegalStateException if any peer's hostname does not resolve
-     */
     private void resolveAll(List<Peer> peers) {
         List<String> unresolved = new ArrayList<>();
         for (Peer peer : peers) {

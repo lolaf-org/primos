@@ -76,25 +76,14 @@ public class PropertiesConfigStore implements ConfigStore {
                 .defaultTimings(timings(properties.timings(), "primos.witness.timings", Timings.lan()))
                 .voteLogging(properties.voteLogging())
                 .keyring(keyring(properties));
-        InetSocketAddress bind = bindAddress(properties);
-        if (bind != null) {
-            settings.bindAddress(bind);
+        if (properties.bind().isSet()) {
+            settings.bindAddress(bindAddress(properties.bind()));
         }
         return settings.build();
     }
 
-    /**
-     * The bind address, or null to leave the builder's own default alone.
-     *
-     * <p>There is no file underneath this store, so a half-given address cannot borrow the other
-     * half from one: a port on its own means the wildcard host, which is what a container wants
-     * anyway.
-     */
-    private static InetSocketAddress bindAddress(WitnessProperties properties) {
-        WitnessProperties.BindProperties bind = properties.bind();
-        if (!bind.isSet()) {
-            return null;
-        }
+    private static InetSocketAddress bindAddress(WitnessProperties.BindProperties bind) {
+        // No file underneath to borrow from, so a port on its own means the wildcard host.
         int port = bind.port() != null ? bind.port() : 7420;
         return bind.host() == null || bind.host().isEmpty()
                 ? new InetSocketAddress(port)
@@ -111,20 +100,6 @@ public class PropertiesConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * A profile, or the intervals spelled out, or whatever the level above decided, never a
-     * mixture.
-     *
-     * <p>The same rule and the same reasoning as the file store's {@code timings.*} block: a
-     * profile is a set of values picked so the relationships between them hold, so overriding part
-     * of one leaves a custom set whose author has not seen the rest. The mixture is refused rather
-     * than merged, and the message quotes the keys back because they may have come from YAML, an
-     * environment variable or the command line.
-     *
-     * @param prefix   how an operator spells these keys, so an error names what they wrote
-     * @param fallback what applies when nothing here is set: the witness-wide values for an
-     *                 application, and the LAN profile for the witness itself
-     */
     private static Timings timings(WitnessProperties.TimingsProperties timings, String prefix,
                                    Timings fallback) {
         if (timings == null) {
@@ -162,13 +137,6 @@ public class PropertiesConfigStore implements ConfigStore {
         return new Keyring(keys);
     }
 
-    /**
-     * The served set, each application on its own intervals or on the witness's.
-     *
-     * <p>Per application rather than one block for the server, because a witness serves clusters it
-     * does not own: one of them being on another network must not decide the intervals for all of
-     * them. That is the same reason the file store keeps a file per application.
-     */
     private static Map<String, ApplicationConfig> applications(WitnessProperties properties) {
         Timings witnessWide = timings(properties.timings(), "primos.witness.timings", Timings.lan());
         Map<String, ApplicationConfig> applications = new LinkedHashMap<>();

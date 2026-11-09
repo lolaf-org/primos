@@ -62,6 +62,7 @@ public final class ElectionNode implements MessageHandler {
     private static final long NO_READING = Long.MIN_VALUE;
     private static final long NO_TERM = -1;
     private static final int NO_LEADER = -1;
+    private static final long NOTHING_PUBLISHED = 0;
     /**
      * Probe intervals of silence after which a witness stops tracking a learned voter.
      */
@@ -238,9 +239,6 @@ public final class ElectionNode implements MessageHandler {
         return now - tracked.lastHeardNanos > silence;
     }
 
-    /**
-     * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
-     */
     private static long nthLatest(long[] values, int n) {
         for (int i = 0; i < n; i++) {
             int latest = i;
@@ -459,7 +457,7 @@ public final class ElectionNode implements MessageHandler {
         if (next == Role.LEADER || previous == Role.LEADER) {
             synchronized (publication) {
                 publishingTerm = next == Role.LEADER ? currentTerm : NO_TERM;
-                publishedVersion = 0;
+                publishedVersion = NOTHING_PUBLISHED;
             }
         }
         listener.onRoleChanged(previous, next, currentTerm);
@@ -485,9 +483,6 @@ public final class ElectionNode implements MessageHandler {
         return Optional.of(new PublishedVersion(term, version));
     }
 
-    /**
-     * Sends a publication at once rather than at the next heartbeat, and reports it to this node.
-     */
     private void announcePublication() {
         long version = publishedVersion;
         if (version != sentVersion) {
@@ -496,20 +491,17 @@ public final class ElectionNode implements MessageHandler {
         reportLeaderVersion(currentTerm, version);
     }
 
-    /**
-     * Reports a pair newer than the last one reported. Version 0 is never reported: it means the
-     * leader has published nothing, and onLeaderChanged has already said who leads.
-     */
     private void reportLeaderVersion(long term, long version) {
-        if (version < 1 || config.isWitness()) {
-            return;
-        }
-        if (term < reportedTerm || (term == reportedTerm && version <= reportedVersion)) {
+        if (version <= NOTHING_PUBLISHED || config.isWitness() || !isNewerThanReported(term, version)) {
             return;
         }
         reportedTerm = term;
         reportedVersion = version;
         listener.onLeaderVersion(leader, term, version);
+    }
+
+    private boolean isNewerThanReported(long term, long version) {
+        return term > reportedTerm || (term == reportedTerm && version > reportedVersion);
     }
 
     private void setLeader(int next) {
@@ -589,6 +581,7 @@ public final class ElectionNode implements MessageHandler {
                 return;
             }
             if (!electable && now >= handOverRetryDeadlineNanos) {
+                // Quietly: this repeats every election timeout while nobody will take over.
                 withdrawalHandOver(now, true);
             }
             if (now >= heartbeatDeadlineNanos) {
@@ -638,8 +631,8 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    private void withdrawalHandOver(long now, boolean retry) {
-        transferToBest(retry);
+    private void withdrawalHandOver(long now, boolean quiet) {
+        transferToBest(quiet);
         handOverRetryDeadlineNanos = now + electionTimeoutMinNanos;
     }
 
@@ -674,22 +667,11 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void abandonPreVote() {
+        // Not where a campaign ends: startElection calls this on its way from a won pre-vote to the real election.
         preVoting = false;
         preVotesGranted.clear();
     }
 
-    /**
-     * Closes a campaign, won or lost, and reports how long it took.
-     *
-     * <p>A lost one is the more interesting of the two when a cluster will not fail over: a
-     * pre-vote refused is <em>why no election happened</em>, and no other signal says so.
-     *
-     * <p>Deliberately <strong>not</strong> hooked into {@link #abandonPreVote()}, which reads as
-     * the place a campaign ends and is not: {@link #startElection(boolean)} calls it on the way from a
-     * <em>won</em> pre-vote into the real election, so ending the campaign there would report every
-     * successful failover as a lost one. A campaign ends when this node leads, or when it gives
-     * up without leading.
-     */
     private void endCampaign(boolean won) {
         if (campaignStartedNanos == NO_READING) {
             return;
@@ -790,17 +772,17 @@ public final class ElectionNode implements MessageHandler {
         heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
-    /**
-     * How long until this node restates itself: probe cadence while anybody is silent, else the
-     * advertisement interval.
-     */
     private long nextNodeConfigIntervalNanos() {
+        return (anyPeerNotUp() ? timings.probeInterval() : timings.advertisementInterval()).toNanos();
+    }
+
+    private boolean anyPeerNotUp() {
         for (TrackedPeer tracked : peers) {
             if (tracked.reachability != Reachability.UP) {
-                return timings.probeInterval().toNanos();
+                return true;
             }
         }
-        return timings.advertisementInterval().toNanos();
+        return false;
     }
 
     private void advertiseNodeConfig() {
@@ -983,9 +965,6 @@ public final class ElectionNode implements MessageHandler {
                 failureThreshold, timings.failureThreshold());
     }
 
-    /**
-     * Assembles what a peer stated into a {@link Timings}, so an owner can read one value.
-     */
     private void recordObservedTimings(int senderId, int heartbeatMillis, int electionMinMillis,
                                        int electionMaxMillis, int probeMillis,
                                        int failureThreshold) {
@@ -1175,22 +1154,18 @@ public final class ElectionNode implements MessageHandler {
         return transferToBest(false);
     }
 
-    /**
-     * @param retry a withdrawn leader's retry, logged at DEBUG: it repeats every election timeout
-     *              while nobody will take over, and the first attempt was already logged
-     */
-    private boolean transferToBest(boolean retry) {
+    private boolean transferToBest(boolean quiet) {
         if (role != Role.LEADER) {
             return false;
         }
         Peer target = handoverTarget();
         if (target == null) {
             stats.onNoSuccessor(currentTerm);
-            logTransfer(retry, "cluster '{}': node {} keeps leading term {}: no reachable follower standing for"
+            logTransfer(quiet, "cluster '{}': node {} keeps leading term {}: no reachable follower standing for"
                     + " election to transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
             return false;
         }
-        transferTo(target, retry);
+        transferTo(target, quiet);
         return true;
     }
 
@@ -1216,16 +1191,16 @@ public final class ElectionNode implements MessageHandler {
         return true;
     }
 
-    private void logTransfer(boolean retry, String message, Object... args) {
-        if (retry) {
+    private void logTransfer(boolean quiet, String message, Object... args) {
+        if (quiet) {
             log.debug(message, args);
         } else {
             log.info(message, args);
         }
     }
 
-    private void transferTo(Peer target, boolean retry) {
-        logTransfer(retry, "cluster '{}': node {} is transferring leadership of term {} to node {}",
+    private void transferTo(Peer target, boolean quiet) {
+        logTransfer(quiet, "cluster '{}': node {} is transferring leadership of term {} to node {}",
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
         stats.onLeadershipTransferSent(target.id());
         sendTimeoutNow(target);
@@ -1300,9 +1275,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * Drops learned voters that have gone quiet for far longer than being down.
-     */
     private void forgetSilentPeers(long now) {
         if (!config.isLearnedMembership()) {
             return;
@@ -1415,9 +1387,6 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    /**
-     * Refuses a turn of the loop taken before the store has been read.
-     */
     private void requireStarted() {
         if (!started) {
             throw new IllegalStateException("node " + config.nodeId() + " has not been started");

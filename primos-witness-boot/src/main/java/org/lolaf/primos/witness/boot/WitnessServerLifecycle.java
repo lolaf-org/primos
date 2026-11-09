@@ -102,13 +102,6 @@ public class WitnessServerLifecycle implements SmartLifecycle {
         return loop != null && loop.isAlive();
     }
 
-    /**
-     * Runs the loop, and makes sure a thread that dies says so.
-     *
-     * <p>{@link WitnessServer} quarantines an application whose node fails and keeps serving the
-     * rest, so anything reaching here is the loop itself failing: every served cluster at once.
-     * That must be loud, and it must leave {@link #isRunning()} answering no.
-     */
     private void serve() {
         try {
             server.run();

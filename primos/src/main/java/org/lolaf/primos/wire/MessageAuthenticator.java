@@ -260,10 +260,6 @@ public final class MessageAuthenticator {
         return mac;
     }
 
-    /**
-     * Refuses a tag that is too short to be worth having or too long to fit beside the largest
-     * message, so both are a configuration error at startup rather than a cluster that cannot talk.
-     */
     private static void requireCarriableTag(String algorithm, int tagBytes) {
         if (tagBytes < MIN_TAG_BYTES) {
             throw new IllegalArgumentException(algorithm + " produces a " + tagBytes
@@ -284,11 +280,7 @@ public final class MessageAuthenticator {
         }
     }
 
-    /**
-     * Hashes {@code [0, length)} of the buffer without allocating: the range is selected by moving
-     * the buffer's own position and limit rather than by taking a duplicate or a copy.
-     */
-    private static void computeInto(Mac mac, ByteBuffer datagram, int length, byte[] out) {
+    private static void hashPrefixInto(Mac mac, ByteBuffer datagram, int length, byte[] out) {
         int savedLimit = datagram.limit();
         datagram.limit(length);
         datagram.position(0);
@@ -320,7 +312,7 @@ public final class MessageAuthenticator {
         }
         Key key = keys[selected];
         int end = datagram.position();
-        computeInto(key.mac, datagram, end, key.computed);
+        hashPrefixInto(key.mac, datagram, end, key.computed);
         datagram.position(end);
         datagram.put(key.computed);
     }
@@ -351,22 +343,15 @@ public final class MessageAuthenticator {
         return false;
     }
 
-    /**
-     * Whether one key accepts this datagram, at that key's own tag length.
-     *
-     * <p>The length test is not only a bounds check. A ring may mix algorithms, and a tag length
-     * that would leave less than a header behind cannot be this key's, so a datagram tagged with
-     * a 32-byte key is rejected by a 64-byte key without hashing anything, which is what keeps a
-     * mixed ring from costing a hash per key on every datagram.
-     */
     private static boolean accepts(Key key, ByteBuffer datagram) {
         int bodyEnd = datagram.limit() - key.tagBytes;
+        // More than a bounds check: a longer tag leaves less than a header, which spares a mixed ring a hash per key.
         if (bodyEnd < WireFormat.HEADER_BYTES) {
             return false;
         }
         datagram.position(bodyEnd);
         datagram.get(key.received);
-        computeInto(key.mac, datagram, bodyEnd, key.computed);
+        hashPrefixInto(key.mac, datagram, bodyEnd, key.computed);
         // Time-constant, so a failure leaks nothing about how far the comparison got.
         return MessageDigest.isEqual(key.computed, key.received);
     }

@@ -167,12 +167,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     @Override
     public void stop() {
         stopNode();
+        // Outside the node's lock, so a callback calling publishChange() cannot wait behind this.
         awaitQueuedCallbacks();
     }
 
-    /**
-     * Outside the node's lock, so a callback calling {@code publishChange()} cannot wait behind this.
-     */
     private void awaitQueuedCallbacks() {
         if (ownedEvents == null || Thread.currentThread() == eventsThread) {
             return;
@@ -244,11 +242,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return awaitTransfer(target);
     }
 
-    /**
-     * Waits for the node thread to serve the request, bounded by the stop timeout in case the
-     * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
-     * the transport under it, and one caller at a time uses the single request slot.
-     */
+    // Synchronized so stop() cannot close the transport under this, and one caller at a time uses the request slot.
     private synchronized boolean awaitTransfer(int target) {
         if (!running) {
             return false;

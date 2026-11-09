@@ -181,13 +181,6 @@ public class ClusterConfig {
     }
 
 
-    /**
-     * Every rule, checked before a {@link ClusterConfig} escapes its builder.
-     *
-     * <p>Called from {@link ClusterConfigBuilder#build()} rather than from a constructor, because the
-     * constructor is Lombok's, which is why the generated build method is named
-     * {@code buildUnvalidated} and wrapped.
-     */
     private ClusterConfig validate() {
         Objects.requireNonNull(nodeType, "nodeType");
         Objects.requireNonNull(timings, "timings");
