@@ -169,6 +169,15 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
+    private static ConfigSource configSource(Properties properties) {
+        String source = properties.getProperty("config.source", "file").trim();
+        try {
+            return ConfigSource.valueOf(source.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("config.source must be 'file' or 'cluster', but was '" + source + "'", e);
+        }
+    }
+
     private static Duration rescanInterval(Properties properties) {
         int seconds = intValue(properties, "reload.rescan.seconds", 5);
         if (seconds < 1) {
@@ -207,7 +216,12 @@ public final class FileConfigStore implements ConfigStore {
             }
         }
         if (value.startsWith("base64:")) {
-            return Base64.getDecoder().decode(value.substring(7));
+            try {
+                return Base64.getDecoder().decode(value.substring(7));
+            } catch (IllegalArgumentException e) {
+                // No cause and no value: the decoder's message would quote part of a secret.
+                throw new IllegalArgumentException(key + " is not valid base64");
+            }
         }
         return value.getBytes(StandardCharsets.UTF_8);
     }
@@ -465,8 +479,7 @@ public final class FileConfigStore implements ConfigStore {
             // another directory must not find an empty state directory and forget its votes.
             builder.stateDirectory(directory.resolve(state.trim()).normalize());
         }
-        String source = properties.getProperty("config.source", "file").trim();
-        builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
+        builder.configSource(configSource(properties));
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
         warnAboutReadableSecrets(properties);

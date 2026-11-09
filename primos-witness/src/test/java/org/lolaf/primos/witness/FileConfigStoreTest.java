@@ -308,6 +308,26 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_malformed_base64_secret_names_its_key_and_not_its_value() throws IOException {
+        settings("secret.orders.value = base64:not*base64");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("secret.orders.value")
+                .hasMessageNotContaining("not*base64");
+    }
+
+    @Test
+    void an_unknown_config_source_is_refused_by_name() throws IOException {
+        settings("config.source=clusterr");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("config.source")
+                .hasMessageContaining("clusterr");
+    }
+
+    @Test
     void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
         settings("secret.orders.value = base64:");
 
