@@ -87,7 +87,8 @@ public interface PrimosStatsListener {
      * @param campaignNanos how long from first wanting to lead to leading. Measured from the
      *                      <em>pre-vote</em> rather than the election, because the question an
      *                      operator is asking is how long the failover took, and a pre-vote that
-     *                      had to be retried is part of that.
+     *                      had to be retried is part of that. A handover has no pre-vote, so it
+     *                      counts from the election.
      */
     default void onElectionWon(long term, long campaignNanos) {
     }

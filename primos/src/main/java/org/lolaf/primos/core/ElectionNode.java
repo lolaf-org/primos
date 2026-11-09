@@ -621,8 +621,8 @@ public final class ElectionNode implements MessageHandler {
         log.warn("cluster '{}': node {} withdrew from elections: it votes but will not lead, and a cluster"
                 + " whose every node withdraws has no leader", config.applicationName(), config.nodeId());
         abandonPreVote();
+        endCampaign(false);
         if (role == Role.CANDIDATE) {
-            endCampaign(false);
             setRole(Role.FOLLOWER);
         } else if (role == Role.LEADER) {
             withdrawalHandOver(clock.nanoTime(), false);
@@ -640,11 +640,7 @@ public final class ElectionNode implements MessageHandler {
         preVotesGranted.clear();
         preVotesGranted.add(config.nodeId());
         preVotesStarted++;
-        if (campaignStartedNanos == NO_CONTACT) {
-            // Not reset per attempt: a failover that took three pre-vote rounds took as long as it
-            // took, and timing only the last round would report the fastest part of the outage.
-            campaignStartedNanos = clock.nanoTime();
-        }
+        beginCampaign();
         resetElectionTimer();
 
         log.debug("node {} is asking whether term {} would elect it", config.nodeId(), preVoteTerm);
@@ -682,8 +678,8 @@ public final class ElectionNode implements MessageHandler {
      * <p>Deliberately <strong>not</strong> hooked into {@link #abandonPreVote()}, which reads as
      * the place a campaign ends and is not: {@link #startElection(boolean)} calls it on the way from a
      * <em>won</em> pre-vote into the real election, so ending the campaign there would report every
-     * successful failover as a lost one. A campaign ends when this node leads, or when it steps
-     * down without leading.
+     * successful failover as a lost one. A campaign ends when this node leads, or when it gives
+     * up without leading.
      */
     private void endCampaign(boolean won) {
         if (campaignStartedNanos == NO_CONTACT) {
@@ -698,8 +694,17 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
+    private void beginCampaign() {
+        if (campaignStartedNanos == NO_CONTACT) {
+            // Not reset per attempt: a failover that took three pre-vote rounds took as long as it
+            // took, and timing only the last round would report the fastest part of the outage.
+            campaignStartedNanos = clock.nanoTime();
+        }
+    }
+
     private void startElection(boolean handover) {
         abandonPreVote();
+        beginCampaign();
         currentTerm++;
         votedFor = config.nodeId();
         persist();
@@ -998,6 +1003,7 @@ public final class ElectionNode implements MessageHandler {
         }
         // A leader exists in this term, so stop campaigning and stop counting down to an election.
         abandonPreVote();
+        endCampaign(false);
         setRole(Role.FOLLOWER);
         setLeader(senderId);
         votesGranted.clear();
