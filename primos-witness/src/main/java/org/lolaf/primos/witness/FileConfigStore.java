@@ -283,8 +283,8 @@ public final class FileConfigStore implements ConfigStore {
 
         long seen = checksum();
         if (seen == lastChecksum) {
-            // The common case by an enormous margin, and it costs a handful of stats rather than
-            // parsing every file to discover nothing moved.
+            // The common case by an enormous margin, and it costs a checksum rather than rebuilding
+            // and comparing a whole configuration to discover nothing moved.
             return false;
         }
         lastChecksum = seen;

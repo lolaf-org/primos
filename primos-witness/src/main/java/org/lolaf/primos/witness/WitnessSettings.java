@@ -28,9 +28,7 @@ import java.time.Duration;
  * The witness server's own settings, as opposed to the applications it serves.
  *
  * <p>Value equality is not decoration: it is how a reload tells a settings-only change from no
- * change at all. {@code FileConfigStore} compared the served applications and nothing else, so a
- * changed registration mode or auto-registration limit was parsed and then dropped on the floor:
- * silently, because the snapshot it belonged to was never published.
+ * change at all.
  */
 @Value
 @Builder

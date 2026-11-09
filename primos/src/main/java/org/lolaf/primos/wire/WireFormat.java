@@ -33,8 +33,8 @@ import lombok.NoArgsConstructor;
  *      0     4  magic 'PRMS'
  *      4     1  version
  *      5     1  message type
- *      6     2  flags (bit 0 = pre-vote, bit 1 = not electable; the rest reserved, sent zero,
- *                 ignored on receive)
+ *      6     2  flags (bit 0 = pre-vote, bit 1 = not electable, bit 2 = handover; the rest
+ *                 reserved, sent zero, ignored on receive)
  *      8    32  application name, UTF-8, zero-padded
  *     40     8  term
  *     48     4  senderId

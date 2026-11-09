@@ -984,8 +984,7 @@ public final class WitnessServer implements AutoCloseable {
          *
          * <p>Ordinary and transient while a new cluster starts: its probes and votes arrive before
          * the config message that creates it. Sustained, it means a cluster is talking to this
-         * witness and never saying who it is: a version mismatch, or a name nobody configured
-         * under {@code ConfigSource.FILE}.
+         * witness and never saying who it is, most likely a version mismatch.
          */
         long awaitingNodeConfig;
 

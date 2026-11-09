@@ -19,12 +19,11 @@ package org.lolaf.primos.witness;
  * Where a served application's configuration comes from.
  *
  * <p>One axis, deliberately, rather than one setting per thing that could be sourced either way.
- * Secrets are the exception that cannot be on it: a secret can never arrive over the wire, because
- * it is what authenticates the datagram that would carry it, and {@code secret.algorithm} is local
- * policy for the same reason the wire carries no algorithm name: a datagram naming its own
- * algorithm lets an attacker pick the weakest one both ends accept. So the {@code applications/}
- * directory is read under either value; what changes is whether it is the served list or only a
- * keyring.
+ * Keys are the exception that cannot be on it: a key can never arrive over the wire, because it
+ * is what authenticates the datagram that would carry it, and a key's algorithm is local policy for
+ * the same reason the wire carries no algorithm name: a datagram naming its own algorithm lets an
+ * attacker pick the weakest one both ends accept. So the keyring in {@code witness.properties}
+ * applies under either value.
  */
 public enum ConfigSource {
 

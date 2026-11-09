@@ -168,7 +168,7 @@ public record PrimosProperties(
      * One member of the cluster other than this node.
      *
      * @param id   its node id
-     * @param name a human-readable name for logs; defaults to the id
+     * @param name a human-readable name for logs; defaults to {@code node-<id>}, or {@code witness-<id>} for a witness
      * @param host its hostname or address, resolved once when the transport is built
      * @param port its port
      */

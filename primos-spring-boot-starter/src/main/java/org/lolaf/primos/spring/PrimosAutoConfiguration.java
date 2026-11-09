@@ -42,7 +42,7 @@ import java.util.function.Supplier;
  * Configures a {@link PrimosNode} from {@code primos.*} and runs it with the context.
  *
  * <p>Inactive until {@code primos.application-name} is set, so the module can sit on a classpath
- * doing nothing. Every bean it contributes backs off if the application defines its own, which is
+ * doing nothing. The beans describing the node back off if the application defines its own, which is
  * the escape hatch for anything this configuration does not express: custom {@link Timings}, a
  * different {@link StateStore}, a {@link Transport} built by hand.
  */
