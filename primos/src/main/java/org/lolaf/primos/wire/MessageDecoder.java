@@ -20,8 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.lolaf.primos.PrimosStatsListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -199,8 +197,7 @@ public final class MessageDecoder {
             return drop(DropReason.UNKNOWN_VERSION, "version {}", version);
         }
         if (!hasExpectedApplication(datagram)) {
-            return drop(DropReason.WRONG_APPLICATION, "addressed to application '{}'",
-                    readApplicationName(datagram));
+            return dropForeignApplication(datagram);
         }
         MessageType type = MessageType.forCode(datagram.get(WireFormat.OFFSET_TYPE) & 0xFF);
         if (type == null) {
@@ -209,8 +206,7 @@ public final class MessageDecoder {
         }
         int expectedLength = type.messageBytes() + authenticator.tagBytes();
         if (length != expectedLength) {
-            return drop(DropReason.UNKNOWN_TYPE, "{} must be " + expectedLength + " bytes, got {}",
-                    type, length);
+            return drop(DropReason.UNKNOWN_TYPE, "{} must be {} bytes, got {}", type, expectedLength, length);
         }
         int senderId = datagram.getInt(WireFormat.OFFSET_SENDER);
         if (!knownSender.test(senderId)) {
@@ -303,23 +299,24 @@ public final class MessageDecoder {
     private boolean drop(DropReason reason, String detail, int argument) {
         stats.onDatagramDropped(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+            log.debug("dropped datagram ({}): " + detail, reason, argument);
         }
         return false;
     }
 
-    private boolean drop(DropReason reason, String detail, String argument) {
+    private boolean drop(DropReason reason, String detail, MessageType type, int expected, int length) {
         stats.onDatagramDropped(reason);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {}", reason, detail, argument);
+            log.debug("dropped datagram ({}): " + detail, reason, type, expected, length);
         }
         return false;
     }
 
-    private boolean drop(DropReason reason, String detail, MessageType type, int length) {
-        stats.onDatagramDropped(reason);
+    private boolean dropForeignApplication(ByteBuffer datagram) {
+        stats.onDatagramDropped(DropReason.WRONG_APPLICATION);
         if (log.isDebugEnabled()) {
-            log.debug("dropped datagram ({}): {} {} {}", reason, detail, type, length);
+            log.debug("dropped datagram ({}): addressed to application '{}'", DropReason.WRONG_APPLICATION,
+                    readApplicationName(datagram));
         }
         return false;
     }
