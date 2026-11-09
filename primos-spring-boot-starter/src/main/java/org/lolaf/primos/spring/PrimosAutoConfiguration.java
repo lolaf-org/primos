@@ -215,8 +215,7 @@ public class PrimosAutoConfiguration {
                                                    PrimosProperties properties,
                                                    ObjectProvider<LeaderLifecycleController> gating,
                                                    ApplicationContext context) {
-        return new PrimosNodeLifecycle(node, properties.lifecycle(),
-                properties.leaderLifecycle().enabled(), gating.getIfAvailable(), context);
+        return new PrimosNodeLifecycle(node, properties.lifecycle(), gating.getIfAvailable(), context);
     }
 
     @Bean

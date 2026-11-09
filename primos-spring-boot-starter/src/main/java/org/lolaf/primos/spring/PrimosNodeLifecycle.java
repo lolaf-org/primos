@@ -50,7 +50,6 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
 
     private final PrimosNode node;
     private final NodeLifecycle mode;
-    private final boolean gatingEnabled;
     private final LeaderLifecycleController controller;
     private final ApplicationContext context;
 
@@ -58,12 +57,10 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
 
     PrimosNodeLifecycle(PrimosNode node,
                         NodeLifecycle mode,
-                        boolean gatingEnabled,
                         LeaderLifecycleController controller,
                         ApplicationContext context) {
         this.node = node;
         this.mode = mode;
-        this.gatingEnabled = gatingEnabled;
         this.controller = controller;
         this.context = context;
     }
@@ -130,7 +127,7 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
      * correct, and warning about it would be noise.
      */
     boolean isWaitingOnAManualStart() {
-        return mode == NodeLifecycle.MANUAL && gatingEnabled && !node.isRunning();
+        return mode == NodeLifecycle.MANUAL && controller != null && !node.isRunning();
     }
 
     /**
