@@ -233,7 +233,7 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private static boolean isSilentTooLong(TrackedPeer trackedPeer, long now, long silence) {
-        return trackedPeer.lastHeardNanos >= 0 && now - trackedPeer.lastHeardNanos > silence;
+        return now - trackedPeer.lastHeardNanos > silence;
     }
 
     /**
@@ -1494,7 +1494,7 @@ public final class ElectionNode implements MessageHandler {
         private boolean awaitingReply;
         private int consecutiveMisses;
         private Reachability reachability = Reachability.UNKNOWN;
-        private long lastHeardNanos = -1;
+        private long lastHeardNanos = NO_READING;
         private boolean timingsMatch = true;
         private long lastConfirmedNanos = NO_READING;
         /**

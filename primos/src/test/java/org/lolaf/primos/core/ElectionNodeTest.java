@@ -728,6 +728,26 @@ class ElectionNodeTest {
     }
 
     @Test
+    void a_witness_forgets_a_quiet_voter_on_a_clock_that_reads_negative() {
+        VirtualClock negative = new VirtualClock(-Duration.ofHours(1).toNanos());
+        ClusterConfig config = ClusterConfig.builder()
+                .applicationName("t")
+                .nodeId(1)
+                .asWitness()
+                .learnedMembership()
+                .build();
+        ElectionNode witness = new ElectionNode(config, store, new SimulatedNetwork(1L, negative).transportFor(1),
+                negative, new Random(1L), MessageAuthenticator.disabled());
+        witness.start();
+        witness.learnPeer(Peer.application(7, "h", 1));
+
+        negative.advance(Duration.ofMinutes(2));
+        witness.runOnce(0L);
+
+        assertThat(witness.peersForgotten()).isEqualTo(1);
+    }
+
+    @Test
     void a_forgotten_voter_is_learned_again_the_moment_it_speaks() {
         ElectionNode witness = startedLearningWitness();
         witness.learnPeer(Peer.application(7, "h", 1));
