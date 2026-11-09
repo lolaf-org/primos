@@ -294,8 +294,9 @@ public final class WitnessServer implements AutoCloseable {
             for (Peer peer : tenant.transport.drainLearned()) {
                 tenant.node.learnPeer(peer);
             }
-            adoptStatedTimings(tenant);
+            // Before adopting, because that rebuilds the node and would erase its failure.
             quarantineIfFailed(tenant);
+            adoptStatedTimings(tenant);
         }
 
         if (configStore.poll(clock.nanoTime())) {
@@ -789,7 +790,7 @@ public final class WitnessServer implements AutoCloseable {
      * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
      */
     private void adoptStatedTimings(Served tenant) {
-        if (!follows()) {
+        if (tenant.failed || !follows()) {
             return;
         }
         Timings stated = tenant.node.observedTimings();

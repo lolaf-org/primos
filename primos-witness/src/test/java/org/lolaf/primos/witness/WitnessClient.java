@@ -99,7 +99,17 @@ final class WitnessClient implements AutoCloseable {
 
     /** Only sends, for a test that is already inside the server's loop. */
     void sendConfig() {
-        write(encoder.nodeConfig(send, 0L, 50, 300, 600, 1000, 3));
+        sendConfig(50, 300, 600, 1000, 3);
+    }
+
+    /** Only sends, so a test can put several messages in front of one turn of the loop. */
+    void sendConfig(int heartbeat, int electionMin, int electionMax, int probe, int failureThreshold) {
+        write(encoder.nodeConfig(send, 0L, heartbeat, electionMin, electionMax, probe, failureThreshold));
+    }
+
+    /** Only sends, so a test can put several messages in front of one turn of the loop. */
+    void sendVote(long term) {
+        write(encoder.handoverVote(send, term));
     }
 
     /**

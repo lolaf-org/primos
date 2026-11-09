@@ -202,6 +202,23 @@ class TenantIsolationTest {
     }
 
     @Test
+    void new_intervals_stated_in_the_turn_a_node_fails_do_not_hide_the_failure() {
+        cluster();
+        start();
+        try (WitnessClient node = new WitnessClient(ORDERS, 3, SECRET, WITNESS_ID, server.boundAddress())) {
+            node.announceConfig(server);
+            stores.get(ORDERS).savesFail = true;
+
+            node.sendConfig(60, 360, 720, 1200, 3);
+            node.sendVote(5L);
+            server.runOnce(Duration.ofMillis(20).toNanos());
+            server.runOnce(0L);
+        }
+
+        assertThat(server.quarantinedApplications()).containsExactly(ORDERS);
+    }
+
+    @Test
     void a_datagram_from_source_port_zero_costs_its_tenant_nothing() {
         cluster();
         start();
@@ -302,6 +319,7 @@ class TenantIsolationTest {
 
         private final MemoryStateStore memory = new MemoryStateStore();
         private volatile boolean corrupt;
+        private volatile boolean savesFail;
         private volatile boolean closed;
         private int loadsLeft;
 
@@ -315,6 +333,9 @@ class TenantIsolationTest {
 
         @Override
         public void save(long currentTerm, int votedFor) {
+            if (savesFail) {
+                throw new StateStoreException("this disk can no longer make a vote durable");
+            }
             memory.save(currentTerm, votedFor);
         }
 
