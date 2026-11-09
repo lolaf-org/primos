@@ -138,6 +138,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // Idempotent rather than fatal, as stop() is
             return;
         }
+        if (thread != null && thread.isAlive()) {
+            throw new IllegalStateException("node " + config.nodeId() + " cannot start: the thread of its last run has"
+                    + " not exited, after a stop() that timed out waiting for it, and two threads would drive one node");
+        }
         if (election != null && election.isFailed()) {
             throw new IllegalStateException("node " + config.nodeId() + " has failed and cannot be"
                     + " restarted: it stopped because something it depends on is broken, and"

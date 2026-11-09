@@ -814,6 +814,28 @@ class PrimosNodeTest {
         await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(node.isRunning()).isFalse());
     }
 
+    /**
+     * Restarting while a thread that outlived its stop() is alive would put two threads on one node.
+     */
+    @Test
+    void a_node_whose_thread_outlived_its_stop_refuses_to_start_until_it_is_gone() throws InterruptedException {
+        WedgedTransport wedged = new WedgedTransport();
+        PrimosNode node = builder(1).transport(() -> wedged).stopTimeout(Duration.ofMillis(50)).build();
+        node.start();
+        started.add(node);
+        assertThat(wedged.polling.await(5, TimeUnit.SECONDS))
+                .as("the thread has to be inside poll, or stop() simply wins the race")
+                .isTrue();
+
+        node.stop();
+
+        assertThatThrownBy(node::start).isInstanceOf(IllegalStateException.class);
+
+        wedged.released.countDown();
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThatCode(node::start).doesNotThrowAnyException());
+        assertThat(node.isRunning()).isTrue();
+    }
+
     private PrimosNode fileBackedNode(Transport transport) {
         return PrimosNode.builder()
                 .clusterConfig(cluster(1))
@@ -854,6 +876,38 @@ class PrimosNodeTest {
         @Override
         public boolean isDurable() {
             return true;
+        }
+
+        @Override
+        public void close() {
+            // nothing to do
+        }
+    }
+
+    private static final class WedgedTransport implements Transport {
+
+        private final CountDownLatch polling = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        @Override
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
+            return null;
+        }
+
+        @Override
+        public int poll(long timeoutNanos, DatagramHandler handler) {
+            polling.countDown();
+            try {
+                released.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return 0;
+        }
+
+        @Override
+        public void wakeup() {
+            // Deliberately nothing: this is the thread stop() cannot get back.
         }
 
         @Override
