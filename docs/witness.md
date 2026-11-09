@@ -251,6 +251,10 @@ Rotation is list membership. No restart, no flag day:
 
 Do not skip step 3. Two keys is a rotation window, not a permanent second key.
 
+Removing the last key that claims an application takes effect the same way, and falls back to the keys that claim
+nothing. If there are none, that application is served **without authentication** and the witness logs a warning, so
+always add the replacement first.
+
 ### Hot reload
 
 The configuration directory is re-read while the witness runs. **This is the point of the design**, because

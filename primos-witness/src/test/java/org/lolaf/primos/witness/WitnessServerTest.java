@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.Role;
+import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.MonotonicClock;
 
@@ -598,6 +599,77 @@ class WitnessServerTest {
                     .as("rotation is a key added and later removed, not a flag day across nodes")
                     .isTrue();
             assertThat(onTheNewSecret.requestVote(server, 2L)).isTrue();
+        }
+    }
+
+    @Test
+    void a_key_rotated_on_a_running_witness_takes_effect_without_a_restart() {
+        settings("secret.old.value = " + SECRET);
+        applicationWith("orders", "");
+        start();
+
+        assertRotationReachesTheServedNode("orders", "");
+    }
+
+    @Test
+    void a_key_rotated_on_a_running_witness_reaches_an_auto_registered_application() {
+        settings("config.source=cluster\nsecret.old.value = " + SECRET);
+        start();
+        try (WitnessClient registering = client("orders", 3)) {
+            registering.announceConfig(server);
+        }
+        assertThat(server.servedApplications()).containsExactly("orders");
+
+        assertRotationReachesTheServedNode("orders", "config.source=cluster\n");
+    }
+
+    @Test
+    void a_rotation_rebuilds_only_the_applications_whose_keys_changed() {
+        String billingKey = "secret.billing.value = billing-secret\n"
+                + "secret.billing.applications = billing\n";
+        settings(billingKey + "secret.orders.value = orders-secret\n"
+                + "secret.orders.applications = orders");
+        applicationWith("orders", "");
+        applicationWith("billing", "");
+        start();
+        ElectionNode ordersBefore = server.nodeOf("orders");
+        ElectionNode billingBefore = server.nodeOf("billing");
+
+        settings(billingKey + "secret.orders.value = orders-rotated\n"
+                + "secret.orders.applications = orders");
+        reloadConfiguration();
+
+        assertThat(server.nodeOf("orders"))
+                .as("the same key name with a new secret is still a rotation")
+                .isNotSameAs(ordersBefore);
+        assertThat(server.nodeOf("billing"))
+                .as("rebuilding clears a tenant's quarantine, so another tenant's rotation must"
+                        + " not reach it")
+                .isSameAs(billingBefore);
+    }
+
+    private void assertRotationReachesTheServedNode(String application, String otherSettings) {
+        try (WitnessClient onTheOldKey = new WitnessClient(application, 1, SECRET,
+                WITNESS_ID, server.boundAddress());
+             WitnessClient onTheNewKey = new WitnessClient(application, 2, "new-secret",
+                     WITNESS_ID, server.boundAddress())) {
+
+            settings(otherSettings + "secret.new.value = new-secret\nsecret.old.value = " + SECRET);
+            reloadConfiguration();
+            assertThat(onTheNewKey.requestVote(server, 1L))
+                    .as("step 1 of a rotation: the added key is accepted at once")
+                    .isTrue();
+            assertThat(onTheOldKey.requestVote(server, 2L))
+                    .as("and the old one still works until it is removed")
+                    .isTrue();
+
+            settings(otherSettings + "secret.new.value = new-secret");
+            reloadConfiguration();
+            assertThat(onTheOldKey.requestVote(server, 3L))
+                    .as("a removed key has to stop working, or rotating after a leak achieves"
+                            + " nothing")
+                    .isNull();
+            assertThat(onTheNewKey.requestVote(server, 4L)).isTrue();
         }
     }
 

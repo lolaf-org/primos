@@ -370,6 +370,11 @@ public final class WitnessServer implements AutoCloseable {
         return found.node.currentTerm();
     }
 
+    /** Identity changes on a rebuild, which is how a test tells one happened. */
+    ElectionNode nodeOf(String application) {
+        return require(application).node;
+    }
+
     /**
      * Which node this application's vote is currently spent on, or -1.
      */
@@ -635,6 +640,15 @@ public final class WitnessServer implements AutoCloseable {
             served.remove(application.name);
             application.close();
         }
+        for (Served application : served.values()) {
+            if (!application.keys.equals(keysFor(application.name))) {
+                rebuild(application, application.config);
+            }
+        }
+    }
+
+    private List<WitnessKey> keysFor(String application) {
+        return configStore.current().settings().keyring().candidatesFor(application);
     }
 
     private Served open(ApplicationConfig application) {
@@ -653,6 +667,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         Served opened = new Served(application, newTransport(application.name()), store,
                 statsListenerFor(application.name()));
+        opened.keys = keysFor(application.name());
         opened.node = newNode(application, opened.transport, store, null, opened.stats);
         served.put(application.name(), opened);
         opened.node.start();
@@ -674,6 +689,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         application.config = updated;
         application.failed = false;
+        application.keys = keysFor(updated.name());
         application.node = newNode(updated, application.transport, application.store,
                 application.adoptedTimings, application.stats);
         application.node.start();
@@ -802,8 +818,7 @@ public final class WitnessServer implements AutoCloseable {
      * application file existing for any of them.
      */
     private MessageAuthenticator authenticatorFor(ApplicationConfig application) {
-        List<WitnessKey> candidates =
-                configStore.current().settings().keyring().candidatesFor(application.name());
+        List<WitnessKey> candidates = keysFor(application.name());
         if (candidates.isEmpty()) {
             log.warn("application '{}' is served without authentication: no configured key claims"
                     + " it. Anyone who can reach this port can forge a vote grant for it, and one"
@@ -897,6 +912,9 @@ public final class WitnessServer implements AutoCloseable {
 
         private ApplicationConfig config;
         private ElectionNode node;
+
+        /** What {@link #node} verifies with. Not in {@link #config}, which holds no key material. */
+        private List<WitnessKey> keys;
 
         /**
          * Volatile for the same reason the map is concurrent: this is written by the server thread
