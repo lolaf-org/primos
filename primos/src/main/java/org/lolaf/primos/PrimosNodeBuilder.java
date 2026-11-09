@@ -88,16 +88,14 @@ public final class PrimosNodeBuilder {
     private PrimosStatsListener statsListener = PrimosStatsListener.NONE;
 
     /**
-     * Where listener callbacks run. By default they run on the node thread, which means a slow
-     * listener stalls consensus; supplying an executor moves them off it without primos creating a
-     * thread of its own.
+     * Where listener callbacks run. By default a thread of the node's own, which keeps a slow listener from stalling
+     * consensus. One supplied here must run tasks one at a time, in order, without blocking the caller.
      */
     @Setter
     private Executor listenerExecutor;
 
     /**
-     * How long a listener callback may take before it is warned about. Defaults to half the
-     * heartbeat interval, which is the point at which one starts to threaten the next heartbeat.
+     * How long a listener callback may take before it is warned about. Defaults to half the heartbeat interval.
      */
     @Setter
     private Duration slowCallbackThreshold;

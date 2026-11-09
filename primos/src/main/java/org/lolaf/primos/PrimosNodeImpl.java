@@ -26,8 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Random;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.Supplier;
 
 /**
@@ -62,6 +61,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      */
     private final PrimosStatsListener stats;
     private final Object transfer = new Object();
+    /**
+     * Null when the application supplied its own, which this node then knows nothing about.
+     */
+    private final ThreadPoolExecutor ownedEvents;
     private StateStore store;
     private Transport transport;
     private ElectionNode election;
@@ -77,7 +80,8 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private volatile boolean candidate = true;
     private boolean transferServed;
     private boolean transferSent;
-    private Thread thread;
+    private volatile Thread thread;
+    private volatile Thread eventsThread;
 
     PrimosNodeImpl(ClusterConfig config,
                    Supplier<StateStore> stores,
@@ -97,7 +101,9 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         this.authenticator = authenticator;
         this.stopTimeoutNanos = stopTimeoutNanos;
         this.stats = stats;
-        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock, listenerExecutor, slowCallbackNanos);
+        this.ownedEvents = listenerExecutor == null ? newEventsExecutor() : null;
+        this.dispatcher = new ListenerDispatcher(config.applicationName(), config.nodeId(), clock,
+                listenerExecutor == null ? ownedEvents : listenerExecutor, slowCallbackNanos);
         this.roleAndTerm = new RoleAndTerm(Role.FOLLOWER, 0);
     }
 
@@ -110,6 +116,23 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         } catch (Exception e) {
             log.info("closing a node's {} failed", resource.getClass().getSimpleName(), e);
         }
+    }
+
+    private ThreadPoolExecutor newEventsExecutor() {
+        String name = "primos-" + config.applicationName() + "-" + config.nodeId() + "-events";
+        // One worker for ordering, and an unbounded queue because the submitter is the node thread, which must never
+        // wait. Events are state changes, never per datagram, and dropping a leadership event is worse than queueing it.
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
+                task -> {
+                    Thread worker = new Thread(task, name);
+                    worker.setDaemon(true);
+                    worker.setUncaughtExceptionHandler((thread, throwable) -> log.error("Failure in thread {}", thread, throwable));
+                    eventsThread = worker;
+                    return worker;
+                });
+        // Nothing to shut down, so a node that is restarted or simply dropped needs no lifecycle for this.
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 
     @Override
@@ -150,7 +173,31 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public synchronized void stop() {
+    public void stop() {
+        stopNode();
+        awaitQueuedCallbacks();
+    }
+
+    /**
+     * Outside the node's lock, so a callback calling {@code publishChange()} cannot wait behind this.
+     */
+    private void awaitQueuedCallbacks() {
+        if (ownedEvents == null || Thread.currentThread() == eventsThread) {
+            return;
+        }
+        CountDownLatch drained = new CountDownLatch(1);
+        ownedEvents.execute(drained::countDown);
+        try {
+            if (!drained.await(stopTimeoutNanos, TimeUnit.NANOSECONDS)) {
+                log.warn("cluster '{}': node {} stopped with listener callbacks still queued behind a slow one",
+                        config.applicationName(), config.nodeId());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private synchronized void stopNode() {
         if (!running) {
             // Never started, or already stopped. Either way the store and the transport are this
             // node's to release: it made them, and a generation that never ran is still holding a
@@ -201,7 +248,16 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
      * the transport under it, and one caller at a time uses the single request slot.
      */
-    private synchronized boolean requestTransfer(int target) {
+    private boolean requestTransfer(int target) {
+        if (Thread.currentThread() == thread) {
+            throw new IllegalStateException("transferLeadership() waits for the node thread, so it cannot be called on"
+                    + " it. A listener executor that runs callbacks on the caller's thread does that; use the default,"
+                    + " or call this from another thread.");
+        }
+        return awaitTransfer(target);
+    }
+
+    private synchronized boolean awaitTransfer(int target) {
         synchronized (transfer) {
             if (!running) {
                 return false;
@@ -243,12 +299,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         }
     }
 
-    @Override
-    public void setCandidate(boolean candidate) {
-        this.candidate = candidate;
-        wakeUp();
-    }
-
     private synchronized void wakeUp() {
         if (running) {
             transport.wakeup();
@@ -258,6 +308,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     @Override
     public boolean isCandidate() {
         return candidate && !config.isWitness();
+    }
+
+    @Override
+    public void setCandidate(boolean candidate) {
+        this.candidate = candidate;
+        wakeUp();
     }
 
     @Override

@@ -26,24 +26,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Delivers events to the application's listeners.
- *
- * <p>It implements {@link PrimosListener} itself, so it plugs into the node as the single sink the
- * algorithm was written against and fans out from there.
- *
- * <p><strong>Callbacks run on the node thread by default</strong>, which is the price of a node
- * that owns exactly one thread. A listener that blocks therefore stalls consensus, misses
- * heartbeats and can trigger a spurious election, so three things guard against that being
- * mysterious when it happens:
- *
- * <ul>
- *   <li>a watchdog times every callback and warns when one runs long — the failure becomes a log
- *       line naming the listener, instead of unexplained election flapping;</li>
- *   <li>an {@link Executor} can be supplied, moving dispatch off the node thread entirely without
- *       primos creating a thread of its own;</li>
- *   <li>an exception from one listener is logged and swallowed, so it can neither kill the node
- *       nor stop the other listeners hearing about the event.</li>
- * </ul>
+ * Delivers events to the application's listeners through one executor, which is what keeps them in order and off the
+ * node thread. A watchdog warns about a callback that runs long, naming the listener, and an exception from one is
+ * logged and swallowed, so it can neither kill the node nor stop the other listeners hearing about the event.
  */
 @Slf4j
 final class ListenerDispatcher implements PrimosListener {
@@ -120,11 +105,7 @@ final class ListenerDispatcher implements PrimosListener {
     }
 
     private void deliverTo(PrimosListener listener, String event, Runnable delivery) {
-        if (executor != null) {
-            executor.execute(() -> invoke(listener, event, delivery));
-        } else {
-            invoke(listener, event, delivery);
-        }
+        executor.execute(() -> invoke(listener, event, delivery));
     }
 
     private void invoke(PrimosListener listener, String event, Runnable delivery) {
@@ -139,10 +120,8 @@ final class ListenerDispatcher implements PrimosListener {
         }
         long tookNanos = clock.nanoTime() - startedAt;
         if (tookNanos > slowCallbackNanos) {
-            log.warn("cluster '{}': node {} listener {} took {}ms in {}. Callbacks run on the node"
-                            + " thread, so a slow one stalls consensus and can cause a spurious"
-                            + " election. Hand the work to your own executor, or give the node an"
-                            + " Executor for listener dispatch.",
+            log.warn("cluster '{}': node {} listener {} took {}ms in {}. Callbacks run one at a time, so a"
+                            + " slow one delays every event behind it. Hand the work to your own executor.",
                     cluster, nodeId, listener.getClass().getName(),
                     TimeUnit.NANOSECONDS.toMillis(tookNanos), event);
         }

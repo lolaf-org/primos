@@ -104,7 +104,7 @@ class ListenerDispatchTest {
 
             await().atMost(10, TimeUnit.SECONDS).until(() -> !listener.threads.isEmpty());
 
-            assertThat(listener.threads).allSatisfy(name -> assertThat(name).startsWith("primos-orders-events"));
+            assertThat(listener.threads).allSatisfy(name -> assertThat(name).isEqualTo("primos-orders-1-events"));
         });
     }
 

@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -187,17 +188,18 @@ class PrimosNodeTest {
     }
 
     @Test
-    void the_node_runs_one_daemon_thread_named_after_the_cluster() {
-        start(builder(1));
+    void the_node_s_threads_are_daemons_named_after_the_cluster() {
+        Recording events = new Recording();
+        start(builder(1).listener(events));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !events.threads.isEmpty());
 
         List<Thread> ours = Thread.getAllStackTraces().keySet().stream()
                 .filter(thread -> thread.getName().startsWith("primos-orders-1"))
                 .collect(java.util.stream.Collectors.toList());
 
-        assertThat(ours).hasSize(1);
-        assertThat(ours.get(0).isDaemon())
-                .as("a forgotten node must never hold a JVM open")
-                .isTrue();
+        assertThat(ours).extracting(Thread::getName)
+                .contains("primos-orders-1", "primos-orders-1-events");
+        assertThat(ours).as("a forgotten node must never hold a JVM open").allMatch(Thread::isDaemon);
     }
 
     @Test
@@ -304,6 +306,7 @@ class PrimosNodeTest {
         Recording late = new Recording();
         node.addListener(late);
 
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !late.leaders.isEmpty());
         assertThat(late.roles)
                 .as("it registered too late for the transition, so it is told where things stand")
                 .containsExactly("LEADER->LEADER");
@@ -330,14 +333,180 @@ class PrimosNodeTest {
     }
 
     @Test
-    void callbacks_run_on_the_node_thread_by_default() {
+    void callbacks_run_on_the_node_s_events_thread_by_default() {
         Recording events = new Recording();
         start(builder(1).listener(events));
 
         await().atMost(5, TimeUnit.SECONDS).until(() -> !events.threads.isEmpty());
 
         assertThat(events.threads).allSatisfy(name ->
-                assertThat(name).startsWith("primos-orders-1"));
+                assertThat(name).isEqualTo("primos-orders-1-events"));
+    }
+
+    @Test
+    void a_blocked_listener_does_not_stall_the_node_by_default() {
+        CountDownLatch release = new CountDownLatch(1);
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                awaitQuietly(release);
+            }
+        }));
+        try {
+            await().atMost(5, TimeUnit.SECONDS).until(() -> node.leadershipConfirmedNanos().isPresent());
+            long first = node.leadershipConfirmedNanos().getAsLong();
+
+            await().atMost(5, TimeUnit.SECONDS)
+                    .alias("the loop keeps turning while the only listener is stuck")
+                    .until(() -> node.leadershipConfirmedNanos().getAsLong() > first);
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void a_listener_can_transfer_leadership_and_gets_a_real_answer() {
+        List<PrimosNode> nodes = new ArrayList<>();
+        nodes.add(start(builder(1, 2, 3)));
+        nodes.add(start(builder(2, 1, 3)));
+        nodes.add(start(builder(3, 1, 2)));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> leaderCount(nodes.toArray(new PrimosNode[0])) == 1);
+        PrimosNode leader = nodes.stream().filter(n -> n.role().isLeader()).findFirst().get();
+        await().atMost(5, TimeUnit.SECONDS).until(() -> leader.leadershipConfirmedNanos().isPresent());
+        AtomicReference<Boolean> answer = new AtomicReference<>();
+        leader.addListener(new PrimosListener() {
+            @Override
+            public void onLeaderVersion(Leader who, long term, long version) {
+                answer.compareAndSet(null, leader.transferLeadership());
+            }
+        });
+
+        long startedAt = System.nanoTime();
+        leader.publishChange();
+
+        await().atMost(4, TimeUnit.SECONDS).until(() -> answer.get() != null);
+        assertThat(answer.get()).isTrue();
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt))
+                .as("far short of the stop timeout a self-wait would burn")
+                .isLessThan(Duration.ofSeconds(3));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> !leader.role().isLeader());
+    }
+
+    @Test
+    void transferring_from_the_node_thread_is_refused_at_once() {
+        AtomicReference<Throwable> anyFollower = new AtomicReference<>();
+        AtomicReference<Throwable> chosen = new AtomicReference<>();
+        AtomicReference<Long> tookNanos = new AtomicReference<>();
+        AtomicReference<PrimosNode> self = new AtomicReference<>();
+        PrimosNode node = builder(1).listenerExecutor(Runnable::run).listener(new PrimosListener() {
+            @Override
+            public void onLeaderVersion(Leader who, long term, long version) {
+                long startedAt = System.nanoTime();
+                anyFollower.compareAndSet(null, thrownBy(() -> self.get().transferLeadership()));
+                chosen.compareAndSet(null, thrownBy(() -> self.get().transferLeadership(2)));
+                tookNanos.compareAndSet(null, System.nanoTime() - startedAt);
+            }
+        }).build();
+        self.set(node);
+        node.start();
+        started.add(node);
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.publishChange();
+
+        await().atMost(4, TimeUnit.SECONDS).until(() -> tookNanos.get() != null);
+        assertThat(anyFollower.get()).isInstanceOf(IllegalStateException.class).hasMessageContaining("node thread");
+        assertThat(chosen.get()).isInstanceOf(IllegalStateException.class);
+        assertThat(Duration.ofNanos(tookNanos.get())).isLessThan(Duration.ofSeconds(1));
+        assertThat(node.role().isLeader()).isTrue();
+    }
+
+    @Test
+    void stop_returns_after_the_callbacks_already_queued() {
+        List<String> delivered = new CopyOnWriteArrayList<>();
+        PrimosNode node = start(builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                sleepQuietly(100);
+                delivered.add(previous + "->" + current);
+            }
+        }));
+        await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+
+        node.stop();
+
+        assertThat(delivered).last().isEqualTo("LEADER->FOLLOWER");
+    }
+
+    @Test
+    void a_stuck_listener_cannot_hold_stop_past_its_timeout() {
+        CountDownLatch release = new CountDownLatch(1);
+        PrimosNode node = start(builder(1).stopTimeout(Duration.ofMillis(300)).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                awaitQuietly(release);
+            }
+        }));
+        try {
+            await().atMost(5, TimeUnit.SECONDS).until(() -> node.role().isLeader());
+            long startedAt = System.nanoTime();
+
+            node.stop();
+
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(3));
+            assertThat(node.isRunning()).isFalse();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void stop_from_a_listener_does_not_wait_on_itself() {
+        AtomicReference<PrimosNode> self = new AtomicReference<>();
+        AtomicReference<Long> tookNanos = new AtomicReference<>();
+        PrimosNode node = builder(1).listener(new PrimosListener() {
+            @Override
+            public void onRoleChanged(Role previous, Role current, long term) {
+                if (current == Role.LEADER) {
+                    long startedAt = System.nanoTime();
+                    self.get().stop();
+                    tookNanos.set(System.nanoTime() - startedAt);
+                }
+            }
+        }).build();
+        self.set(node);
+        node.start();
+        started.add(node);
+
+        await().atMost(10, TimeUnit.SECONDS).until(() -> tookNanos.get() != null);
+
+        assertThat(Duration.ofNanos(tookNanos.get())).isLessThan(Duration.ofSeconds(3));
+        assertThat(node.isRunning()).isFalse();
+    }
+
+    private static Throwable thrownBy(Runnable action) {
+        try {
+            action.run();
+            return null;
+        } catch (Throwable thrown) {
+            return thrown;
+        }
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---------------------------------------------------------------- stats

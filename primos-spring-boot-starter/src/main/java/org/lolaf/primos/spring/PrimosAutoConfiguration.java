@@ -16,19 +16,12 @@
 package org.lolaf.primos.spring;
 
 import lombok.extern.slf4j.Slf4j;
-import org.lolaf.primos.ClusterConfig;
-import org.lolaf.primos.Peer;
-import org.lolaf.primos.PrimosListener;
-import org.lolaf.primos.PrimosNode;
-import org.lolaf.primos.PrimosStatsListener;
-import org.lolaf.primos.Timings;
+import org.lolaf.primos.*;
 import org.lolaf.primos.spring.PrimosProperties.PeerProperties;
 import org.lolaf.primos.store.FileStateStore;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.transport.Transport;
 import org.lolaf.primos.transport.UdpTransport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -40,18 +33,12 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
-import java.util.function.Supplier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Configures a {@link PrimosNode} from {@code primos.*} and runs it with the context.
@@ -67,6 +54,80 @@ import java.util.concurrent.TimeUnit;
 @EnableConfigurationProperties(PrimosProperties.class)
 @Slf4j
 public class PrimosAutoConfiguration {
+
+    private static Timings toTimings(PrimosProperties.TimingsProperties timings) {
+        List<String> explicit = timings.explicitKeys();
+        if (timings.profile() != null && !explicit.isEmpty()) {
+            throw new IllegalStateException("primos.timings.profile is set to '"
+                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is "
+                    + String.join(", ", explicit) + ". Choose one: a profile is a set of intervals"
+                    + " picked to hold together, so overriding part of one leaves a custom set"
+                    + " whose author has not seen the other values. Either drop the profile and"
+                    + " name every interval you want, or drop the individual keys.");
+        }
+        if (timings.profile() != null) {
+            return timings.profile() == PrimosProperties.Profile.WAN ? Timings.wan() : Timings.lan();
+        }
+        if (explicit.isEmpty()) {
+            return Timings.lan();
+        }
+        // The two bounds are a pair: setting one against the other's default is how an invalid
+        // range gets built. Timings rejects that at build(), but naming the property is a better
+        // error than naming a Java field, so it is caught here first.
+        boolean hasMin = timings.electionTimeoutMin() != null;
+        boolean hasMax = timings.electionTimeoutMax() != null;
+        if (hasMin != hasMax) {
+            throw new IllegalStateException("primos.timings.election-timeout-"
+                    + (hasMin ? "min" : "max") + " is set without its pair. The election timeout is"
+                    + " a range drawn from afresh on every reset, and setting one end against the"
+                    + " other's default is how an invalid or too-narrow range is built. Set both.");
+        }
+        Timings.TimingsBuilder builder = Timings.builder();
+        if (timings.heartbeatInterval() != null) {
+            builder.heartbeatInterval(timings.heartbeatInterval());
+        }
+        if (hasMin) {
+            builder.electionTimeoutMin(timings.electionTimeoutMin());
+            builder.electionTimeoutMax(timings.electionTimeoutMax());
+        }
+        if (timings.probeInterval() != null) {
+            builder.probeInterval(timings.probeInterval());
+        }
+        if (timings.advertisementInterval() != null) {
+            builder.advertisementInterval(timings.advertisementInterval());
+        }
+        if (timings.failureThreshold() != null) {
+            builder.failureThreshold(timings.failureThreshold());
+        }
+        // Every relationship between these — the election timeout above five heartbeats, the range
+        // wider than one heartbeat, the probe ceiling — is checked in here, with its own message.
+        return builder.build();
+    }
+
+    private static byte[] secretBytes(PrimosProperties properties) {
+        String secret = properties.secret();
+        return secret == null || secret.isEmpty()
+                ? null : secret.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static List<Peer> toPeers(List<PeerProperties> peers, boolean witness) {
+        List<Peer> result = new ArrayList<>();
+        peers.forEach(peer -> result.add(toPeer(peer, witness)));
+        return result;
+    }
+
+    /**
+     * The name is passed through untouched, including when it is null.
+     *
+     * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
+     * and substituting anything here — the bare id, say — would give a peer configured through
+     * Spring a different default from the identical peer configured through the library.
+     */
+    private static Peer toPeer(PeerProperties peer, boolean witness) {
+        return witness
+                ? Peer.witness(peer.id(), peer.name(), peer.host(), peer.port())
+                : Peer.application(peer.id(), peer.name(), peer.host(), peer.port());
+    }
 
     /**
      * The intervals governing elections and failure detection, from a named profile or from values
@@ -165,11 +226,7 @@ public class PrimosAutoConfiguration {
         var builder = PrimosNode.builder()
                 .clusterConfig(cluster)
                 .store(stores)
-                .transport(transports)
-                // Callbacks off the node thread. Every @EventListener in the application hangs off
-                // this, and a listener that blocks on the node thread stalls consensus, misses
-                // heartbeats and triggers an election that loses the leadership it was watching.
-                .listenerExecutor(listenerExecutor(properties));
+                .transport(transports);
         byte[] secret = secretBytes(properties);
         if (secret != null) {
             builder.clusterSecret(secret);
@@ -234,94 +291,5 @@ public class PrimosAutoConfiguration {
         public PrimosHealthIndicator primosHealthIndicator(PrimosNode node) {
             return new PrimosHealthIndicator(node);
         }
-    }
-
-    private static Timings toTimings(PrimosProperties.TimingsProperties timings) {
-        List<String> explicit = timings.explicitKeys();
-        if (timings.profile() != null && !explicit.isEmpty()) {
-            throw new IllegalStateException("primos.timings.profile is set to '"
-                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is "
-                    + String.join(", ", explicit) + ". Choose one: a profile is a set of intervals"
-                    + " picked to hold together, so overriding part of one leaves a custom set"
-                    + " whose author has not seen the other values. Either drop the profile and"
-                    + " name every interval you want, or drop the individual keys.");
-        }
-        if (timings.profile() != null) {
-            return timings.profile() == PrimosProperties.Profile.WAN ? Timings.wan() : Timings.lan();
-        }
-        if (explicit.isEmpty()) {
-            return Timings.lan();
-        }
-        // The two bounds are a pair: setting one against the other's default is how an invalid
-        // range gets built. Timings rejects that at build(), but naming the property is a better
-        // error than naming a Java field, so it is caught here first.
-        boolean hasMin = timings.electionTimeoutMin() != null;
-        boolean hasMax = timings.electionTimeoutMax() != null;
-        if (hasMin != hasMax) {
-            throw new IllegalStateException("primos.timings.election-timeout-"
-                    + (hasMin ? "min" : "max") + " is set without its pair. The election timeout is"
-                    + " a range drawn from afresh on every reset, and setting one end against the"
-                    + " other's default is how an invalid or too-narrow range is built. Set both.");
-        }
-        Timings.TimingsBuilder builder = Timings.builder();
-        if (timings.heartbeatInterval() != null) {
-            builder.heartbeatInterval(timings.heartbeatInterval());
-        }
-        if (hasMin) {
-            builder.electionTimeoutMin(timings.electionTimeoutMin());
-            builder.electionTimeoutMax(timings.electionTimeoutMax());
-        }
-        if (timings.probeInterval() != null) {
-            builder.probeInterval(timings.probeInterval());
-        }
-        if (timings.advertisementInterval() != null) {
-            builder.advertisementInterval(timings.advertisementInterval());
-        }
-        if (timings.failureThreshold() != null) {
-            builder.failureThreshold(timings.failureThreshold());
-        }
-        // Every relationship between these — the election timeout above five heartbeats, the range
-        // wider than one heartbeat, the probe ceiling — is checked in here, with its own message.
-        return builder.build();
-    }
-
-    private static Executor listenerExecutor(PrimosProperties properties) {
-        String threadName = "primos-" + properties.applicationName() + "-events";
-        // One worker for ordering, and an unbounded queue because the submitter is the node thread, which must never
-        // wait. Events are state changes, never per datagram, and dropping a leadership event is worse than queueing it.
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
-                task -> {
-                    Thread thread = new Thread(task, threadName);
-                    thread.setDaemon(true);
-                    return thread;
-                });
-        // Nothing to shut down, so no ordering against the node's own stop to get wrong.
-        executor.allowCoreThreadTimeOut(true);
-        return executor;
-    }
-
-    private static byte[] secretBytes(PrimosProperties properties) {
-        String secret = properties.secret();
-        return secret == null || secret.isEmpty()
-                ? null : secret.getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static List<Peer> toPeers(List<PeerProperties> peers, boolean witness) {
-        List<Peer> result = new ArrayList<>();
-        peers.forEach(peer -> result.add(toPeer(peer, witness)));
-        return result;
-    }
-
-    /**
-     * The name is passed through untouched, including when it is null.
-     *
-     * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
-     * and substituting anything here — the bare id, say — would give a peer configured through
-     * Spring a different default from the identical peer configured through the library.
-     */
-    private static Peer toPeer(PeerProperties peer, boolean witness) {
-        return witness
-                ? Peer.witness(peer.id(), peer.name(), peer.host(), peer.port())
-                : Peer.application(peer.id(), peer.name(), peer.host(), peer.port());
     }
 }

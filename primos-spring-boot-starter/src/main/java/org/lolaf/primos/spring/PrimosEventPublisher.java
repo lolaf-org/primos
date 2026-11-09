@@ -27,9 +27,8 @@ import java.util.Optional;
 /**
  * Republishes primos' callbacks as Spring application events.
  *
- * <p>Runs wherever the node's listener dispatch runs. The auto-configuration gives the node an
- * executor for that, so publishing — and therefore every {@code @EventListener} downstream of it —
- * is off the node thread, where a slow listener would otherwise stall consensus.
+ * <p>Runs wherever the node's listener dispatch runs, which is off the node thread, so a slow
+ * {@code @EventListener} cannot stall consensus.
  */
 class PrimosEventPublisher implements PrimosListener {
 

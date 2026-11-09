@@ -129,6 +129,8 @@ public interface PrimosNode extends AutoCloseable {
      *
      * @return whether the successor was told to campaign; false when this node is not leading,
      * not running, or has no follower it heard from within an election timeout
+     * @throws IllegalStateException if called on the node thread, which only a listener executor
+     * that runs callbacks on the caller's thread can do
      */
     boolean transferLeadership();
 
