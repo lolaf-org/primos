@@ -160,7 +160,7 @@ class VoteStickinessTest {
 
     @Test
     void the_flag_is_its_own_bit() {
-        assertThat(WireFormat.FLAG_HANDOVER & (WireFormat.FLAG_PRE_VOTE | WireFormat.FLAG_DECLINES_CANDIDACY)).isZero();
+        assertThat(WireFormat.FLAG_HANDOVER & (WireFormat.FLAG_PRE_VOTE | WireFormat.FLAG_NOT_ELECTABLE)).isZero();
     }
 
     private void waitOutTheWindow() {

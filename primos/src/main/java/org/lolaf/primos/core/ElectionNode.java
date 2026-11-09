@@ -124,7 +124,7 @@ public final class ElectionNode implements MessageHandler {
     /**
      * Whether this node stands for election; a witness never does, whatever this says.
      */
-    private boolean candidate = true;
+    private boolean electable = true;
     /**
      * When a leader that withdrew next tries to hand over, until a successor deposes it.
      */
@@ -422,7 +422,7 @@ public final class ElectionNode implements MessageHandler {
             deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, quorumContactDeadlineNanos()));
             return deadline;
         }
-        if (campaigns()) {
+        if (isElectable()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
         if (isFollowingLeader()) {
@@ -587,7 +587,7 @@ public final class ElectionNode implements MessageHandler {
                 relinquishLeadership();
                 return;
             }
-            if (!candidate && now >= withdrawalHandOverNanos) {
+            if (!electable && now >= withdrawalHandOverNanos) {
                 withdrawalHandOver(now, true);
             }
             if (now >= heartbeatDeadlineNanos) {
@@ -599,32 +599,28 @@ public final class ElectionNode implements MessageHandler {
         if (isFollowingLeader() && now >= leaderSilenceDeadlineNanos()) {
             setLeader(-1);
         }
-        if (campaigns() && now >= electionDeadlineNanos) {
+        if (isElectable() && now >= electionDeadlineNanos) {
             startPreVote();
         }
     }
 
-    private boolean campaigns() {
-        return candidate && !config.isWitness();
-    }
-
-    public boolean isCandidate() {
-        return campaigns();
+    public boolean isElectable() {
+        return electable && !config.isWitness();
     }
 
     /**
-     * Takes this node out of elections, or puts it back. A non-candidate keeps voting, replying and
-     * probing, as a witness does, but never campaigns. A candidate withdrawing mid-campaign drops
+     * Takes this node out of elections, or puts it back. One that is not electable keeps voting,
+     * replying and probing, as a witness does, but never campaigns. One withdrawing mid-campaign drops
      * back to follower, so the votes still in flight cannot elect it; a leader hands leadership
      * over, and keeps trying every election timeout until a successor deposes it rather than leave
      * the cluster without one.
      */
-    public void setCandidate(boolean candidate) {
-        if (this.candidate == candidate || config.isWitness()) {
+    public void setElectable(boolean electable) {
+        if (this.electable == electable || config.isWitness()) {
             return;
         }
-        this.candidate = candidate;
-        if (candidate) {
+        this.electable = electable;
+        if (electable) {
             // From now, not from whenever the timer was last set: an expired deadline would campaign at once.
             resetElectionTimer();
             log.info("cluster '{}': node {} stands for election again", config.applicationName(), config.nodeId());
@@ -756,7 +752,7 @@ public final class ElectionNode implements MessageHandler {
         for (TrackedPeer trackedPeer : peers) {
             trackedPeer.lastConfirmedNanos = electionStartedNanos;
             // Learned again from this leadership's first replies, rather than kept from an older one.
-            trackedPeer.candidate = true;
+            trackedPeer.electable = true;
         }
 
         log.info("cluster '{}': node {} became leader for term {}",
@@ -1016,7 +1012,7 @@ public final class ElectionNode implements MessageHandler {
     @Override
     public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
         if (term < currentTerm) {
-            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, campaigns(), sentNanos));
+            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, isElectable(), sentNanos));
             return;
         }
         if (term > currentTerm) {
@@ -1030,12 +1026,12 @@ public final class ElectionNode implements MessageHandler {
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
-        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, campaigns(), sentNanos));
+        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, isElectable(), sentNanos));
         reportLeaderVersion(term, leaderVersion);
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean electable, long sentNanos) {
         if (term > currentTerm) {
             stepDown(term);
             return;
@@ -1049,7 +1045,7 @@ public final class ElectionNode implements MessageHandler {
                 if (sentNanos <= clock.nanoTime()) {
                     trackedPeer.lastConfirmedNanos = Math.max(trackedPeer.lastConfirmedNanos, sentNanos);
                 }
-                trackedPeer.candidate = candidate;
+                trackedPeer.electable = electable;
             }
         }
     }
@@ -1075,7 +1071,7 @@ public final class ElectionNode implements MessageHandler {
                     config.applicationName(), config.nodeId(), senderId);
             return;
         }
-        if (!candidate) {
+        if (!electable) {
             // The same rule switched on at runtime. A leader that has not learned this node withdrew
             // may still pick it, and only costs itself a retry.
             log.debug("cluster '{}': node {} withdrew from elections, ignoring a handover from node {}",
@@ -1208,7 +1204,7 @@ public final class ElectionNode implements MessageHandler {
         TrackedPeer trackedPeer = trackedPeer(targetId);
         String refusal = trackedPeer == null ? "not a peer"
                 : trackedPeer.peer.isWitness() ? "a witness, which never leads"
-                : !trackedPeer.candidate ? "withdrawn from elections"
+                : !trackedPeer.electable ? "withdrawn from elections"
                 : isDeclaredDown(trackedPeer) ? "down" : null;
         if (refusal != null) {
             log.info("cluster '{}': node {} keeps leading term {}: node {} is {}", config.applicationName(),
@@ -1248,7 +1244,7 @@ public final class ElectionNode implements MessageHandler {
         long bestContactNanos = Long.MIN_VALUE;
 
         for (TrackedPeer trackedPeer : peers) {
-            if (trackedPeer.peer.isWitness() || !trackedPeer.candidate || isDeclaredDown(trackedPeer)) {
+            if (trackedPeer.peer.isWitness() || !trackedPeer.electable || isDeclaredDown(trackedPeer)) {
                 continue;
             }
             long lastContact = trackedPeer.lastConfirmedNanos;
@@ -1448,7 +1444,7 @@ public final class ElectionNode implements MessageHandler {
         /**
          * What its last heartbeat reply in this node's leadership said; standing until one says otherwise.
          */
-        private boolean candidate = true;
+        private boolean electable = true;
 
         private TrackedPeer(Peer peer) {
             this.peer = peer;

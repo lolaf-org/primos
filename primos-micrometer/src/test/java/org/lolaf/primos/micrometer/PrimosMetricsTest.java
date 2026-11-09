@@ -74,7 +74,7 @@ class PrimosMetricsTest {
         assertThat(gauge("primos.role", "role", "follower")).isZero();
         assertThat(gauge("primos.term")).isGreaterThan(0.0);
         assertThat(gauge("primos.node.running")).isEqualTo(1.0);
-        assertThat(gauge("primos.candidate")).isEqualTo(1.0);
+        assertThat(gauge("primos.electable")).isEqualTo(1.0);
         assertThat(gauge("primos.voters")).isEqualTo(1.0);
         assertThat(gauge("primos.quorum.required")).isEqualTo(1.0);
 
@@ -82,8 +82,8 @@ class PrimosMetricsTest {
         assertThat(counter("primos.role.changes", "to", "leader")).isEqualTo(1.0);
         assertThat(counter("primos.leader.changes")).isGreaterThanOrEqualTo(1.0);
 
-        node.setCandidate(false);
-        assertThat(gauge("primos.candidate")).isZero();
+        node.setElectable(false);
+        assertThat(gauge("primos.electable")).isZero();
     }
 
     /**

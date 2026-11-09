@@ -239,7 +239,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
         gauge("primos.node.running", node, n -> n.isRunning() ? 1 : 0,
                 "1 while the node is started. Separates a node nobody started from a healthy follower",
                 base);
-        gauge("primos.candidate", node, n -> n.isCandidate() ? 1 : 0,
+        gauge("primos.electable", node, n -> n.isElectable() ? 1 : 0,
                 "1 while this node stands for election. Summed across a cluster: 0 means nobody can"
                         + " take over from the leader", base);
 

@@ -76,7 +76,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * What the application asked, applied to the election by the node thread each turn and to
      * every new election on start.
      */
-    private volatile boolean candidate = true;
+    private volatile boolean electable = true;
     private volatile Thread thread;
     private volatile Thread eventsThread;
 
@@ -147,7 +147,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             store = stores.get();
             transport = transports.get();
             election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
-            election.setCandidate(candidate);
+            election.setElectable(electable);
             // Here rather than on the node thread, so a state file it cannot read fails this call.
             election.start();
         } catch (RuntimeException e) {
@@ -284,13 +284,13 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public boolean isCandidate() {
-        return candidate && !config.isWitness();
+    public boolean isElectable() {
+        return electable && !config.isWitness();
     }
 
     @Override
-    public void setCandidate(boolean candidate) {
-        this.candidate = candidate;
+    public void setElectable(boolean electable) {
+        this.electable = electable;
         wakeUp();
     }
 
@@ -370,7 +370,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
                 // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
                 // the socket, so there is no polling interval to tune and no latency to trade away.
                 election.runOnce(Long.MAX_VALUE);
-                election.setCandidate(candidate);
+                election.setElectable(electable);
                 serveTransfer();
                 publish();
                 if (election.isFailed()) {

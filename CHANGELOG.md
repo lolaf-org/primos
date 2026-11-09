@@ -45,7 +45,7 @@ state.
   come back. A peer that never starts, or stops before it is first seen, is reported down too.
 - **Planned switchover and maintenance.** `transferLeadership()` hands leadership to a follower while the leader keeps
   running, to the follower it heard from last or to one you name; the leader keeps leading until the successor takes
-  over, so a transfer that fails changes nothing. `setCandidate(false)` takes a node out of elections: it still votes,
+  over, so a transfer that fails changes nothing. `setElectable(false)` takes a node out of elections: it still votes,
   but never leads, and a leader that withdraws hands over first and keeps leading until someone takes over.
   `primos-micrometer` counts transfers and transfers that found nobody to take over, and reports which nodes stand.
 - **Restartable nodes.** A stopped node can be started again and rejoins with the term and vote it left with.

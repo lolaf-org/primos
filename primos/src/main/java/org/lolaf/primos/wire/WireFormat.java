@@ -33,7 +33,7 @@ import lombok.NoArgsConstructor;
  *      0     4  magic 'PRMS'
  *      4     1  version
  *      5     1  message type
- *      6     2  flags (bit 0 = pre-vote, bit 1 = declines candidacy; the rest reserved, sent zero,
+ *      6     2  flags (bit 0 = pre-vote, bit 1 = not electable; the rest reserved, sent zero,
  *                 ignored on receive)
  *      8    32  application name, UTF-8, zero-padded
  *     40     8  term
@@ -99,7 +99,7 @@ public final class WireFormat {
      * never hands leadership to it. Set rather than cleared, so a sender that predates it reads as
      * standing, which is what it does.
      */
-    public static final int FLAG_DECLINES_CANDIDACY = 0x0002;
+    public static final int FLAG_NOT_ELECTABLE = 0x0002;
 
     /**
      * Marks a real {@code RequestVote} as campaigning on a leader's own {@code TimeoutNow}, so a voter that has just

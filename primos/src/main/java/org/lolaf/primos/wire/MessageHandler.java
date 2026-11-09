@@ -47,10 +47,10 @@ public interface MessageHandler {
     /**
      * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.
      *
-     * @param candidate whether the sender stands for election
+     * @param electable whether the sender stands for election
      * @param sentNanos when the answered heartbeat was sent, on this node's clock
      */
-    void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos);
+    void onAppendEntriesReply(int senderId, long term, boolean success, boolean electable, long sentNanos);
 
     /**
      * A reachability probe, to be answered with the same sequence number.

@@ -71,7 +71,7 @@ Everything else on this page is diagnosis after that alert has fired.
 | `primos.role` | gauge | 1 for the role held, tagged `role` |
 | `primos.term` | gauge | the term this node is in, which is the fencing token |
 | `primos.node.running` | gauge | 1 while started: separates a node nobody started from a healthy follower |
-| `primos.candidate` | gauge | 1 while this node stands for election; summed across a cluster, 0 means nobody can take over |
+| `primos.electable` | gauge | 1 while this node stands for election; summed across a cluster, 0 means nobody can take over |
 | `primos.voters` | gauge | voters in the configured cluster |
 | `primos.quorum.required` | gauge | votes needed to lead |
 | `primos.peer.up` | gauge | 1 while a peer answers probes |

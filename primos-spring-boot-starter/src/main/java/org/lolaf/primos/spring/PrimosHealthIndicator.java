@@ -52,7 +52,7 @@ public class PrimosHealthIndicator implements HealthIndicator {
                 .withDetail("term", current.term())
                 .withDetail("leader", node.leader().map(leader -> leader.isSelf()
                         ? "self" : String.valueOf(leader.id())).orElse("none"))
-                .withDetail("candidate", node.isCandidate());
+                .withDetail("electable", node.isElectable());
         if (current.role() == Role.FAILED) {
             health.withDetail("reason", "the node thread died and this node will never lead again;"
                     + " restart the process rather than waiting for it to recover");

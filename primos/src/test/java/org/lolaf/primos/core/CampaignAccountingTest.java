@@ -93,11 +93,11 @@ class CampaignAccountingTest {
     void withdrawing_during_a_pre_vote_is_reported_as_lost_and_forgotten() {
         startPreVote();
 
-        node.setCandidate(false);
+        node.setElectable(false);
 
         assertThat(recorded.electionsLost.get()).isEqualTo(1);
 
-        node.setCandidate(true);
+        node.setElectable(true);
         clock.advance(A_WEEK);
         startPreVote();
         win();
