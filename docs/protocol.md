@@ -190,6 +190,11 @@ It authenticates and does not encrypt, and it does not stop a captured datagram 
 the protocol instead: an old-term replay fails the term check, a current-term replay is a duplicate UDP already forces
 the protocol to tolerate, and a replayed vote grant is a no-op because votes are counted in a set.
 
+**A known limit: a replay can move a learned address.** The tag does not cover the source address, so an attacker on
+the network path who resends a captured datagram from another address moves that peer's learned address until the peer
+next speaks, and repeating it faster than the peer's own traffic cuts that peer off. It takes a position on the path,
+and it applies only where addresses are learned: always on a witness, and on a node with `addressLearning` set.
+
 ## The receive pipeline
 
 Every datagram goes through the same checks in the same order, and each failure is counted under its own

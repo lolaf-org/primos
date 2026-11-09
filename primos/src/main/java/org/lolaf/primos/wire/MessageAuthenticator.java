@@ -50,7 +50,8 @@ import java.util.Objects;
  * replay protection (a captured datagram resent verbatim still verifies). Replay is absorbed by
  * the protocol rather than here: old-term replays fail the term check, current-term replays are
  * duplicates UDP already forced us to tolerate, and a replayed vote grant is a no-op because votes
- * are counted in a set.
+ * are counted in a set. The exception is a learned address: the tag does not cover the source, so
+ * a captured datagram resent from elsewhere moves that peer's address until it next speaks.
  *
  * <p>Not thread-safe: {@link Mac} is stateful, and each instance is owned by one node thread.
  */

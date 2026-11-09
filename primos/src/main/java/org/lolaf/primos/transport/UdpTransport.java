@@ -268,7 +268,9 @@ public final class UdpTransport implements Transport {
      * operator editing configuration, and since hostnames are resolved once at construction it is
      * the only thing that updates an address at all. It is gated on authentication for a reason:
      * learning from an unauthenticated datagram would let a single spoofed packet redirect a
-     * peer's traffic and partition it, without the attacker forging any content at all.
+     * peer's traffic and partition it, without the attacker forging any content at all. The tag
+     * does not cover the source address, so a captured datagram replayed from elsewhere still
+     * redirects that peer until it next speaks.
      */
     @Override
     public void confirmSender(int senderId) {

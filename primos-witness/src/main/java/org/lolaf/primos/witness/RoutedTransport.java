@@ -202,7 +202,9 @@ final class RoutedTransport implements Transport {
      *
      * <p>This is the entire addressing story for a witness. It is also why a node that restarts on
      * a new address can be answered again with no operator involvement, and why the tag has to be
-     * verified first: without that, one spoofed datagram would redirect a node's replies.
+     * verified first: without that, one spoofed datagram would redirect a node's replies. The tag
+     * does not cover the source address, so a captured datagram replayed from elsewhere still
+     * redirects them until that node next speaks.
      */
     @Override
     public void confirmSender(int senderId) {

@@ -87,7 +87,8 @@ durable storage: a network filesystem or a throttled cloud volume whose worst-ca
 will lose elections while writing.
 
 `addressLearning` lets a node follow a peer whose address changes. Enable it only with a cluster secret set: without a
-tag, one spoofed datagram would redirect a peer's traffic and partition it without forging any content.
+tag, one spoofed datagram would redirect a peer's traffic and partition it without forging any content. Even with one,
+an attacker on the network path can replay a captured datagram to the same end; see [protocol.md](protocol.md).
 
 ## Authentication
 
