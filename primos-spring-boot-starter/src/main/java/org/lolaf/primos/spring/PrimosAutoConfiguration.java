@@ -39,7 +39,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -50,6 +49,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Configures a {@link PrimosNode} from {@code primos.*} and runs it with the context.
@@ -284,10 +286,17 @@ public class PrimosAutoConfiguration {
     }
 
     private static Executor listenerExecutor(PrimosProperties properties) {
-        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor(
-                "primos-" + properties.applicationName() + "-events-");
-        // One at a time, so events reach the application in the order the node produced them.
-        executor.setConcurrencyLimit(1);
+        String threadName = "primos-" + properties.applicationName() + "-events";
+        // One worker for ordering, and an unbounded queue because the submitter is the node thread, which must never
+        // wait. Events are state changes, never per datagram, and dropping a leadership event is worse than queueing it.
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
+                task -> {
+                    Thread thread = new Thread(task, threadName);
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        // Nothing to shut down, so no ordering against the node's own stop to get wrong.
+        executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 
