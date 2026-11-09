@@ -90,6 +90,7 @@ they say how close the cluster is to having no leader at all.
 | `primos.handover.no.successor` | counter | transfers that found no follower standing for election |
 | `primos.probe.rtt` | timer | every probe round trip, per peer |
 | `primos.datagrams.dropped` | counter | drops, tagged `reason` |
+| `primos.sends.dropped` | counter | datagrams this node never got onto the network, tagged `reason` = `socket_error`, `transport_closed` or `no_address` |
 | `primos.peer.down` | counter | times a peer stopped answering |
 | `primos.departures.observed` | counter | peers that announced a shutdown |
 | `primos.timing.mismatches` | counter | peers running different intervals from this node |

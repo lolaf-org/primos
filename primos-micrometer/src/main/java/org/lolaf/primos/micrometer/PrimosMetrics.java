@@ -30,6 +30,7 @@ import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.PrimosStatsListener;
 import org.lolaf.primos.Quorum;
 import org.lolaf.primos.Role;
+import org.lolaf.primos.SendDropReason;
 
 import java.util.Collections;
 import java.util.List;
@@ -112,6 +113,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
     private final Counter versionsPublished;
     private final Counter versionsReceived;
     private final Counter[] dropped;
+    private final Counter[] sendsDropped;
     private final Counter[] roleChanges;
 
     private final AtomicBoolean bound = new AtomicBoolean();
@@ -202,6 +204,12 @@ public final class PrimosMetrics implements PrimosStatsListener {
         for (DropReason reason : DropReason.values()) {
             dropped[reason.ordinal()] = counter("primos.datagrams.dropped",
                     "Datagrams discarded, by the check that discarded them",
+                    base.and("reason", lower(reason.name())));
+        }
+        this.sendsDropped = new Counter[SendDropReason.values().length];
+        for (SendDropReason reason : SendDropReason.values()) {
+            sendsDropped[reason.ordinal()] = counter("primos.sends.dropped",
+                    "Datagrams this node never got onto the network, by why",
                     base.and("reason", lower(reason.name())));
         }
         this.roleChanges = new Counter[Role.values().length];
@@ -312,6 +320,11 @@ public final class PrimosMetrics implements PrimosStatsListener {
     @Override
     public void onDatagramDropped(DropReason reason) {
         dropped[reason.ordinal()].increment();
+    }
+
+    @Override
+    public void onSendDropped(SendDropReason reason) {
+        sendsDropped[reason.ordinal()].increment();
     }
 
     @Override

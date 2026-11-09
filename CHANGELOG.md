@@ -66,7 +66,7 @@ state.
     metrics.
   - `primos-witness` on Maven Central, to embed the witness in your own process.
 - **Observability.** `PrimosStatsListener` reports elections and how long they took, how long a cluster had no
-  leader, handovers, probe round trips and dropped datagrams as they happen, at no allocation cost.
+  leader, handovers, probe round trips, dropped datagrams and datagrams it could not send as they happen, at no allocation cost.
   `primos-micrometer` binds a node or a witness onto a Micrometer `MeterRegistry`.
 - **Spring Boot.** `primos-spring-boot-starter` configures a node from `application.properties`, publishes leadership
   changes as Spring events, reports health, and can start and stop your beans as this node gains and loses
