@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.transport;
 
+import org.lolaf.primos.SendDropReason;
+
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,29 +48,25 @@ public final class LoopbackNetwork {
 
         private final int nodeId;
         private volatile boolean closed;
-        private volatile long sendsDropped;
 
         private LoopbackTransport(int nodeId) {
             this.nodeId = nodeId;
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
             if (closed) {
-                sendsDropped++;
-                return;
+                return SendDropReason.TRANSPORT_CLOSED;
             }
             LinkedBlockingQueue<byte[]> mailbox = mailboxes.get(peerId);
             if (mailbox == null) {
                 // Sending into the void, exactly as a datagram to a host that is not listening.
-                // Counted so that a test naming a peer that was never registered fails on the
-                // counter rather than on a silence it has to work backwards from.
-                sendsDropped++;
-                return;
+                return SendDropReason.NO_ADDRESS;
             }
             byte[] copy = new byte[datagram.remaining()];
             datagram.duplicate().get(copy);
             mailbox.offer(copy);
+            return null;
         }
 
         @Override
@@ -100,11 +98,6 @@ public final class LoopbackNetwork {
             }
             handler.onDatagram(ByteBuffer.wrap(bytes));
             return 1;
-        }
-
-        @Override
-        public long sendsDropped() {
-            return sendsDropped;
         }
 
         @Override

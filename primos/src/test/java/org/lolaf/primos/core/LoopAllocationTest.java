@@ -18,6 +18,7 @@ package org.lolaf.primos.core;
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.VirtualClock;
 import org.lolaf.primos.transport.DatagramHandler;
@@ -173,6 +174,20 @@ class LoopAllocationTest {
     }
 
     /**
+     * A socket refusing every send is one event per datagram on the timer path, and a listener told about each must
+     * cost what it costs when they all leave.
+     */
+    @Test
+    void a_counting_listener_told_of_refused_sends_adds_nothing() {
+        Counting told = new Counting();
+        long leaving = bytesPerTurn(witness(new ReplayingTransport(null), new Counting()));
+        long refused = bytesPerTurn(witness(new ReplayingTransport(null, SendDropReason.SOCKET_ERROR), told));
+
+        assertThat(refused - leaving).isLessThan(8L);
+        assertThat(told.events).as("otherwise the measurement above is vacuous").isPositive();
+    }
+
+    /**
      * The negative pair, and it earned itself immediately: the first version of the measurement
      * above replayed a <em>heartbeat</em>, which fires no stats event at all, so it was weighing a
      * listener that was never called.
@@ -241,6 +256,10 @@ class LoopAllocationTest {
     }
 
     private ElectionNode witness(Transport transport) {
+        return witness(transport, org.lolaf.primos.PrimosStatsListener.NONE);
+    }
+
+    private ElectionNode witness(Transport transport, org.lolaf.primos.PrimosStatsListener stats) {
         ClusterConfig config = ClusterConfig.builder()
                 .applicationName("t")
                 .nodeId(1)
@@ -249,7 +268,8 @@ class LoopAllocationTest {
                         Peer.application(PEER_B, "sim", 7002)))
                 .build();
         ElectionNode node = new ElectionNode(config, new MemoryStateStore(), transport, clock,
-                new Random(1L), MessageAuthenticator.disabled());
+                new Random(1L), MessageAuthenticator.disabled(), new org.lolaf.primos.PrimosListener() {
+                }, stats);
         node.start();
         return node;
     }
@@ -268,6 +288,11 @@ class LoopAllocationTest {
 
         @Override
         public void onDatagramDropped(org.lolaf.primos.DropReason reason) {
+            events++;
+        }
+
+        @Override
+        public void onSendDropped(SendDropReason reason) {
             events++;
         }
 
@@ -294,14 +319,20 @@ class LoopAllocationTest {
     private static final class ReplayingTransport implements Transport {
 
         private final ByteBuffer datagram;
+        private final SendDropReason sendOutcome;
 
         private ReplayingTransport(ByteBuffer datagram) {
+            this(datagram, null);
+        }
+
+        private ReplayingTransport(ByteBuffer datagram, SendDropReason sendOutcome) {
             this.datagram = datagram;
+            this.sendOutcome = sendOutcome;
         }
 
         @Override
-        public void send(int peerId, ByteBuffer datagram) {
-            // nothing to do
+        public SendDropReason send(int peerId, ByteBuffer datagram) {
+            return sendOutcome;
         }
 
         @Override
@@ -312,11 +343,6 @@ class LoopAllocationTest {
             datagram.position(0).limit(datagram.capacity());
             handler.onDatagram(datagram);
             return 1;
-        }
-
-        @Override
-        public long sendsDropped() {
-            return 0;
         }
 
         @Override

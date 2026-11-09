@@ -71,7 +71,7 @@ Everything else on this page is diagnosis after that alert has fired.
 | `primos.role` | gauge | 1 for the role held, tagged `role` |
 | `primos.term` | gauge | the term this node is in, which is the fencing token |
 | `primos.node.running` | gauge | 1 while started: separates a node nobody started from a healthy follower |
-| `primos.candidate` | gauge | 1 while this node stands for election; summed across a cluster, 0 means nobody can take over |
+| `primos.electable` | gauge | 1 while this node stands for election; summed across a cluster, 0 means nobody can take over |
 | `primos.voters` | gauge | voters in the configured cluster |
 | `primos.quorum.required` | gauge | votes needed to lead |
 | `primos.peer.up` | gauge | 1 while a peer answers probes |
@@ -90,6 +90,7 @@ they say how close the cluster is to having no leader at all.
 | `primos.handover.no.successor` | counter | transfers that found no follower standing for election |
 | `primos.probe.rtt` | timer | every probe round trip, per peer |
 | `primos.datagrams.dropped` | counter | drops, tagged `reason` |
+| `primos.sends.dropped` | counter | datagrams this node never got onto the network, tagged `reason` = `socket_error`, `transport_closed` or `no_address` |
 | `primos.peer.down` | counter | times a peer stopped answering |
 | `primos.departures.observed` | counter | peers that announced a shutdown |
 | `primos.timing.mismatches` | counter | peers running different intervals from this node |
@@ -161,9 +162,9 @@ Every served cluster gets the whole node table above, tagged with its own name. 
 The routing meters carry `node` and **no `application`**: the meaning of `unroutable` is precisely that the datagram
 could not be attributed to a cluster.
 
-Alert on **`primos.witness.routing{reason="undeliverable_replies"}`**. It should stay at zero, and a witness that
-silently fails to answer is indistinguishable from a witness nobody is asking, while the cluster on the other end waits
-out an election timeout for a vote that was never coming.
+Alert on **`primos.sends.dropped`** for a served cluster, on any `reason` but `transport_closed`. It should stay at zero,
+and a witness that silently fails to answer is indistinguishable from a witness nobody is asking, while the cluster on
+the other end waits out an election timeout for a vote that was never coming.
 
 `awaiting_node_config` is ordinary and transient while a new cluster starts, and means something else when it is
 sustained: a cluster is talking to this witness and never saying who it is.

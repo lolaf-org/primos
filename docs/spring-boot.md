@@ -417,7 +417,7 @@ With actuator on the classpath, `/actuator/health` reports:
     "role": "FOLLOWER",
     "term": 7,
     "leader": "3",
-    "candidate": true
+    "electable": true
   }
 }
 ```
@@ -428,7 +428,7 @@ balancer during an ordinary election: a whole-cluster outage caused by the healt
 `FAILED` means the node thread died and this node will never lead again; restart the process rather than waiting for it
 to recover. `"state": "not-started"` stays `UP`, since under `manual` it is the expected state until you start the
 node, but it says so, because a deployment that forgot to start its node looks identical to a healthy one from every
-other angle. `"candidate": false` is a node taken out of elections with `setCandidate(false)`: still `UP`, since it
+other angle. `"electable": false` is a node taken out of elections with `setElectable(false)`: still `UP`, since it
 votes; see [Planned switchover and maintenance](leadership-control.md).
 
 ## Metrics

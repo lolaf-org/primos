@@ -30,8 +30,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -278,6 +276,58 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_rescan_interval_below_a_second_is_refused_by_name() throws IOException {
+        settings("reload.rescan.seconds=0");
+
+        assertThatThrownBy(this::open)
+                .as("the check runs on the witness's own loop, which would then do nothing else")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reload.rescan.seconds");
+    }
+
+    @Test
+    void a_rescan_interval_of_one_second_is_accepted() throws IOException {
+        settings("reload.rescan.seconds=1");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().rescanInterval()).isEqualTo(Duration.ofSeconds(1));
+        }
+    }
+
+    @Test
+    void a_relative_file_secret_is_found_beside_the_configuration() throws IOException {
+        Files.createDirectories(directory.resolve("keys"));
+        Files.write(directory.resolve("keys/orders"), "s3cret".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:keys/orders");
+
+        try (FileConfigStore store = open()) {
+            assertThat(store.current().settings().keyring().keys().get(0).secret())
+                    .as("a witness started from another directory must still find its keys")
+                    .isEqualTo("s3cret".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void a_malformed_base64_secret_names_its_key_and_not_its_value() throws IOException {
+        settings("secret.orders.value = base64:not*base64");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("secret.orders.value")
+                .hasMessageNotContaining("not*base64");
+    }
+
+    @Test
+    void an_unknown_config_source_is_refused_by_name() throws IOException {
+        settings("config.source=clusterr");
+
+        assertThatThrownBy(this::open)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("config.source")
+                .hasMessageContaining("clusterr");
+    }
+
+    @Test
     void a_key_whose_secret_decodes_to_nothing_is_refused_at_load() throws IOException {
         settings("secret.orders.value = base64:");
 
@@ -495,15 +545,12 @@ class FileConfigStoreTest {
     @Test
     void a_new_application_is_picked_up_without_a_restart() throws IOException {
         try (FileConfigStore store = open()) {
-            Recording changes = new Recording();
-            store.addListener(changes);
             assertThat(store.current().applications()).isEmpty();
 
             application("orders", "");
             assertThat(rescan(store)).isTrue();
 
             assertThat(store.current().applicationNames()).containsExactly("orders");
-            assertThat(changes.added).containsExactly("orders");
         }
     }
 
@@ -511,14 +558,10 @@ class FileConfigStoreTest {
     void a_removed_application_stops_being_served_but_keeps_its_state() throws IOException {
         application("orders", "");
         try (FileConfigStore store = open()) {
-            Recording changes = new Recording();
-            store.addListener(changes);
-
             Files.delete(applicationFile("orders"));
             assertThat(rescan(store)).isTrue();
 
             assertThat(store.current().applications()).isEmpty();
-            assertThat(changes.removed).containsExactly("orders");
         }
     }
 
@@ -661,17 +704,12 @@ class FileConfigStoreTest {
         settings("config.source=file");
         application("orders", "");
 
-        Recording changes = new Recording();
         try (FileConfigStore store = open()) {
-            store.addListener(changes);
             ApplicationConfig before = store.current().application("orders");
 
             settings("config.source=cluster");
             assertThat(rescan(store)).isTrue();
 
-            assertThat(changes.added).isEmpty();
-            assertThat(changes.changed).isEmpty();
-            assertThat(changes.removed).isEmpty();
             assertThat(store.current().application("orders"))
                     .as("no tenant is rebuilt for a change that was not theirs")
                     .isEqualTo(before);
@@ -729,16 +767,11 @@ class FileConfigStoreTest {
         application("orders", "");
 
         try (FileConfigStore store = open()) {
-            Recording changes = new Recording();
-            store.addListener(changes);
-
             for (int tick = 0; tick < 5; tick++) {
                 assertThat(rescan(store))
                         .as("the steady state must cost a checksum, not a parse of every file")
                         .isFalse();
             }
-            assertThat(changes.added).isEmpty();
-            assertThat(changes.changed).isEmpty();
         }
     }
 
@@ -824,27 +857,5 @@ class FileConfigStoreTest {
 
     private Path applicationFile(String name) {
         return directory.resolve("applications").resolve(name + ".properties");
-    }
-
-    private static final class Recording implements ConfigChangeListener {
-
-        private final List<String> added = new ArrayList<>();
-        private final List<String> changed = new ArrayList<>();
-        private final List<String> removed = new ArrayList<>();
-
-        @Override
-        public void onApplicationAdded(ApplicationConfig application) {
-            added.add(application.name());
-        }
-
-        @Override
-        public void onApplicationChanged(ApplicationConfig previous, ApplicationConfig current) {
-            changed.add(current.name());
-        }
-
-        @Override
-        public void onApplicationRemoved(ApplicationConfig application) {
-            removed.add(application.name());
-        }
     }
 }

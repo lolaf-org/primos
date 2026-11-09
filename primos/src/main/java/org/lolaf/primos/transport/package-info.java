@@ -28,9 +28,8 @@
  * supplies the second implementation, and a blocking loopback network supplies a third. All of them
  * answer the same contract test, which is what keeps the contract honest.
  *
- * <p>It is message-oriented and connectionless on purpose, and a transport may drop anything,
- * but it must be able to say how much of what it dropped, which is why
- * {@link org.lolaf.primos.transport.Transport#sendsDropped()} is on the SPI rather than left to
- * each implementation to spell its own way.
+ * <p>It is message-oriented and connectionless on purpose, and a transport may drop anything, but it must say what it
+ * dropped, which is why {@link org.lolaf.primos.transport.Transport#send} returns the reason rather than leaving each
+ * implementation to keep its own count.
  */
 package org.lolaf.primos.transport;

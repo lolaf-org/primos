@@ -15,7 +15,8 @@
  */
 package org.lolaf.primos.witness;
 
-import lombok.AllArgsConstructor;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +38,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
@@ -165,7 +165,7 @@ public final class WitnessServer implements AutoCloseable {
      * reader when those coincide, which is a health check that fails <em>because</em> a tenant was
      * being onboarded. The loop's own use is unchanged: one writer, and lookups still hash.
      */
-    private final Map<String, Served> served = new ConcurrentHashMap<>();
+    private final Map<String, Tenant> tenants = new ConcurrentHashMap<>();
     private final Set<String> namesSeen = new HashSet<>();
 
     private volatile boolean stopped;
@@ -193,7 +193,7 @@ public final class WitnessServer implements AutoCloseable {
     private final Map<String, MessageAuthenticator> admissionRings = new HashMap<>();
 
     /** Tenants whose node could not be created. Concurrent because a health endpoint reads it from another thread. */
-    private final Set<String> unopened = ConcurrentHashMap.newKeySet();
+    private final Set<String> failedToOpen = ConcurrentHashMap.newKeySet();
 
     private WitnessServer(Builder builder) {
         this.configStore = Objects.requireNonNull(builder.configStore, "configStore");
@@ -211,10 +211,8 @@ public final class WitnessServer implements AutoCloseable {
                 : StateStoreFactory.perApplicationDirectory(settings.stateDirectory());
 
         try {
-            this.channel = DatagramChannel.open();
-            this.channel.configureBlocking(false);
-            setIfSupported(StandardSocketOptions.SO_RCVBUF, builder.receiveBufferBytes);
-            this.channel.bind(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress());
+            this.channel = boundChannel(builder.bindAddress != null ? builder.bindAddress : settings.bindAddress(),
+                    builder.receiveBufferBytes);
             this.selector = Selector.open();
             this.channel.register(selector, SelectionKey.OP_READ);
         } catch (IOException e) {
@@ -266,7 +264,7 @@ public final class WitnessServer implements AutoCloseable {
      * Runs until {@link #stop()}.
      */
     public void run() {
-        log.info("witness {} is serving {} application(s)", nodeId, served.size());
+        log.info("witness {} is serving {} application(s)", nodeId, tenants.size());
         while (!stopped) {
             runOnce(MAX_WAIT_NANOS);
         }
@@ -286,7 +284,7 @@ public final class WitnessServer implements AutoCloseable {
         awaitReadable(wait);
         drainSocket();
 
-        for (Served tenant : new ArrayList<>(served.values())) {
+        for (Tenant tenant : tenants.values()) {
             if (tenant.failed) {
                 continue;
             }
@@ -318,7 +316,7 @@ public final class WitnessServer implements AutoCloseable {
     public Set<String> servedApplications() {
         // Sorted rather than in insertion order: a concurrent map has no order of its own, and a
         // set of names that reshuffles between two reads is a diagnostic nobody can diff.
-        return Collections.unmodifiableSet(new TreeSet<>(served.keySet()));
+        return Collections.unmodifiableSet(new TreeSet<>(tenants.keySet()));
     }
 
     /**
@@ -349,8 +347,8 @@ public final class WitnessServer implements AutoCloseable {
      * since that rebuilds its node.
      */
     public Set<String> quarantinedApplications() {
-        Set<String> quarantined = new TreeSet<>(unopened);
-        for (Served tenant : served.values()) {
+        Set<String> quarantined = new TreeSet<>(failedToOpen);
+        for (Tenant tenant : tenants.values()) {
             if (tenant.failed) {
                 quarantined.add(tenant.name);
             }
@@ -359,27 +357,23 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     /**
-     * Why datagrams were not handed to any application, and what could not be answered.
+     * Why datagrams were not handed to any application.
      */
     public RoutingStats routing() {
         long overflowed = 0;
-        long undeliverable = 0;
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             overflowed += tenant.transport.overflowed();
-            undeliverable += tenant.transport.sendsDropped();
         }
         return new RoutingStats(unroutable, unservedApplication, autoRegistrationsRefused,
                 unusableName, droppedForFailedApplication, autoRegistrations, awaitingNodeConfig,
-                registrationBadTag, overflowed,
-                undeliverable);
+                registrationBadTag, overflowed);
     }
 
     /**
      * The term one application currently holds, for tests and diagnostics.
      */
     public long currentTerm(String application) {
-        Served found = require(application);
-        return found.node.currentTerm();
+        return require(application).node.currentTerm();
     }
 
     /** Identity changes on a rebuild, which is how a test tells one happened. */
@@ -391,12 +385,11 @@ public final class WitnessServer implements AutoCloseable {
      * Which node this application's vote is currently spent on, or -1.
      */
     public int votedFor(String application) {
-        Served found = require(application);
-        return found.node.votedFor();
+        return require(application).node.votedFor();
     }
 
-    private Served require(String application) {
-        Served found = served.get(application);
+    private Tenant require(String application) {
+        Tenant found = tenants.get(application);
         if (found == null) {
             throw new IllegalArgumentException("this witness does not serve '" + application + "'");
         }
@@ -405,7 +398,7 @@ public final class WitnessServer implements AutoCloseable {
 
     private long nextDeadlineNanos(long now) {
         long deadline = configStore.nextCheckNanos(now);
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             if (!tenant.failed) {
                 deadline = Math.min(deadline, tenant.node.nextDeadlineNanos());
             }
@@ -429,7 +422,7 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void drainSocket() {
-        for (int read = 0; !closed && read < MAX_DATAGRAMS_PER_TURN; read++) {
+        for (int read = 0; read < MAX_DATAGRAMS_PER_TURN; read++) {
             receiveBuffer.clear();
             SocketAddress source;
             try {
@@ -463,7 +456,7 @@ public final class WitnessServer implements AutoCloseable {
             unroutable++;
             return;
         }
-        Served target = served.get(application);
+        Tenant target = tenants.get(application);
         if (target == null) {
             target = admit(application, datagram, MessageDecoder.peekMessageType(datagram),
                     source);
@@ -478,12 +471,7 @@ public final class WitnessServer implements AutoCloseable {
         target.transport.offer(datagram, source);
     }
 
-    /**
-     * Decides what to do with a name this witness is not currently serving.
-     *
-     * @return the application now serving it, or null if the datagram is to be dropped
-     */
-    private Served admit(String application, ByteBuffer datagram, MessageType claimed,
+    private Tenant admit(String application, ByteBuffer datagram, MessageType claimed,
                          InetSocketAddress source) {
         boolean firstSighting = rememberName(application);
         WitnessSettings settings = configStore.current().settings();
@@ -548,7 +536,10 @@ public final class WitnessServer implements AutoCloseable {
         //
         // The keys tried are the ones that claim this name, or those claiming nothing when none
         // does, so a name somebody has reserved cannot be created by a holder of the general key.
-        if (!admissionRing(application, settings).verify(datagram)) {
+        MessageAuthenticator ring = admissionRing(application, settings);
+        // A disabled ring verifies anything, which is right only on a witness that holds no keys at all.
+        boolean covered = ring.isEnabled() || settings.keyring().isEmpty();
+        if (!covered || !ring.verify(datagram)) {
             registrationBadTag++;
             if (firstSighting) {
                 log.warn("dropping a config message for unserved application '{}' from {}: no key"
@@ -567,7 +558,7 @@ public final class WitnessServer implements AutoCloseable {
 
     private boolean limitAllows(String application, InetSocketAddress source, WitnessSettings settings,
                                 boolean firstSighting) {
-        if (served.size() < settings.clusterApplicationLimit()) {
+        if (tenants.size() < settings.clusterApplicationLimit()) {
             return true;
         }
         autoRegistrationsRefused++;
@@ -580,9 +571,9 @@ public final class WitnessServer implements AutoCloseable {
         return false;
     }
 
-    private Served register(String application, InetSocketAddress source, WitnessSettings settings) {
-        String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
-        if (!unopened.contains(application)) {
+    private Tenant register(String application, InetSocketAddress source, WitnessSettings settings) {
+        String nearMiss = ApplicationNames.nearMiss(application, tenants.keySet());
+        if (!failedToOpen.contains(application)) {
             log.warn("auto-registering application '{}', first heard from {}. Nobody configured it;"
                     + " config.source=cluster is serving it anyway.", application, source);
         }
@@ -596,7 +587,7 @@ public final class WitnessServer implements AutoCloseable {
         }
         // An auto-registered application has no file to say otherwise, so it takes the
         // witness-wide intervals. If those are wrong for it, its nodes will now say so.
-        Served opened = openIsolated(new ApplicationConfig(application, settings.defaultTimings(), true));
+        Tenant opened = tryOpen(new ApplicationConfig(application, settings.defaultTimings(), true));
         if (opened != null) {
             autoRegistrations++;
         }
@@ -623,7 +614,7 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void warnUnserved(String application, InetSocketAddress source) {
-        String nearMiss = ApplicationNames.nearMiss(application, served.keySet());
+        String nearMiss = ApplicationNames.nearMiss(application, tenants.keySet());
         if (nearMiss != null) {
             log.warn("dropping traffic for unserved application '{}' from {}, which is one or two"
                     + " characters from '{}'. That is very likely a typo in one cluster's"
@@ -636,9 +627,6 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * @return whether this name had not been seen before, so it is worth a log line
-     */
     private boolean rememberName(String application) {
         if (namesSeen.size() >= MAX_REMEMBERED_NAMES) {
             // Full. Stop logging rather than stop working: the counters still tell the story, and
@@ -650,22 +638,22 @@ public final class WitnessServer implements AutoCloseable {
 
     private void applyConfiguration() {
         ConfigSnapshot snapshot = configStore.current();
-        unopened.clear();
-        boolean follows = follows();
-        if (!follows) {
+        failedToOpen.clear();
+        boolean following = followsStatedTimings();
+        if (!following) {
             // First, so a rebuild below for any other reason already runs on the files' intervals.
-            served.values().forEach(tenant -> tenant.adoptedTimings = null);
+            tenants.values().forEach(tenant -> tenant.adoptedTimings = null);
         }
 
         for (ApplicationConfig applicationConfig : snapshot.applications().values()) {
-            Served current = served.get(applicationConfig.name());
+            Tenant current = tenants.get(applicationConfig.name());
             if (current == null) {
-                openIsolated(applicationConfig);
+                tryOpen(applicationConfig);
             } else if (!current.config.equals(applicationConfig)) {
                 rebuild(current, applicationConfig);
             }
         }
-        for (Served tenant : new ArrayList<>(served.values())) {
+        for (Tenant tenant : tenants.values()) {
             boolean heldByCluster = tenant.config.isAutoRegistered() && snapshot.settings().configSource().isCluster();
             if (snapshot.serves(tenant.name) || heldByCluster) {
                 continue;
@@ -673,11 +661,11 @@ public final class WitnessServer implements AutoCloseable {
             // Its state stays on disk, deliberately. A cluster that comes back later still needs
             // the vote it was given remembered, and deleting it is the double-vote bug.
             log.info("no longer serving application '{}'; its state is left in place", tenant.name);
-            served.remove(tenant.name);
+            tenants.remove(tenant.name);
             tenant.close();
         }
-        for (Served tenant : served.values()) {
-            boolean sourceChanged = tenant.node.config().isFollowingStatedTimings() != follows;
+        for (Tenant tenant : tenants.values()) {
+            boolean sourceChanged = tenant.node.config().isFollowingStatedTimings() != following;
             if (sourceChanged || !tenant.keys.equals(keysFor(tenant.name))) {
                 rebuild(tenant, tenant.config);
             }
@@ -688,7 +676,7 @@ public final class WitnessServer implements AutoCloseable {
         return configStore.current().settings().keyring().candidatesFor(application);
     }
 
-    private Served open(ApplicationConfig applicationConfig) {
+    private Tenant open(ApplicationConfig applicationConfig) {
         String application = applicationConfig.name();
         if (!ApplicationNames.isUsableAsDirectory(application)) {
             throw new IllegalArgumentException("application name '" + application
@@ -706,11 +694,11 @@ public final class WitnessServer implements AutoCloseable {
             }
             // Before the stats factory: a tenant being retried must not bind its meters again each time.
             store.load();
-            Served opened = new Served(applicationConfig, transport, store, statsListenerFor(application));
+            Tenant opened = new Tenant(applicationConfig, transport, store, statsListenerFor(application));
             opened.keys = keysFor(application);
-            opened.node = newNode(applicationConfig, opened.transport, store, null, opened.stats);
+            opened.node = newNode(opened);
             opened.node.start();
-            served.put(application, opened);
+            tenants.put(application, opened);
             return opened;
         } catch (RuntimeException e) {
             transport.close();
@@ -719,18 +707,13 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * {@link #open} for a server already running, where one tenant's broken storage must not end the loop.
-     *
-     * @return null if it could not be opened; a reload or its next announcement tries again
-     */
-    private Served openIsolated(ApplicationConfig applicationConfig) {
+    private Tenant tryOpen(ApplicationConfig applicationConfig) {
         try {
-            Served opened = open(applicationConfig);
-            unopened.remove(applicationConfig.name());
+            Tenant opened = open(applicationConfig);
+            failedToOpen.remove(applicationConfig.name());
             return opened;
         } catch (RuntimeException e) {
-            if (unopened.size() < MAX_REMEMBERED_NAMES && unopened.add(applicationConfig.name())) {
+            if (failedToOpen.size() < MAX_REMEMBERED_NAMES && failedToOpen.add(applicationConfig.name())) {
                 log.error("application '{}' could not be opened and is not being served. Every other application is"
                         + " unaffected.", applicationConfig.name(), e);
             }
@@ -738,22 +721,14 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    /**
-     * Replaces an application's node after its configuration changed, most often a rotated secret.
-     *
-     * <p>The node is rebuilt rather than mutated because the secret is baked into its codec, and
-     * that is safe precisely because the node holds nothing that matters: the term and the vote
-     * live in the store, which is kept and re-read, so a rebuilt node comes back knowing exactly
-     * what it had promised. Learned addresses are kept too, in the transport, so replies keep
-     * flowing without waiting for every node to speak again.
-     */
-    private void rebuild(Served tenant, ApplicationConfig updated) {
+    private void rebuild(Tenant tenant, ApplicationConfig updated) {
         log.info("application '{}' was reconfigured", updated.name());
         tenant.config = updated;
         tenant.keys = keysFor(updated.name());
         ElectionNode replacement;
         try {
-            replacement = newNode(updated, tenant.transport, tenant.store, tenant.adoptedTimings, tenant.stats);
+            // The term and the vote are in the store, kept and re-read, so the new node remembers its promises.
+            replacement = newNode(tenant);
             replacement.start();
         } catch (RuntimeException e) {
             // Not left on the old node: after a rotation that one still honours the key just removed.
@@ -764,40 +739,25 @@ public final class WitnessServer implements AutoCloseable {
         }
         tenant.node = replacement;
         tenant.failed = false;
+        relearnEndpoints(tenant);
+    }
+
+    private static void relearnEndpoints(Tenant tenant) {
         for (Map.Entry<Integer, InetSocketAddress> known : tenant.transport.endpoints()) {
             tenant.node.learnPeer(Peer.application(known.getKey(),
                     known.getValue().getHostString(), known.getValue().getPort()));
         }
     }
 
-    /**
-     * Which profile this application's node runs, in the order that settles who wins.
-     *
-     * <p>The builder override first, because a caller assembling a server in code (a test driving
-     * deliberately fast intervals among them) means it and has no file to say so. Then what the
-     * cluster stated, which is the point of {@link ConfigSource#CLUSTER}. Then the files.
-     */
-    private Timings timings(ApplicationConfig applicationConfig, Timings adopted) {
+    private Timings effectiveTimings(Tenant tenant) {
         if (timingsOverride != null) {
             return timingsOverride;
         }
-        return adopted != null ? adopted : applicationConfig.timings();
+        return tenant.adoptedTimings != null ? tenant.adoptedTimings : tenant.config.timings();
     }
 
-    /**
-     * Follows a cluster's own intervals, when its operator has asked this witness to.
-     *
-     * <p>This is the whole of what {@link ConfigSource#CLUSTER} buys beyond registration: a tenant
-     * retunes its own nodes and its witness follows, with nobody editing a file here. The witness
-     * is the one member of a cluster whose configuration is owned by the wrong party (the tenant
-     * owns the profile, the witness operator owns the file) and this is what closes that.
-     *
-     * <p>The rebuild is the existing reconfiguration path, so it keeps the state store and every
-     * learned address: the term and the vote are on disk and are re-read, so the node comes back
-     * knowing exactly what it had promised. Nothing here can move a term or spend a vote.
-     */
-    private void adoptStatedTimings(Served tenant) {
-        if (tenant.failed || !follows()) {
+    private void adoptStatedTimings(Tenant tenant) {
+        if (tenant.failed || !followsStatedTimings()) {
             return;
         }
         Timings stated = tenant.node.observedTimings();
@@ -813,19 +773,6 @@ public final class WitnessServer implements AutoCloseable {
         rebuild(tenant, tenant.config);
     }
 
-    /**
-     * The sink for one application, resolved once when it starts being served and kept across
-     * every rebuild.
-     *
-     * <p>Once per application rather than once per node, because a node is rebuilt whenever a
-     * secret rotates or a cluster states new intervals, and a binder that registers its meters
-     * when it is created would register them again on each rebuild.
-     *
-     * <p>A factory that throws or returns null is a bug in the embedding application, and it is
-     * reported as one, but it does not stop this witness serving. The rule the SPI already states
-     * for a listener that throws holds for the call that produces it: a metrics binder must not be
-     * able to take a cluster's witness away from it.
-     */
     private PrimosStatsListener statsListenerFor(String application) {
         PrimosStatsListener sink;
         try {
@@ -850,30 +797,22 @@ public final class WitnessServer implements AutoCloseable {
         return new RoutedTransport(application, channel, selector);
     }
 
-    private ElectionNode newNode(ApplicationConfig applicationConfig, RoutedTransport transport,
-                                 StateStore store, Timings adopted, PrimosStatsListener stats) {
+    private ElectionNode newNode(Tenant tenant) {
         ClusterConfig.ClusterConfigBuilder config = ClusterConfig.builder()
-                .applicationName(applicationConfig.name())
+                .applicationName(tenant.name)
                 .nodeId(nodeId)
                 .asWitness()
                 .learnedMembership()
-                .timings(timings(applicationConfig, adopted))
+                .timings(effectiveTimings(tenant))
                 .voteLogging(voteLogging);
-        if (follows()) {
+        if (followsStatedTimings()) {
             config.followsStatedTimings();
         }
-        return new ElectionNode(config.build(), store, transport, clock, random,
-                authenticatorFor(applicationConfig.name()), NO_EVENTS, stats);
+        return new ElectionNode(config.build(), tenant.store, tenant.transport, clock, random,
+                authenticatorFor(tenant.name), NO_EVENTS, tenant.stats);
     }
 
-    /**
-     * Whether this witness applies what its clusters state, rather than only reporting it.
-     *
-     * <p>The builder override is part of the question, not beside it: a caller that passed
-     * intervals in code gets them whatever any datagram says, so nothing is being followed and a
-     * mismatch is a real one worth reporting.
-     */
-    private boolean follows() {
+    private boolean followsStatedTimings() {
         return timingsOverride == null
                 && configStore.current().settings().configSource().isCluster();
     }
@@ -889,14 +828,7 @@ public final class WitnessServer implements AutoCloseable {
         return authenticator;
     }
 
-    /**
-     * Stops serving an application whose node has failed, without stopping the server.
-     *
-     * <p>The realistic cause is storage that can no longer make a vote durable. Continuing to
-     * answer for that application would mean voting on state it may forget, so it stops; every
-     * other tenant keeps its failover, because one broken disk must not be a shared outage.
-     */
-    private void quarantineIfFailed(Served tenant) {
+    private void quarantineIfFailed(Tenant tenant) {
         if (tenant.failed || !tenant.node.isFailed()) {
             return;
         }
@@ -919,10 +851,10 @@ public final class WitnessServer implements AutoCloseable {
     }
 
     private void closeQuietly() {
-        for (Served tenant : served.values()) {
+        for (Tenant tenant : tenants.values()) {
             tenant.close();
         }
-        served.clear();
+        tenants.clear();
         try {
             configStore.close();
         } catch (RuntimeException e) {
@@ -941,18 +873,31 @@ public final class WitnessServer implements AutoCloseable {
         }
     }
 
-    private <T> void setIfSupported(SocketOption<T> option, T value) {
+    private static DatagramChannel boundChannel(InetSocketAddress address, int receiveBufferBytes) throws IOException {
+        DatagramChannel channel = DatagramChannel.open();
         try {
-            channel.setOption(option, value);
+            channel.configureBlocking(false);
+            setReceiveBuffer(channel, receiveBufferBytes);
+            channel.bind(address);
+            return channel;
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
+    }
+
+    private static void setReceiveBuffer(DatagramChannel channel, int bytes) {
+        try {
+            channel.setOption(StandardSocketOptions.SO_RCVBUF, bytes);
         } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
-            log.debug("this platform does not support {}: {}", option.name(), e.toString());
+            log.debug("this platform does not support SO_RCVBUF: {}", e.toString());
         }
     }
 
     /**
      * One served application: its configuration, its socket view, its state and its voter.
      */
-    private static final class Served {
+    private static final class Tenant {
 
         private final String name;
         private final RoutedTransport transport;
@@ -989,7 +934,7 @@ public final class WitnessServer implements AutoCloseable {
          */
         private Timings adoptedTimings;
 
-        private Served(ApplicationConfig config, RoutedTransport transport, StateStore store,
+        private Tenant(ApplicationConfig config, RoutedTransport transport, StateStore store,
                        PrimosStatsListener stats) {
             this.name = config.name();
             this.config = config;
@@ -998,13 +943,6 @@ public final class WitnessServer implements AutoCloseable {
             this.stats = stats;
         }
 
-        /**
-         * Tells this application's cluster the witness is going away, then releases everything.
-         *
-         * <p>Worth the datagram. A cluster whose witness has silently gone is back to the fault
-         * tolerance it has without one, and the sooner it says so the sooner somebody looks: a
-         * two-node pair in that state tolerates zero failures and looks perfectly healthy.
-         */
         private void close() {
             if (!failed && node != null) {
                 try {
@@ -1023,7 +961,6 @@ public final class WitnessServer implements AutoCloseable {
      * Why datagrams did not reach an application.
      */
     @Value
-    @AllArgsConstructor
     public static class RoutingStats {
 
         /**
@@ -1061,8 +998,7 @@ public final class WitnessServer implements AutoCloseable {
          *
          * <p>Ordinary and transient while a new cluster starts: its probes and votes arrive before
          * the config message that creates it. Sustained, it means a cluster is talking to this
-         * witness and never saying who it is: a version mismatch, or a name nobody configured
-         * under {@code ConfigSource.FILE}.
+         * witness and never saying who it is, most likely a version mismatch.
          */
         long awaitingNodeConfig;
 
@@ -1084,21 +1020,12 @@ public final class WitnessServer implements AutoCloseable {
          */
         long inboxOverflowed;
 
-        /**
-         * Replies this witness never put on the wire, for any reason.
-         *
-         * <p>Expected to stay at zero, and worth alerting on if it does not. A witness that
-         * silently fails to answer is indistinguishable from a witness nobody is asking, and the
-         * cluster on the other end is the one that pays: it waits out an election timeout for a
-         * vote that was never coming.
-         */
-        long undeliverableReplies;
-
     }
 
     /**
      * Builds a {@link WitnessServer}.
      */
+    @NoArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class Builder {
 
         /**
@@ -1156,9 +1083,6 @@ public final class WitnessServer implements AutoCloseable {
          */
         private Function<String, PrimosStatsListener> statsListeners =
                 application -> PrimosStatsListener.NONE;
-
-        private Builder() {
-        }
 
         /**
          * Registers a {@link PrimosStatsListener} per served application.

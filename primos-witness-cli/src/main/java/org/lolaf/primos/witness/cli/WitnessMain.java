@@ -115,13 +115,6 @@ public final class WitnessMain implements Callable<Integer> {
         System.exit(status);
     }
 
-    /**
-     * Asks the server to stop and waits for its own thread to finish closing.
-     *
-     * <p>Bounded, because a shutdown that hangs is worse than one that is a little abrupt: state
-     * is fsynced before it is acted on, so an exit that gives up here loses nothing that had been
-     * promised.
-     */
     private static void stopAndAwait(WitnessServer server, CountDownLatch closed) {
         server.stop();
         try {

@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos.wire;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * The byte layout every primos datagram follows.
  *
@@ -30,8 +33,8 @@ package org.lolaf.primos.wire;
  *      0     4  magic 'PRMS'
  *      4     1  version
  *      5     1  message type
- *      6     2  flags (bit 0 = pre-vote, bit 1 = declines candidacy; the rest reserved, sent zero,
- *                 ignored on receive)
+ *      6     2  flags (bit 0 = pre-vote, bit 1 = not electable, bit 2 = handover; the rest
+ *                 reserved, sent zero, ignored on receive)
  *      8    32  application name, UTF-8, zero-padded
  *     40     8  term
  *     48     4  senderId
@@ -42,6 +45,7 @@ package org.lolaf.primos.wire;
  * <p>Big-endian throughout, which is both network byte order and {@link java.nio.ByteBuffer}'s
  * default, so nothing ever calls {@code order()}.
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class WireFormat {
 
     /**
@@ -75,16 +79,6 @@ public final class WireFormat {
     public static final int APPLICATION_BYTES = 32;
 
     /**
-     * Length of a tag from the default HMAC-SHA256.
-     *
-     * <p>Not a property of the format: the tag length follows whichever {@code Mac} a cluster is
-     * configured with, and everything that measures a datagram asks
-     * {@link MessageAuthenticator#tagBytes()} rather than this. It is here because the layout above
-     * has to show a number, and this is the one almost every cluster will see.
-     */
-    public static final int DEFAULT_TAG_BYTES = 32;
-
-    /**
      * The largest datagram primos will send or accept.
      *
      * <p>576 bytes is the smallest IPv4 datagram every host must accept, less 60 of maximum IP
@@ -105,14 +99,11 @@ public final class WireFormat {
      * never hands leadership to it. Set rather than cleared, so a sender that predates it reads as
      * standing, which is what it does.
      */
-    public static final int FLAG_DECLINES_CANDIDACY = 0x0002;
+    public static final int FLAG_NOT_ELECTABLE = 0x0002;
 
     /**
      * Marks a real {@code RequestVote} as campaigning on a leader's own {@code TimeoutNow}, so a voter that has just
      * heard from that leader does not refuse it.
      */
     public static final int FLAG_HANDOVER = 0x0004;
-
-    private WireFormat() {
-    }
 }

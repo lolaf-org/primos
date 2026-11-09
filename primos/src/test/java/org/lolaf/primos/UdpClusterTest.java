@@ -323,13 +323,13 @@ class UdpClusterTest {
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
         PrimosNode leader = leaderOf(one, two, three);
 
-        leader.setCandidate(false);
+        leader.setElectable(false);
 
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1 && leader.role() == Role.FOLLOWER);
-        assertThat(leader.isCandidate()).isFalse();
+        assertThat(leader.isElectable()).isFalse();
         leader.stop();
         leader.start();
-        assertThat(leader.isCandidate()).as("kept across a stop and start").isFalse();
+        assertThat(leader.isElectable()).as("kept across a stop and start").isFalse();
     }
 
     @Test

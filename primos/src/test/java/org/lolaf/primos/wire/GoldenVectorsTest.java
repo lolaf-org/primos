@@ -34,6 +34,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class GoldenVectorsTest {
 
+    private static final int HMAC_SHA256_TAG_BYTES = 32;
+
     private static final String REQUEST_VOTE =
             "50524d53010100006f7264657273000000000000000000000000000000000000"
                     + "0000000000000000000000000000002a00000003";
@@ -180,11 +182,11 @@ class GoldenVectorsTest {
     void the_largest_authenticated_message_leaves_the_datagram_budget_untroubled() {
         // NODE_CONFIG took this title from PING when it was added: five u32s is a bigger payload
         // one u64. Still less than a quarter of the budget, and still fixed.
-        int largest = MessageType.NODE_CONFIG.messageBytes() + WireFormat.DEFAULT_TAG_BYTES;
+        int largest = MessageType.NODE_CONFIG.messageBytes() + HMAC_SHA256_TAG_BYTES;
 
         assertThat(largest).isEqualTo(104).isLessThan(WireFormat.MAX_DATAGRAM_BYTES);
         for (MessageType type : MessageType.values()) {
-            assertThat(type.messageBytes() + WireFormat.DEFAULT_TAG_BYTES)
+            assertThat(type.messageBytes() + HMAC_SHA256_TAG_BYTES)
                     .as("%s must not exceed the largest", type)
                     .isLessThanOrEqualTo(largest);
         }

@@ -39,9 +39,7 @@ import java.util.Objects;
 public final class WitnessKey {
 
     /**
-     * What this key is called, from {@code secret.<name>.value}. Reaches the log, and that is most
-     * of why it exists: <em>which</em> key admitted a tenant is the difference between a
-     * configuration somebody can explain and one that merely works.
+     * What this key is called, from {@code secret.<name>.value}, so a configuration error can say which key it means.
      */
     private final String name;
 
@@ -123,7 +121,7 @@ public final class WitnessKey {
     private void requireUsable() {
         try {
             MessageAuthenticator.keyring(Collections.singletonList(
-                    MessageAuthenticator.KeySpec.of(name, algorithm, secret)));
+                    MessageAuthenticator.KeySpec.of(algorithm, secret)));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("key '" + name + "' cannot be used: " + e.getMessage(), e);
         }

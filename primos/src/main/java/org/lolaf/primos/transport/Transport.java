@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.transport;
 
+import org.lolaf.primos.SendDropReason;
+
 import java.nio.ByteBuffer;
 
 /**
@@ -26,7 +28,7 @@ import java.nio.ByteBuffer;
  * simulation needs (dropping, delaying and reordering are all per message) so one SPI serves the
  * real transport and the simulated one without either compromising.
  *
- * <p><strong>Sending is fire-and-forget and may silently fail.</strong> There is no acknowledgement
+ * <p><strong>Sending is fire-and-forget.</strong> There is no acknowledgement
  * and no retry here, because Raft is already a retry protocol: a lost vote request is retried by
  * the next election timeout, a lost heartbeat by the next heartbeat interval. A transport that
  * retried would be duplicating work the algorithm does anyway, and doing it with less information.
@@ -42,12 +44,13 @@ public interface Transport extends AutoCloseable {
      * <p>The buffer's contents are consumed before this returns, so the caller may reuse it
      * immediately, which the node does, holding one send buffer for its whole life.
      *
-     * <p>Errors are not thrown. UDP sends fail routinely, and an ICMP port-unreachable can surface
-     * long after the fact; the algorithm's timers are the recovery mechanism, so a failure here is
-     * counted and logged rather than propagated. Letting it reach the node thread's catch-all would
-     * turn an unremarkable network event into a failed node.
+     * <p>A failure is returned rather than thrown. UDP sends fail routinely, and an ICMP port-unreachable can surface
+     * long after the fact; the algorithm's timers are the recovery mechanism, so letting one reach the node thread's
+     * catch-all would turn an unremarkable network event into a failed node.
+     *
+     * @return why the datagram never reached the network, or null once it was handed over
      */
-    void send(int peerId, ByteBuffer datagram);
+    SendDropReason send(int peerId, ByteBuffer datagram);
 
     /**
      * Waits for datagrams and delivers whatever arrived, returning how many.
@@ -59,25 +62,6 @@ public interface Transport extends AutoCloseable {
      *                     The simulation ignores it, because there the harness owns time.
      */
     int poll(long timeoutNanos, DatagramHandler handler);
-
-    /**
-     * How many datagrams this transport never handed to the network, for any reason.
-     *
-     * <p>Part of the contract rather than a convenience, and the reason is a bug this project
-     * already had: {@link #send} promises a failure is "counted and logged rather than propagated",
-     * and three separate implementations had paths that returned without doing either: a peer that
-     * could never be sent to looked exactly like a peer that was simply not answering. A transport
-     * may drop anything; it must be able to say how much of what it dropped.
-     *
-     * <p><strong>This counts what never left, not what was lost on the way.</strong> Datagrams the
-     * network discarded after this transport handed them over are invisible here, exactly as they
-     * are to a UDP socket: the simulated network's seeded loss and its partitions are network
-     * behaviour and are counted there instead. What belongs here is a closed transport, an id the
-     * transport has no address for, and a socket that refused the write.
-     *
-     * <p>Monotonic, and flat on a healthy transport, which is what makes it worth alerting on.
-     */
-    long sendsDropped();
 
     /**
      * Makes a blocked {@link #poll} return promptly. The one method other threads may call, so

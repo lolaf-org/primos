@@ -224,7 +224,7 @@ class TenantIsolationTest {
         start();
         announce(ORDERS);
         long unroutableBefore = server.routing().unroutable();
-        ByteBuffer ping = new MessageEncoder(ORDERS, 3, MessageAuthenticator.hmacSha256(SECRET.getBytes(StandardCharsets.UTF_8)))
+        ByteBuffer ping = new MessageEncoder(ORDERS, 3, MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, SECRET.getBytes(StandardCharsets.UTF_8)))
                 .ping(ByteBuffer.allocate(WireFormat.MAX_DATAGRAM_BYTES), 0L, 1L);
 
         // Straight at route(), because no socket can send from port 0: only a forged header can claim it.

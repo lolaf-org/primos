@@ -17,6 +17,7 @@ package org.lolaf.primos.transport;
 
 import org.junit.jupiter.api.Test;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.wire.WireFormat;
 import org.mockito.MockedStatic;
 
@@ -31,6 +32,7 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,16 +71,16 @@ class UdpTransportTest extends TransportContractTest {
     }
 
     @Test
-    void a_send_the_socket_had_no_room_for_is_counted() throws IOException {
-        assertThat(sendsDroppedWhenChannelAccepts(0)).isEqualTo(1);
+    void a_send_the_socket_had_no_room_for_is_reported() throws IOException {
+        assertThat(outcomeWhenChannelAccepts(0)).isEqualTo(SendDropReason.SOCKET_ERROR);
     }
 
     @Test
-    void a_send_the_socket_took_whole_is_not_counted() throws IOException {
-        assertThat(sendsDroppedWhenChannelAccepts(WireFormat.HEADER_BYTES)).isZero();
+    void a_send_the_socket_took_whole_reports_nothing() throws IOException {
+        assertThat(outcomeWhenChannelAccepts(WireFormat.HEADER_BYTES)).isNull();
     }
 
-    private long sendsDroppedWhenChannelAccepts(int bytes) throws IOException {
+    private SendDropReason outcomeWhenChannelAccepts(int bytes) throws IOException {
         DatagramChannel channel = mock(DatagramChannel.class);
         when(channel.send(any(), any())).thenReturn(bytes);
         try (MockedStatic<DatagramChannel> open = mockStatic(DatagramChannel.class)) {
@@ -87,8 +89,7 @@ class UdpTransportTest extends TransportContractTest {
                     .bindAddress(new InetSocketAddress(LOOPBACK, 0))
                     .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, 7000)))
                     .build()) {
-                transport.send(NODE_B, datagram());
-                return transport.sendsDropped();
+                return transport.send(NODE_B, datagram());
             }
         }
     }
@@ -115,18 +116,15 @@ class UdpTransportTest extends TransportContractTest {
 
     @Test
     void a_peer_that_is_not_listening_costs_a_send_but_not_an_exception() {
-        UdpTransport transport = (UdpTransport) a;
         int deadPort = Ports.free();
         Transport toNowhere = udp(Ports.free(), Peer.application(7, LOOPBACK, deadPort));
 
-        for (int i = 0; i < 20; i++) {
-            toNowhere.send(7, wrap("into the void"));
-        }
-
-        assertThat(transport.sendFailures())
-                .as("UDP sends into nothing usually succeed locally; what matters is that none"
-                        + " of it ever throws at the algorithm")
-                .isNotNegative();
+        assertThatCode(() -> {
+            for (int i = 0; i < 20; i++) {
+                toNowhere.send(7, wrap("into the void"));
+            }
+        }).as("UDP sends into nothing usually succeed locally; what matters is that none of it ever"
+                + " throws at the algorithm").doesNotThrowAnyException();
         toNowhere.close();
     }
 
@@ -228,26 +226,20 @@ class UdpTransportTest extends TransportContractTest {
     }
 
     /**
-     * Every way a send can fail to reach the wire, each proved to be counted.
-     *
-     * <p>The SPI promises a failed send is "counted and logged rather than propagated". Three of
-     * these four paths used to do neither: they returned quietly, so a peer that could never be
-     * sent to looked exactly like a peer that was simply not talking back.
+     * Every way a send can fail to reach the wire, each proved to be reported rather than swallowed: a peer that could
+     * never be sent to must not look like a peer that is simply not talking back.
      */
     @Test
-    void a_send_to_a_peer_that_was_never_configured_is_counted() throws IOException {
+    void a_send_to_a_peer_that_was_never_configured_is_reported() throws IOException {
         try (UdpTransport transport = UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
                 .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, Ports.free())))
                 .build()) {
 
-            transport.send(99, datagram());
-
-            assertThat(transport.sendsToUnknownPeer())
+            assertThat(transport.send(99, datagram()))
                     .as("not a network condition: something asked for an id that was never"
                             + " configured, which is a bug rather than a lost datagram")
-                    .isEqualTo(1);
-            assertThat(transport.sendsDropped()).isEqualTo(1);
+                    .isEqualTo(SendDropReason.NO_ADDRESS);
         }
     }
 
@@ -291,26 +283,21 @@ class UdpTransportTest extends TransportContractTest {
                 .peers(Collections.singletonList(Peer.application(NODE_B, "localhost", Ports.free())))
                 .build()) {
 
-            transport.send(NODE_B, datagram());
-
-            assertThat(transport.sendsDropped())
-                    .as("a name that resolves is sent to, and nothing about it is counted")
-                    .isZero();
+            assertThat(transport.send(NODE_B, datagram()))
+                    .as("a name that resolves is sent to, and nothing about it is reported")
+                    .isNull();
         }
     }
 
     @Test
-    void a_send_after_close_is_counted_rather_than_ignored() throws IOException {
+    void a_send_after_close_is_reported_rather_than_ignored() throws IOException {
         UdpTransport transport = UdpTransport.builder()
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
                 .peers(Collections.singletonList(Peer.application(NODE_B, LOOPBACK, Ports.free())))
                 .build();
         transport.close();
 
-        transport.send(NODE_B, datagram());
-
-        assertThat(transport.sendsWhileClosed()).isEqualTo(1);
-        assertThat(transport.sendsDropped()).isEqualTo(1);
+        assertThat(transport.send(NODE_B, datagram())).isEqualTo(SendDropReason.TRANSPORT_CLOSED);
     }
 
     @Test
@@ -345,10 +332,8 @@ class UdpTransportTest extends TransportContractTest {
 
     @Test
     void a_healthy_transport_drops_nothing() {
-        ((UdpTransport) a).send(NODE_B, datagram());
-
-        assertThat(((UdpTransport) a).sendsDropped())
-                .as("the one number worth alerting on, and it stays flat when nothing is wrong")
-                .isZero();
+        assertThat(a.send(NODE_B, datagram()))
+                .as("the one thing worth alerting on, and it stays quiet when nothing is wrong")
+                .isNull();
     }
 }

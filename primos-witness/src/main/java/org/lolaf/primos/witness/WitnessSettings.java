@@ -15,36 +15,44 @@
  */
 package org.lolaf.primos.witness;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Builder;
+import lombok.NonNull;
+import lombok.Value;
 import org.lolaf.primos.Timings;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * The witness server's own settings, as opposed to the applications it serves.
  *
  * <p>Value equality is not decoration: it is how a reload tells a settings-only change from no
- * change at all. {@code FileConfigStore} compared the served applications and nothing else, so a
- * changed registration mode or auto-registration limit was parsed and then dropped on the floor:
- * silently, because the snapshot it belonged to was never published.
+ * change at all.
  */
-@Getter
-@EqualsAndHashCode
-public final class WitnessSettings {
+@Value
+@Builder
+public class WitnessSettings {
 
-    private final InetSocketAddress bindAddress;
+    /**
+     * Where to listen. Not hot-reloadable: a change is read and ignored until a restart.
+     */
+    @NonNull
+    @Builder.Default
+    InetSocketAddress bindAddress = new InetSocketAddress(7420);
 
     /**
      * Where per-application term and vote files live. Must be durable local storage.
      */
-    private final Path stateDirectory;
+    @NonNull
+    Path stateDirectory;
 
-    private final ConfigSource configSource;
+    /**
+     * Where a served application's configuration comes from. See {@link ConfigSource}.
+     */
+    @NonNull
+    @Builder.Default
+    ConfigSource configSource = ConfigSource.FILE;
 
     /**
      * Every key this witness holds, and which applications each may speak for.
@@ -53,19 +61,24 @@ public final class WitnessSettings {
      * {@link ConfigSource}: a cluster arriving over the network has no file to have had a secret
      * set in, so keys kept per application could offer it only one shared key or none.
      */
-    private final Keyring keyring;
+    @NonNull
+    @Builder.Default
+    Keyring keyring = Keyring.empty();
 
     /**
      * How many applications {@link ConfigSource#CLUSTER} may create, so an open witness cannot be
      * filled up by whoever can reach the port.
      */
-    private final int clusterApplicationLimit;
+    @Builder.Default
+    int clusterApplicationLimit = 64;
 
     /**
      * How often the configuration is checked for change, which is the whole of the reload mechanism.
      * A tick does nothing further unless a file has changed, so this is cheap enough to be seconds.
      */
-    private final Duration rescanInterval;
+    @NonNull
+    @Builder.Default
+    Duration rescanInterval = Duration.ofSeconds(5);
 
     /**
      * The witness-wide <em>default</em> intervals, not, despite the obvious reading, what any node
@@ -90,7 +103,9 @@ public final class WitnessSettings {
      * genuinely on a third network wants {@link Timings#wan()}: a 50ms WAN round trip makes the
      * LAN election timeout marginal.
      */
-    private final Timings defaultTimings;
+    @NonNull
+    @Builder.Default
+    Timings defaultTimings = Timings.lan();
 
     /**
      * Whether the served nodes log who voted for whom at INFO rather than DEBUG.
@@ -101,82 +116,6 @@ public final class WitnessSettings {
      * timing profile, because it describes how this process talks about its work rather than
      * anything about a tenant's cluster.
      */
-    private final boolean voteLogging;
-
-    private WitnessSettings(Builder builder) {
-        this.bindAddress = Objects.requireNonNull(builder.bindAddress, "bindAddress");
-        this.stateDirectory = Objects.requireNonNull(builder.stateDirectory, "stateDirectory");
-        this.configSource = Objects.requireNonNull(builder.configSource, "configSource");
-        this.keyring = Objects.requireNonNull(builder.keyring, "keyring");
-        this.clusterApplicationLimit = builder.clusterApplicationLimit;
-        this.rescanInterval = Objects.requireNonNull(builder.rescanInterval, "rescanInterval");
-        this.defaultTimings = Objects.requireNonNull(builder.defaultTimings, "defaultTimings");
-        this.voteLogging = builder.voteLogging;
-    }
-
-    public static Builder builder() {
-        return new Builder();
-    }
-
-    /**
-     * Builder for {@link WitnessSettings}.
-     */
-    public static final class Builder {
-
-        /**
-         * Where to listen. Not hot-reloadable: a change is read and ignored until a restart.
-         */
-        @Setter
-        private InetSocketAddress bindAddress = new InetSocketAddress(7420);
-
-        /**
-         * Where per-application term and vote files live. Must be durable local storage.
-         */
-        @Setter
-        private Path stateDirectory;
-
-        /**
-         * Where a served application's configuration comes from. See {@link ConfigSource}.
-         */
-        @Setter
-        private ConfigSource configSource = ConfigSource.FILE;
-
-        /**
-         * Every key this witness holds. See {@link Keyring}.
-         */
-        @Setter
-        private Keyring keyring = Keyring.empty();
-
-        /**
-         * How many applications {@link ConfigSource#CLUSTER} may create.
-         */
-        @Setter
-        private int clusterApplicationLimit = 64;
-
-        /**
-         * How often the configuration directory is re-read regardless of events.
-         */
-        @Setter
-        private Duration rescanInterval = Duration.ofSeconds(5);
-
-        /**
-         * What an application that names no intervals of its own falls back to. Keep it uniform
-         * across a cluster.
-         */
-        @Setter
-        private Timings defaultTimings = Timings.lan();
-
-        /**
-         * Whether the served nodes log who voted for whom at INFO rather than DEBUG. On by default.
-         */
-        @Setter
-        private boolean voteLogging = true;
-
-        private Builder() {
-        }
-
-        public WitnessSettings build() {
-            return new WitnessSettings(this);
-        }
-    }
+    @Builder.Default
+    boolean voteLogging = true;
 }

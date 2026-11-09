@@ -19,7 +19,10 @@ import lombok.Builder;
 import lombok.Value;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * The intervals that govern elections and failure detection.
@@ -91,20 +94,20 @@ public class Timings {
      * <p>Not to be confused with {@link #probeInterval()}, which measures reachability, or
      * {@link #advertisementInterval()}, which reports configuration. See the table on this class.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration heartbeatInterval = Duration.ofMillis(50);
 
     /**
      * The low end of the range an election timeout is drawn from, afresh on every reset.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration electionTimeoutMin = Duration.ofMillis(300);
 
     /**
      * The high end of that range. The width between the two is what stops nodes campaigning in
      * lockstep, so it is never zero.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration electionTimeoutMax = Duration.ofMillis(600);
 
     /**
@@ -120,7 +123,7 @@ public class Timings {
      * <p>Capped at {@link #MAX_PROBE_INTERVAL}: symmetric probing is what holds a NAT or firewall
      * pinhole open to a witness on another network.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration probeInterval = Duration.ofSeconds(1);
 
     /**
@@ -142,7 +145,7 @@ public class Timings {
      * <p>Never shorter than {@link #probeInterval()}. Restating unchanging values more often than a
      * node checks whether its peers are alive at all is pure traffic.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration advertisementInterval = Duration.ofSeconds(30);
 
     /**
@@ -152,7 +155,7 @@ public class Timings {
      * anyone says so, and on the JVM that product has to clear the worst stop-the-world pause,
      * because a collecting process is indistinguishable from a dead one.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     int failureThreshold = 3;
 
     /**
@@ -177,16 +180,35 @@ public class Timings {
     }
 
     /**
-     * Refuses one election bound given without the other, naming the key as the operator wrote it. Checked before
-     * building because {@link TimingsBuilder#build()} can only name a Java field.
+     * What an operator configured: a named profile or the intervals spelled out, never both, because overriding part
+     * of a profile leaves a custom set whose author has not seen the other values.
      *
-     * @throws IllegalArgumentException if exactly one of the bounds is set
+     * @param profileKey   the key naming the profile, as the operator wrote it
+     * @param profile      {@code lan} or {@code wan}, or null or blank when none was named
+     * @param explicitKeys the interval keys that were set, as the operator wrote them
+     * @param fallback     what applies when nothing was set
+     * @param spelledOut   builds the intervals when only those were set
+     * @throws IllegalArgumentException if the profile is unknown, or is set beside any interval
      */
-    public static void requireElectionBoundsTogether(Duration min, Duration max, String minKey, String maxKey) {
-        if ((min == null) != (max == null)) {
-            throw new IllegalArgumentException((min != null ? minKey : maxKey) + " is set without its pair. The"
-                    + " election timeout is a range drawn from afresh on every reset, and setting one end against the"
-                    + " other's default is how an invalid or too-narrow range is built. Set both.");
+    public static Timings resolve(String profileKey, String profile, List<String> explicitKeys,
+                                  Timings fallback, Supplier<Timings> spelledOut) {
+        String named = profile == null ? "" : profile.trim().toLowerCase(Locale.ROOT);
+        if (named.isEmpty()) {
+            return explicitKeys.isEmpty() ? fallback : spelledOut.get();
+        }
+        if (!explicitKeys.isEmpty()) {
+            throw new IllegalArgumentException(profileKey + " is set to '" + named + "' and so is "
+                    + String.join(", ", explicitKeys) + ". Choose one: a profile is a set of intervals picked to hold"
+                    + " together, so overriding part of one leaves a custom set whose author has not seen the other"
+                    + " values. Either drop " + profileKey + " and name every interval, or drop the individual keys.");
+        }
+        switch (named) {
+            case "lan":
+                return lan();
+            case "wan":
+                return wan();
+            default:
+                throw new IllegalArgumentException(profileKey + " must be 'lan' or 'wan', but was '" + named + "'");
         }
     }
 
@@ -206,14 +228,6 @@ public class Timings {
         return electionTimeoutMax.minus(electionTimeoutMin);
     }
 
-    /**
-     * Every rule, checked before a {@link Timings} escapes its builder.
-     *
-     * <p>Called from {@link TimingsBuilder#build()} rather than from a constructor, because the
-     * constructor is Lombok's, which is also why the generated build method is named
-     * {@code buildUnvalidated} and wrapped: it is the only seam where this can run without
-     * hand-writing the {@code @Builder.Default} machinery.
-     */
     private Timings validate() {
         requirePositive(heartbeatInterval, "heartbeatInterval");
         requirePositive(electionTimeoutMin, "electionTimeoutMin");
@@ -239,16 +253,6 @@ public class Timings {
                             + "ms), so no timeout could ever be drawn from that range. Setting one"
                             + " bound on its own leaves the other at its default, which is the"
                             + " usual way to arrive here: set both.");
-        }
-        // Only equality can still reach this, the inverted case having been rejected above. The
-        // comparison stays <= rather than == so that deleting the check above would fail loudly
-        // rather than let an inverted range through.
-        if (electionTimeoutMax.compareTo(electionTimeoutMin) <= 0) {
-            throw new IllegalArgumentException(
-                    "electionTimeoutMax (" + electionTimeoutMax.toMillis()
-                            + "ms) must be greater than electionTimeoutMin ("
-                            + electionTimeoutMin.toMillis() + "ms): a range of zero width means"
-                            + " every node draws the same timeout and campaigns in lockstep");
         }
         if (electionTimeoutSpread().compareTo(heartbeatInterval) < 0) {
             throw new IllegalArgumentException(
@@ -284,7 +288,17 @@ public class Timings {
             return interval == null ? this : heartbeatInterval(interval);
         }
 
-        public TimingsBuilder electionTimeoutIfSet(Duration min, Duration max) {
+        /**
+         * @param minKey what an operator calls the low bound, named when only it is set; a Java field would not help
+         * @param maxKey the same for the high bound
+         * @throws IllegalArgumentException if exactly one bound is set
+         */
+        public TimingsBuilder electionTimeoutIfSet(Duration min, Duration max, String minKey, String maxKey) {
+            if ((min == null) != (max == null)) {
+                throw new IllegalArgumentException((min != null ? minKey : maxKey) + " is set without its pair. The"
+                        + " election timeout is a range drawn from afresh on every reset, and setting one end against"
+                        + " the other's default is how an invalid or too-narrow range is built. Set both.");
+            }
             return min == null ? this : electionTimeoutMin(min).electionTimeoutMax(max);
         }
 

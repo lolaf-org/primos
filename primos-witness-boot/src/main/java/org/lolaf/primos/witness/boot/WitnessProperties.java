@@ -191,20 +191,20 @@ public record WitnessProperties(
             Integer failureThreshold) {
 
         /**
-         * The keys that were actually set, spelled as an operator wrote them.
+         * The keys under {@code prefix} that were actually set, spelled as an operator wrote them.
          *
          * <p>Names rather than a yes-or-no, because refusing a profile beside them should quote
          * them back: the values may have come from YAML, an environment variable or the command
          * line, and "you also set some intervals" leaves the operator to search all three.
          */
-        List<String> explicitKeys() {
+        List<String> explicitKeys(String prefix) {
             List<String> keys = new ArrayList<>(6);
-            addIfSet(keys, "heartbeat-interval", heartbeatInterval);
-            addIfSet(keys, "election-timeout-min", electionTimeoutMin);
-            addIfSet(keys, "election-timeout-max", electionTimeoutMax);
-            addIfSet(keys, "probe-interval", probeInterval);
-            addIfSet(keys, "advertisement-interval", advertisementInterval);
-            addIfSet(keys, "failure-threshold", failureThreshold);
+            addIfSet(keys, prefix + ".heartbeat-interval", heartbeatInterval);
+            addIfSet(keys, prefix + ".election-timeout-min", electionTimeoutMin);
+            addIfSet(keys, prefix + ".election-timeout-max", electionTimeoutMax);
+            addIfSet(keys, prefix + ".probe-interval", probeInterval);
+            addIfSet(keys, prefix + ".advertisement-interval", advertisementInterval);
+            addIfSet(keys, prefix + ".failure-threshold", failureThreshold);
             return keys;
         }
 

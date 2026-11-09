@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -31,17 +33,12 @@ import lombok.extern.slf4j.Slf4j;
  * the path this whole SPI is shaped to keep allocation-free.
  */
 @Slf4j
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class GuardedStatsListener implements PrimosStatsListener {
 
     private final PrimosStatsListener sink;
     private final String application;
     private final int nodeId;
-
-    GuardedStatsListener(PrimosStatsListener sink, String application, int nodeId) {
-        this.sink = sink;
-        this.application = application;
-        this.nodeId = nodeId;
-    }
 
     /**
      * Wraps only when there is something that could throw. {@link PrimosStatsListener#NONE} cannot,
@@ -149,6 +146,15 @@ final class GuardedStatsListener implements PrimosStatsListener {
             sink.onDatagramDropped(reason);
         } catch (RuntimeException e) {
             failed("onDatagramDropped", e);
+        }
+    }
+
+    @Override
+    public void onSendDropped(SendDropReason reason) {
+        try {
+            sink.onSendDropped(reason);
+        } catch (RuntimeException e) {
+            failed("onSendDropped", e);
         }
     }
 

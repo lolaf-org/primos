@@ -60,6 +60,7 @@ A snapshot cannot carry the three things worth having:
 | `onDepartureObserved` | a peer said it was going |
 | `onProbeRoundTrip` | every sample, per peer |
 | `onDatagramDropped` | with the reason; see the [receive pipeline](protocol.md#the-receive-pipeline) |
+| `onSendDropped` | a datagram this node never got onto the network, with the reason. `TRANSPORT_CLOSED` is expected during shutdown; the others mean a socket refusing writes or a peer with no address |
 | `onTimingMismatch`, `onUnusableNodeConfig`, `onPeerForgotten` | configuration a peer stated |
 
 Two answer questions a rolling deploy raises immediately. `onHandoverSent` against the number of times this node was

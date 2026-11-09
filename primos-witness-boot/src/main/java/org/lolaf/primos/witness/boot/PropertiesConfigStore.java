@@ -69,32 +69,21 @@ public class PropertiesConfigStore implements ConfigStore {
                     + " already voted in and elect two leaders: the exact failure it was deployed"
                     + " to prevent.");
         }
-        WitnessSettings.Builder settings = WitnessSettings.builder()
+        WitnessSettings.WitnessSettingsBuilder settings = WitnessSettings.builder()
                 .stateDirectory(properties.stateDirectory())
                 .configSource(configSource(properties))
                 .clusterApplicationLimit(properties.clusterApplicationLimit())
                 .defaultTimings(timings(properties.timings(), "primos.witness.timings", Timings.lan()))
                 .voteLogging(properties.voteLogging())
                 .keyring(keyring(properties));
-        InetSocketAddress bind = bindAddress(properties);
-        if (bind != null) {
-            settings.bindAddress(bind);
+        if (properties.bind().isSet()) {
+            settings.bindAddress(bindAddress(properties.bind()));
         }
         return settings.build();
     }
 
-    /**
-     * The bind address, or null to leave the builder's own default alone.
-     *
-     * <p>There is no file underneath this store, so a half-given address cannot borrow the other
-     * half from one: a port on its own means the wildcard host, which is what a container wants
-     * anyway.
-     */
-    private static InetSocketAddress bindAddress(WitnessProperties properties) {
-        WitnessProperties.BindProperties bind = properties.bind();
-        if (!bind.isSet()) {
-            return null;
-        }
+    private static InetSocketAddress bindAddress(WitnessProperties.BindProperties bind) {
+        // No file underneath to borrow from, so a port on its own means the wildcard host.
         int port = bind.port() != null ? bind.port() : 7420;
         return bind.host() == null || bind.host().isEmpty()
                 ? new InetSocketAddress(port)
@@ -111,49 +100,21 @@ public class PropertiesConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * A profile, or the intervals spelled out, or whatever the level above decided, never a
-     * mixture.
-     *
-     * <p>The same rule and the same reasoning as the file store's {@code timings.*} block: a
-     * profile is a set of values picked so the relationships between them hold, so overriding part
-     * of one leaves a custom set whose author has not seen the rest. The mixture is refused rather
-     * than merged, and the message quotes the keys back because they may have come from YAML, an
-     * environment variable or the command line.
-     *
-     * @param prefix   how an operator spells these keys, so an error names what they wrote
-     * @param fallback what applies when nothing here is set: the witness-wide values for an
-     *                 application, and the LAN profile for the witness itself
-     */
     private static Timings timings(WitnessProperties.TimingsProperties timings, String prefix,
                                    Timings fallback) {
         if (timings == null) {
             return fallback;
         }
-        List<String> explicit = timings.explicitKeys();
-        if (timings.profile() != null && !explicit.isEmpty()) {
-            throw new IllegalStateException(prefix + ".profile is set to '"
-                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is " + prefix
-                    + "." + String.join(", " + prefix + ".", explicit) + ". Choose one: a profile is"
-                    + " a set of intervals picked to hold together, so overriding part of one leaves"
-                    + " a custom set whose author has not seen the other values. Either drop the"
-                    + " profile and name every interval you want, or drop the individual keys.");
-        }
-        if (timings.profile() != null) {
-            return timings.profile() == WitnessProperties.Profile.WAN ? Timings.wan() : Timings.lan();
-        }
-        if (explicit.isEmpty()) {
-            return fallback;
-        }
-        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
-                prefix + ".election-timeout-min", prefix + ".election-timeout-max");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(timings.heartbeatInterval())
-                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
-                .probeIntervalIfSet(timings.probeInterval())
-                .advertisementIntervalIfSet(timings.advertisementInterval())
-                .failureThresholdIfSet(timings.failureThreshold())
-                .build();
+        return Timings.resolve(prefix + ".profile", timings.profile() == null ? null : timings.profile().name(),
+                timings.explicitKeys(prefix), fallback,
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                        .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                                prefix + ".election-timeout-min", prefix + ".election-timeout-max")
+                        .probeIntervalIfSet(timings.probeInterval())
+                        .advertisementIntervalIfSet(timings.advertisementInterval())
+                        .failureThresholdIfSet(timings.failureThreshold())
+                        .build());
     }
 
     private static Keyring keyring(WitnessProperties properties) {
@@ -176,13 +137,6 @@ public class PropertiesConfigStore implements ConfigStore {
         return new Keyring(keys);
     }
 
-    /**
-     * The served set, each application on its own intervals or on the witness's.
-     *
-     * <p>Per application rather than one block for the server, because a witness serves clusters it
-     * does not own: one of them being on another network must not decide the intervals for all of
-     * them. That is the same reason the file store keeps a file per application.
-     */
     private static Map<String, ApplicationConfig> applications(WitnessProperties properties) {
         Timings witnessWide = timings(properties.timings(), "primos.witness.timings", Timings.lan());
         Map<String, ApplicationConfig> applications = new LinkedHashMap<>();
@@ -204,15 +158,6 @@ public class PropertiesConfigStore implements ConfigStore {
     @Override
     public ConfigSnapshot current() {
         return snapshot;
-    }
-
-    /**
-     * Accepted and never called, because nothing here ever changes. Refusing a listener would make
-     * this store a different SPI rather than a different implementation of the same one.
-     */
-    @Override
-    public void addListener(ConfigChangeListener listener) {
-        // nothing to do
     }
 
     @Override

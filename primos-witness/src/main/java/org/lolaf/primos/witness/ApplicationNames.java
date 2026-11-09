@@ -15,11 +15,15 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 import java.util.Locale;
 
 /**
  * Checks on an application name that only the witness server needs.
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class ApplicationNames {
 
     /**
@@ -28,9 +32,6 @@ final class ApplicationNames {
      * estate are one edit apart.
      */
     private static final int MIN_LENGTH_FOR_NEAR_MISS = 4;
-
-    private ApplicationNames() {
-    }
 
     /**
      * Whether a name can be a single directory name, which the state layout requires.
@@ -125,13 +126,6 @@ final class ApplicationNames {
         return null;
     }
 
-    /**
-     * Levenshtein distance, answered only as "is it at most two".
-     *
-     * <p>Two rows rather than a full matrix, and an early exit once every cell in a row exceeds the
-     * threshold: names are short, but this runs on the first sighting of a name from the network,
-     * so it should not be something an attacker can make expensive by choosing long ones.
-     */
     private static boolean editDistanceAtMostTwo(String a, String b) {
         if (Math.abs(a.length() - b.length()) > 2) {
             return false;
@@ -143,14 +137,14 @@ final class ApplicationNames {
         }
         for (int i = 1; i <= a.length(); i++) {
             current[0] = i;
-            int best = current[0];
+            int rowMinimum = current[0];
             for (int j = 1; j <= b.length(); j++) {
                 int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
                 current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1),
                         previous[j - 1] + cost);
-                best = Math.min(best, current[j]);
+                rowMinimum = Math.min(rowMinimum, current[j]);
             }
-            if (best > 2) {
+            if (rowMinimum > 2) {
                 return false;
             }
             int[] swap = previous;

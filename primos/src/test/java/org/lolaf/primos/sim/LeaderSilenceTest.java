@@ -54,7 +54,7 @@ class LeaderSilenceTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         int leader = cluster.leader().get().id();
         ElectionCluster.NodeUnderTest survivor = followers(cluster, leader).get(0);
-        survivor.election().setCandidate(false);
+        survivor.election().setElectable(false);
         simulation.run(Duration.ofMillis(200));
         assertThat(survivor.election().leaderOptional()).isPresent();
 

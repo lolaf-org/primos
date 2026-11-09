@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.StateStore;
@@ -43,8 +44,7 @@ import java.util.function.Supplier;
 @Slf4j
 final class PrimosNodeImpl implements PrimosNode, PrimosListener {
 
-    private static final int NO_TRANSFER = Integer.MIN_VALUE;
-    private static final int ANY_FOLLOWER = Integer.MIN_VALUE + 1;
+    private static final int ANY_FOLLOWER = Integer.MIN_VALUE;
 
     private final ClusterConfig config;
     private final Supplier<StateStore> stores;
@@ -60,7 +60,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
      * generation, so a listener registered once keeps counting across a restart.
      */
     private final PrimosStatsListener stats;
-    private final Object transfer = new Object();
     /**
      * Null when the application supplied its own, which this node then knows nothing about.
      */
@@ -72,14 +71,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     private volatile Leader leader;
     private volatile long leadershipConfirmedNanos = Long.MIN_VALUE;
     private volatile boolean running;
-    private volatile int transferRequest = NO_TRANSFER;
+    private volatile TransferRequest transferRequest;
     /**
      * What the application asked, applied to the election by the node thread each turn and to
      * every new election on start.
      */
-    private volatile boolean candidate = true;
-    private boolean transferServed;
-    private boolean transferSent;
+    private volatile boolean electable = true;
     private volatile Thread thread;
     private volatile Thread eventsThread;
 
@@ -141,6 +138,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // Idempotent rather than fatal, as stop() is
             return;
         }
+        if (thread != null && thread.isAlive()) {
+            throw new IllegalStateException("node " + config.nodeId() + " cannot start: the thread of its last run has"
+                    + " not exited, after a stop() that timed out waiting for it, and two threads would drive one node");
+        }
         if (election != null && election.isFailed()) {
             throw new IllegalStateException("node " + config.nodeId() + " has failed and cannot be"
                     + " restarted: it stopped because something it depends on is broken, and"
@@ -149,17 +150,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         try {
             store = stores.get();
             transport = transports.get();
-        } catch (RuntimeException e) {
-            closeQuietly();
-            throw e;
-        }
-        election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
-        try {
-            election.setCandidate(candidate);
+            election = new ElectionNode(config, store, transport, clock, random, authenticator, this, stats);
+            election.setElectable(electable);
             // Here rather than on the node thread, so a state file it cannot read fails this call.
             election.start();
         } catch (RuntimeException e) {
-            closeQuietly();
+            releaseResources();
             throw e;
         }
         running = true;
@@ -175,12 +171,10 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     @Override
     public void stop() {
         stopNode();
+        // Outside the node's lock, so a callback calling publishChange() cannot wait behind this.
         awaitQueuedCallbacks();
     }
 
-    /**
-     * Outside the node's lock, so a callback calling {@code publishChange()} cannot wait behind this.
-     */
     private void awaitQueuedCallbacks() {
         if (ownedEvents == null || Thread.currentThread() == eventsThread) {
             return;
@@ -202,7 +196,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             // Never started, or already stopped. Either way the store and the transport are this
             // node's to release: it made them, and a generation that never ran is still holding a
             // bound socket and an exclusive lock. Both closes are idempotent.
-            closeQuietly();
+            releaseResources();
             return;
         }
         running = false;
@@ -220,7 +214,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             Thread.currentThread().interrupt();
         } finally {
             standDown();
-            closeQuietly();
+            releaseResources();
         }
         log.info("cluster '{}': node {} stopped", config.applicationName(), config.nodeId());
     }
@@ -252,50 +246,32 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return awaitTransfer(target);
     }
 
-    /**
-     * Waits for the node thread to serve the request, bounded by the stop timeout in case the
-     * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
-     * the transport under it, and one caller at a time uses the single request slot.
-     */
+    // Synchronized so stop() cannot close the transport under this, and one caller at a time uses the request slot.
     private synchronized boolean awaitTransfer(int target) {
-        synchronized (transfer) {
-            if (!running) {
-                return false;
-            }
-            transferServed = false;
-            transferRequest = target;
-            transport.wakeup();
-            long deadline = clock.nanoTime() + stopTimeoutNanos;
-            try {
-                while (!transferServed && running) {
-                    long remaining = deadline - clock.nanoTime();
-                    if (remaining <= 0) {
-                        break;
-                    }
-                    TimeUnit.NANOSECONDS.timedWait(transfer, remaining);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                transferRequest = NO_TRANSFER;
-            }
-            return transferServed && transferSent;
+        if (!running) {
+            return false;
+        }
+        TransferRequest request = new TransferRequest(target);
+        transferRequest = request;
+        transport.wakeup();
+        try {
+            return request.sent.get(stopTimeoutNanos, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (TimeoutException | ExecutionException e) {
+            return false;
+        } finally {
+            transferRequest = null;
         }
     }
 
     private void serveTransfer() {
-        if (transferRequest == NO_TRANSFER) {
-            return;
-        }
-        synchronized (transfer) {
-            int target = transferRequest;
-            if (target == NO_TRANSFER) {
-                return;
-            }
-            transferRequest = NO_TRANSFER;
-            transferSent = target == ANY_FOLLOWER ? election.transferLeadership() : election.transferLeadership(target);
-            transferServed = true;
-            transfer.notifyAll();
+        TransferRequest request = transferRequest;
+        if (request != null) {
+            transferRequest = null;
+            request.sent.complete(request.target == ANY_FOLLOWER
+                    ? election.transferLeadership() : election.transferLeadership(request.target));
         }
     }
 
@@ -306,13 +282,13 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     @Override
-    public boolean isCandidate() {
-        return candidate && !config.isWitness();
+    public boolean isElectable() {
+        return electable && !config.isWitness();
     }
 
     @Override
-    public void setCandidate(boolean candidate) {
-        this.candidate = candidate;
+    public void setElectable(boolean electable) {
+        this.electable = electable;
         wakeUp();
     }
 
@@ -344,7 +320,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         if (running) {
             // A listener registered after the node started would otherwise wait for the next
             // change to learn anything, and may have been registered for one that already happened.
-            dispatcher.deliverCurrentState(listener, roleAndTerm.role(), roleAndTerm.term(), leader());
+            dispatcher.deliverCurrentState(listener, roleAndTerm, leader());
         }
     }
 
@@ -392,9 +368,9 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
                 // No bound of our own: runOnce waits only until the next deadline, and stop() wakes
                 // the socket, so there is no polling interval to tune and no latency to trade away.
                 election.runOnce(Long.MAX_VALUE);
-                election.setCandidate(candidate);
+                election.setElectable(electable);
                 serveTransfer();
-                publish();
+                publishSnapshot();
                 if (election.isFailed()) {
                     running = false;
                 }
@@ -404,7 +380,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
             throw fatal;
         }
         announceShutdown();
-        publish();
     }
 
     private void announceShutdown() {
@@ -435,12 +410,11 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         dispatcher.onLeaderChanged(Optional.empty(), last.term());
     }
 
-    private void publish() {
+    private void publishSnapshot() {
         RoleAndTerm published = roleAndTerm;
         if (published.role() != election.role() || published.term() != election.currentTerm()) {
             roleAndTerm = new RoleAndTerm(election.role(), election.currentTerm());
         }
-        leader = election.leader();
         leadershipConfirmedNanos = election.leadershipConfirmedNanos();
     }
 
@@ -452,7 +426,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return running;
     }
 
-    private void closeQuietly() {
+    private void releaseResources() {
         closeQuietly(transport);
         closeQuietly(store);
         transport = null;
@@ -463,5 +437,12 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     public String toString() {
         return "primos-" + config.applicationName() + "-" + config.nodeId()
                 + " " + roleAndTerm.role() + "/" + roleAndTerm.term();
+    }
+
+    @RequiredArgsConstructor
+    private static final class TransferRequest {
+
+        private final int target;
+        private final CompletableFuture<Boolean> sent = new CompletableFuture<>();
     }
 }

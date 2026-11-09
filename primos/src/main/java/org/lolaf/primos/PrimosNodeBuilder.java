@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.lolaf.primos.store.StateStore;
 import org.lolaf.primos.time.MonotonicClock;
@@ -53,6 +55,7 @@ import java.util.function.Supplier;
  *         .build();
  * </pre>
  */
+@NoArgsConstructor(access = AccessLevel.PACKAGE)
 public final class PrimosNodeBuilder {
 
     private final List<PrimosListener> listeners = new ArrayList<>();
@@ -144,9 +147,6 @@ public final class PrimosNodeBuilder {
     @Setter
     private String macAlgorithm = MessageAuthenticator.DEFAULT_ALGORITHM;
 
-    PrimosNodeBuilder() {
-    }
-
     /**
      * How to make the store this node keeps its term and vote in. Required.
      */
@@ -190,6 +190,7 @@ public final class PrimosNodeBuilder {
             throw new IllegalStateException("a transport is required");
         }
         Objects.requireNonNull(macAlgorithm, "macAlgorithm");
+        Objects.requireNonNull(statsListener, "statsListener");
         Objects.requireNonNull(stopTimeout, "stopTimeout");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(random, "random");

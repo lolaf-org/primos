@@ -47,7 +47,7 @@ class PrimosHealthIndicatorTest {
         assertThat(health.getDetails()).containsEntry("role", "FOLLOWER")
                 .containsEntry("term", 7L)
                 .containsEntry("state", "running")
-                .containsEntry("candidate", true);
+                .containsEntry("electable", true);
     }
 
     @Test
@@ -141,11 +141,11 @@ class PrimosHealthIndicatorTest {
         }
 
         @Override
-        public void setCandidate(boolean candidate) {
+        public void setElectable(boolean electable) {
         }
 
         @Override
-        public boolean isCandidate() {
+        public boolean isElectable() {
             return true;
         }
 

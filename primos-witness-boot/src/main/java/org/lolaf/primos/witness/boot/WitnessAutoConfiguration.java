@@ -24,9 +24,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 import java.net.InetSocketAddress;
@@ -76,16 +76,6 @@ public class WitnessAutoConfiguration {
         return new FileConfigStore(properties.configDirectory(), MonotonicClock.SYSTEM);
     }
 
-    /**
-     * Refuses to start when settings that only the properties store reads are set under the file
-     * store.
-     *
-     * <p>Ignoring them would be the failure this module's whole precedence rule exists to prevent,
-     * arriving from the other direction: an operator sets {@code primos.witness.state-directory},
-     * nothing complains, and the state goes wherever {@code witness.properties} says instead, which
-     * is discovered when a restart cannot find a vote. There is no half of this worth guessing at,
-     * so it is a refusal rather than a warning.
-     */
     private void refuseSettingsThatTheFileOwns(WitnessProperties properties) {
         List<String> misplaced = new ArrayList<>();
         if (properties.stateDirectory() != null) {
@@ -124,9 +114,8 @@ public class WitnessAutoConfiguration {
         WitnessServer.Builder server = WitnessServer.builder()
                 .configStore(configStore)
                 .nodeId(properties.nodeId());
-        InetSocketAddress bind = bindAddress(configStore, properties);
-        if (bind != null) {
-            server.bindAddress(bind);
+        if (properties.bind().isSet()) {
+            server.bindAddress(bindAddress(properties.bind(), configStore.current().settings().bindAddress()));
         }
         // A tenant's sink has to be in place before build(), because the constructor opens every
         // application the configuration directory already names.
@@ -159,34 +148,8 @@ public class WitnessAutoConfiguration {
         return new WitnessServerLifecycle(server, stopTimeout);
     }
 
-    /**
-     * The health endpoint's view of this witness.
-     *
-     * <p>Contributed only when the application actually has actuator health on its classpath, so
-     * the module still works in a deployment that has stripped it.
-     */
-    @Bean
-    @ConditionalOnClass(HealthIndicator.class)
-    @ConditionalOnMissingBean
-    public WitnessHealthIndicator witnessHealthIndicator(WitnessServer server,
-                                                         WitnessServerLifecycle lifecycle) {
-        return new WitnessHealthIndicator(server, lifecycle);
-    }
-
-    /**
-     * What {@code primos.witness.bind.*} overrides, or null to leave the file alone.
-     *
-     * <p>Either half may be given by itself (a container setting the port and nothing else is the
-     * common case) so the half that was not given is taken from the address the file already
-     * produced rather than from a default invented here. That keeps one answer to "what does this
-     * witness bind to?" instead of two that can disagree.
-     */
-    private InetSocketAddress bindAddress(ConfigStore configStore, WitnessProperties properties) {
-        WitnessProperties.BindProperties bind = properties.bind();
-        if (!bind.isSet()) {
-            return null;
-        }
-        InetSocketAddress configured = configStore.current().settings().bindAddress();
+    private static InetSocketAddress bindAddress(WitnessProperties.BindProperties bind, InetSocketAddress configured) {
+        // Either half may be given alone; the other comes from the file rather than from a default invented here.
         int port = bind.port() != null ? bind.port() : configured.getPort();
         if (bind.host() == null) {
             return new InetSocketAddress(configured.getAddress(), port);
@@ -194,5 +157,21 @@ public class WitnessAutoConfiguration {
         return bind.host().isEmpty()
                 ? new InetSocketAddress(port)
                 : new InetSocketAddress(bind.host(), port);
+    }
+
+    /**
+     * The health endpoint's view of this witness, only where actuator health is on the classpath. A nested class,
+     * because Spring reads every method of a configuration class before any condition: a {@code @Bean} method
+     * returning a {@code HealthIndicator} on the outer class would fail the whole auto-configuration without it.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
+    static class Health {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public WitnessHealthIndicator witnessHealthIndicator(WitnessServer server, WitnessServerLifecycle lifecycle) {
+            return new WitnessHealthIndicator(server, lifecycle);
+        }
     }
 }

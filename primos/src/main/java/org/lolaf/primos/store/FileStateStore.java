@@ -189,17 +189,11 @@ public final class FileStateStore implements StateStore {
         }
     }
 
-    /**
-     * Makes the rename itself durable. Without this the file can be back after a crash but the
-     * directory entry pointing at it need not be.
-     *
-     * <p>Best effort: some platforms, Windows among them, refuse to open a directory as a channel.
-     * The rename is still atomic there, so the window this closes is narrower rather than absent.
-     */
     private void syncDirectory() {
         try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
             channel.force(true);
         } catch (IOException | UnsupportedOperationException e) {
+            // Best effort: Windows among others refuses a directory channel, and the rename is still atomic there.
             log.debug("this platform does not support syncing a directory: {}", e.toString());
         }
     }
@@ -236,9 +230,6 @@ public final class FileStateStore implements StateStore {
         return new PersistentState(view.getLong(OFFSET_TERM), view.getInt(OFFSET_VOTED_FOR));
     }
 
-    /**
-     * Over everything up to, but not including, the checksum itself.
-     */
     private int checksumOf(byte[] bytes) {
         crc.reset();
         crc.update(bytes, 0, OFFSET_CRC);

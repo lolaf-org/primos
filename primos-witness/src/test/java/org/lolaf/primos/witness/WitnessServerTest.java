@@ -17,10 +17,16 @@ package org.lolaf.primos.witness;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,10 +36,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Peer;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.core.ElectionNode;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.time.MonotonicClock;
+import org.mockito.MockedStatic;
 
 /**
  * The multi-tenant server: routing by application name, registration policy, and the isolation
@@ -534,6 +542,26 @@ class WitnessServerTest {
         assertThat(server.servedApplications()).containsExactly("payments");
     }
 
+    /**
+     * A name no key covers has no way to prove itself, which is not the same as a witness that holds no keys at all.
+     */
+    @Test
+    void a_name_no_key_covers_creates_nothing_on_a_witness_that_holds_keys() {
+        settings(String.join("\n", "config.source=cluster",
+                "secret.orders.value = orders-secret",
+                "secret.orders.applications = orders-*"));
+        start();
+
+        try (WitnessClient anybody = new WitnessClient("payments", 1, null, WITNESS_ID, server.boundAddress())) {
+            anybody.announceConfig(server);
+        }
+
+        assertThat(server.servedApplications())
+                .as("reaching the port must not be enough to make a state directory here")
+                .isEmpty();
+        assertThat(server.routing().registrationBadTag()).isEqualTo(1L);
+    }
+
     @Test
     void a_name_that_could_choose_where_its_state_is_written_is_refused() {
         settings("config.source=cluster\nsecret.shared.value=" + SECRET);
@@ -772,15 +800,41 @@ class WitnessServerTest {
     }
 
     @Test
+    void a_failed_bind_closes_the_channel_it_opened() throws IOException {
+        DatagramChannel channel = mock(DatagramChannel.class);
+        when(channel.bind(any())).thenThrow(new BindException("in use"));
+        FileConfigStore store = new FileConfigStore(directory, MonotonicClock.SYSTEM);
+
+        try (MockedStatic<DatagramChannel> open = mockStatic(DatagramChannel.class)) {
+            open.when(DatagramChannel::open).thenReturn(channel);
+
+            assertThatThrownBy(() -> WitnessServer.builder()
+                    .configStore(store)
+                    .nodeId(WITNESS_ID)
+                    .bindAddress(loopback())
+                    .build())
+                    .hasMessageContaining("cannot open its socket");
+        }
+
+        verify(channel).close();
+    }
+
+    @Test
     void a_witness_serving_normally_never_fails_to_send_a_reply() {
         application("orders");
-        start();
+        RecordingStats recorded = new RecordingStats();
+        server = WitnessServer.builder()
+                .configStore(new FileConfigStore(directory, MonotonicClock.SYSTEM))
+                .nodeId(WITNESS_ID)
+                .bindAddress(loopback())
+                .statsListeners(application -> recorded)
+                .build();
 
         try (WitnessClient candidate = client("orders", 1)) {
             assertThat(candidate.requestVote(server, 1L)).isTrue();
         }
 
-        assertThat(server.routing().undeliverableReplies())
+        assertThat(recorded.sendsDropped())
                 .as("a witness that silently fails to answer is indistinguishable from one nobody"
                         + " is asking, and the cluster waiting for the vote is what pays")
                 .isZero();

@@ -34,7 +34,7 @@ Every message starts with the same 52 bytes. Integers are big-endian (network by
 | 0 | 4 | magic | ASCII `PRMS` |
 | 4 | 1 | version | `1`. An unknown version is dropped, never guessed |
 | 5 | 1 | message type | see the table below. Never `0`, so a zeroed buffer is not a message |
-| 6 | 2 | flags | bit 0: pre-vote. Bit 1: declines candidacy, on `AppendEntriesReply`. Bit 2: handover, on `RequestVote`. Other bits are reserved, sent as zero and ignored on receive |
+| 6 | 2 | flags | bit 0: pre-vote. Bit 1: not electable, on `AppendEntriesReply`. Bit 2: handover, on `RequestVote`. Other bits are reserved, sent as zero and ignored on receive |
 | 8 | 32 | application name | UTF-8, zero-padded. 1 to 32 bytes of printable ASCII, no spaces |
 | 40 | 8 | term | signed 64-bit, the sender's current term (with one exception, below) |
 | 48 | 4 | sender id | signed 32-bit, the sender's node id |

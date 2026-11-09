@@ -99,17 +99,8 @@ public class LeaderLifecycleController implements PrimosListener, SmartLifecycle
         });
     }
 
-    /**
-     * Beans that must never be gated, however wide the scope.
-     *
-     * <p>Two of them are primos' own: gating the node on leadership would stop the very thing that
-     * reports it. The third is the one that had to be found rather than predicted: Spring's
-     * {@link LifecycleProcessor} is itself a {@link Lifecycle} bean, so a sweep of every
-     * {@code Lifecycle} in the context picks it up, and stopping it stops <em>every</em> lifecycle
-     * bean there is. That is {@code context.stop()} by another name, re-entrant, and it takes the
-     * node down with it while the context is still refreshing.
-     */
     private static boolean isInfrastructure(Lifecycle lifecycle) {
+        // Spring's processor is a Lifecycle bean too, and stopping it stops every bean: context.stop() by another name.
         return lifecycle instanceof LifecycleProcessor
                 || lifecycle instanceof PrimosNodeLifecycle
                 || lifecycle instanceof LeaderLifecycleController;

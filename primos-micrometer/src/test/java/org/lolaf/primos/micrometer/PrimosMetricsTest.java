@@ -25,6 +25,7 @@ import org.lolaf.primos.DropReason;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.PrimosNodeBuilder;
+import org.lolaf.primos.SendDropReason;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.store.MemoryStateStore;
 import org.lolaf.primos.transport.LoopbackNetwork;
@@ -74,7 +75,7 @@ class PrimosMetricsTest {
         assertThat(gauge("primos.role", "role", "follower")).isZero();
         assertThat(gauge("primos.term")).isGreaterThan(0.0);
         assertThat(gauge("primos.node.running")).isEqualTo(1.0);
-        assertThat(gauge("primos.candidate")).isEqualTo(1.0);
+        assertThat(gauge("primos.electable")).isEqualTo(1.0);
         assertThat(gauge("primos.voters")).isEqualTo(1.0);
         assertThat(gauge("primos.quorum.required")).isEqualTo(1.0);
 
@@ -82,8 +83,8 @@ class PrimosMetricsTest {
         assertThat(counter("primos.role.changes", "to", "leader")).isEqualTo(1.0);
         assertThat(counter("primos.leader.changes")).isGreaterThanOrEqualTo(1.0);
 
-        node.setCandidate(false);
-        assertThat(gauge("primos.candidate")).isZero();
+        node.setElectable(false);
+        assertThat(gauge("primos.electable")).isZero();
     }
 
     /**
@@ -110,6 +111,9 @@ class PrimosMetricsTest {
         for (DropReason reason : DropReason.values()) {
             metrics.onDatagramDropped(reason);
         }
+        for (SendDropReason reason : SendDropReason.values()) {
+            metrics.onSendDropped(reason);
+        }
 
         assertThat(timerCount("primos.campaign", "outcome", "won")).isEqualTo(1);
         assertThat(timerCount("primos.campaign", "outcome", "lost")).isEqualTo(1);
@@ -127,6 +131,11 @@ class PrimosMetricsTest {
         for (DropReason reason : DropReason.values()) {
             assertThat(counter("primos.datagrams.dropped", "reason", reason.name().toLowerCase()))
                     .as("drop reason %s", reason)
+                    .isEqualTo(1.0);
+        }
+        for (SendDropReason reason : SendDropReason.values()) {
+            assertThat(counter("primos.sends.dropped", "reason", reason.name().toLowerCase()))
+                    .as("send drop reason %s", reason)
                     .isEqualTo(1.0);
         }
     }

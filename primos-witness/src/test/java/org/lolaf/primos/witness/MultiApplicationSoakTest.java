@@ -40,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosNode;
+import org.lolaf.primos.RecordingStats;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.store.MemoryStateStore;
@@ -60,6 +61,8 @@ import org.lolaf.primos.transport.UdpTransport;
  * that one process running three of them keeps them apart.
  */
 class MultiApplicationSoakTest {
+
+    private final RecordingStats recorded = new RecordingStats();
 
     private static final String LOOPBACK = "127.0.0.1";
     private static final String SECRET = "a-shared-cluster-secret";
@@ -145,7 +148,7 @@ class MultiApplicationSoakTest {
         assertThat(server.routing().unservedApplication())
                 .as("every datagram belonged to a configured cluster")
                 .isZero();
-        assertThat(server.routing().undeliverableReplies())
+        assertThat(recorded.sendsDropped())
                 .as("every reply reached somebody, including the first from each node: those are"
                         + " answered before the sender has been learned, and getting that wrong"
                         + " costs every new node a whole election timeout to retry")
@@ -217,6 +220,7 @@ class MultiApplicationSoakTest {
                 .nodeId(WITNESS_ID)
                 .bindAddress(new InetSocketAddress(LOOPBACK, 0))
                 .timings(FAST)
+                .statsListeners(application -> recorded)
                 .build();
         serverThread = new Thread(server::run, "witness-under-test");
         serverThread.setDaemon(true);

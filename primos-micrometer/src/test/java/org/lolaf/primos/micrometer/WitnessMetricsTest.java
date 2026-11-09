@@ -66,10 +66,7 @@ class WitnessMetricsTest {
     }
 
     /**
-     * These are the witness's first counters to reach anything but a {@code toString}, and the one
-     * to alert on is {@code undeliverable_replies}: a witness that silently fails to answer looks
-     * exactly like a witness nobody is asking, while the cluster on the other end waits out an
-     * election timeout for a vote that was never coming.
+     * These are the witness's first counters to reach anything but a {@code toString}.
      */
     @Test
     void the_routing_counters_reach_the_registry_and_move() throws IOException {
@@ -77,8 +74,7 @@ class WitnessMetricsTest {
 
         assertThat(registry.find("primos.witness.routing").functionCounters())
                 .as("every field of RoutingStats, one series each")
-                .hasSize(10);
-        assertThat(routing("undeliverable_replies")).isZero();
+                .hasSize(9);
 
         sendJunk();
 

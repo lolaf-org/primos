@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.spring;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.spring.PrimosProperties.NodeLifecycle;
@@ -40,6 +42,7 @@ import org.springframework.context.event.EventListener;
  * and only then hands leadership on.
  */
 @Slf4j
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public class PrimosNodeLifecycle implements SmartLifecycle {
 
     /**
@@ -50,23 +53,10 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
 
     private final PrimosNode node;
     private final NodeLifecycle mode;
-    private final boolean gatingEnabled;
     private final LeaderLifecycleController controller;
     private final ApplicationContext context;
 
     private volatile boolean running;
-
-    PrimosNodeLifecycle(PrimosNode node,
-                        NodeLifecycle mode,
-                        boolean gatingEnabled,
-                        LeaderLifecycleController controller,
-                        ApplicationContext context) {
-        this.node = node;
-        this.mode = mode;
-        this.gatingEnabled = gatingEnabled;
-        this.controller = controller;
-        this.context = context;
-    }
 
     /**
      * Quiesces the gated beans, then joins the cluster if that is Spring's job.
@@ -130,7 +120,7 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
      * correct, and warning about it would be noise.
      */
     boolean isWaitingOnAManualStart() {
-        return mode == NodeLifecycle.MANUAL && gatingEnabled && !node.isRunning();
+        return mode == NodeLifecycle.MANUAL && controller != null && !node.isRunning();
     }
 
     /**

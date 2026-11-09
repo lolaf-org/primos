@@ -122,8 +122,8 @@ configure.
 
 The two worth alerting on:
 
-- `primos.witness.routing{reason="undeliverable_replies"}` should stay at zero. A witness that silently fails to answer
-  looks exactly like a witness nobody is asking.
+- `primos.sends.dropped`, on any `reason` but `transport_closed`, should stay at zero. A witness that silently fails to
+  answer looks exactly like a witness nobody is asking.
 - `primos.witness.applications{state="quarantined"}` above zero is the health detail as a number.
 
 The catalogue and the tag rules are in [Micrometer](micrometer.md).

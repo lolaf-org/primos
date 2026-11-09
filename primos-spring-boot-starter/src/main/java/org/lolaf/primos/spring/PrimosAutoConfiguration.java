@@ -36,16 +36,13 @@ import org.springframework.context.annotation.Configuration;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
  * Configures a {@link PrimosNode} from {@code primos.*} and runs it with the context.
  *
  * <p>Inactive until {@code primos.application-name} is set, so the module can sit on a classpath
- * doing nothing. Every bean it contributes backs off if the application defines its own, which is
+ * doing nothing. The beans describing the node back off if the application defines its own, which is
  * the escape hatch for anything this configuration does not express: custom {@link Timings}, a
  * different {@link StateStore}, a {@link Transport} built by hand.
  */
@@ -57,30 +54,17 @@ import java.util.function.Supplier;
 public class PrimosAutoConfiguration {
 
     private static Timings toTimings(PrimosProperties.TimingsProperties timings) {
-        List<String> explicit = timings.explicitKeys();
-        if (timings.profile() != null && !explicit.isEmpty()) {
-            throw new IllegalStateException("primos.timings.profile is set to '"
-                    + timings.profile().name().toLowerCase(Locale.ROOT) + "' and so is "
-                    + String.join(", ", explicit) + ". Choose one: a profile is a set of intervals"
-                    + " picked to hold together, so overriding part of one leaves a custom set"
-                    + " whose author has not seen the other values. Either drop the profile and"
-                    + " name every interval you want, or drop the individual keys.");
-        }
-        if (timings.profile() != null) {
-            return timings.profile() == PrimosProperties.Profile.WAN ? Timings.wan() : Timings.lan();
-        }
-        if (explicit.isEmpty()) {
-            return Timings.lan();
-        }
-        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
-                "primos.timings.election-timeout-min", "primos.timings.election-timeout-max");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(timings.heartbeatInterval())
-                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
-                .probeIntervalIfSet(timings.probeInterval())
-                .advertisementIntervalIfSet(timings.advertisementInterval())
-                .failureThresholdIfSet(timings.failureThreshold())
-                .build();
+        String prefix = "primos.timings";
+        return Timings.resolve(prefix + ".profile", timings.profile() == null ? null : timings.profile().name(),
+                timings.explicitKeys(prefix), Timings.lan(),
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                        .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                                prefix + ".election-timeout-min", prefix + ".election-timeout-max")
+                        .probeIntervalIfSet(timings.probeInterval())
+                        .advertisementIntervalIfSet(timings.advertisementInterval())
+                        .failureThresholdIfSet(timings.failureThreshold())
+                        .build());
     }
 
     private static byte[] secretBytes(PrimosProperties properties) {
@@ -89,19 +73,6 @@ public class PrimosAutoConfiguration {
                 ? null : secret.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static List<Peer> toPeers(List<PeerProperties> peers, boolean witness) {
-        List<Peer> result = new ArrayList<>();
-        peers.forEach(peer -> result.add(toPeer(peer, witness)));
-        return result;
-    }
-
-    /**
-     * The name is passed through untouched, including when it is null.
-     *
-     * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
-     * and substituting anything here (the bare id, say) would give a peer configured through
-     * Spring a different default from the identical peer configured through the library.
-     */
     private static Peer toPeer(PeerProperties peer, boolean witness) {
         return witness
                 ? Peer.witness(peer.id(), peer.name(), peer.host(), peer.port())
@@ -140,7 +111,7 @@ public class PrimosAutoConfiguration {
                 .nodeId(properties.nodeId())
                 .timings(timings)
                 .voteLogging(properties.voteLogging())
-                .peers(toPeers(properties.peers(), false));
+                .peers(properties.peers().stream().map(peer -> toPeer(peer, false)).toList());
         if (properties.witness() != null) {
             cluster.witness(toPeer(properties.witness(), true));
         }
@@ -229,8 +200,7 @@ public class PrimosAutoConfiguration {
                                                    PrimosProperties properties,
                                                    ObjectProvider<LeaderLifecycleController> gating,
                                                    ApplicationContext context) {
-        return new PrimosNodeLifecycle(node, properties.lifecycle(),
-                properties.leaderLifecycle().enabled(), gating.getIfAvailable(), context);
+        return new PrimosNodeLifecycle(node, properties.lifecycle(), gating.getIfAvailable(), context);
     }
 
     @Bean

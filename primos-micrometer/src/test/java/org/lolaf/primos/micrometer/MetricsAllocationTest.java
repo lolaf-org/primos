@@ -21,6 +21,7 @@ import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.DropReason;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PrimosStatsListener;
+import org.lolaf.primos.SendDropReason;
 
 import java.lang.management.ManagementFactory;
 
@@ -41,6 +42,7 @@ class MetricsAllocationTest {
 
     private static final int PEER = 201;
     private static final DropReason REASON = DropReason.BAD_TAG;
+    private static final SendDropReason SEND_REASON = SendDropReason.SOCKET_ERROR;
 
     @Test
     void recording_an_event_allocates_nothing_the_no_op_sink_does_not() {
@@ -103,11 +105,12 @@ class MetricsAllocationTest {
     }
 
     /**
-     * The two callbacks that fire most: one per dropped datagram, one per probe reply.
+     * The callbacks that fire most: per dropped datagram, per send a socket refused, per probe reply.
      */
     private void drive(PrimosStatsListener sink, int events) {
         for (int i = 0; i < events; i++) {
             sink.onDatagramDropped(REASON);
+            sink.onSendDropped(SEND_REASON);
             sink.onProbeRoundTrip(PEER, 250_000);
         }
     }

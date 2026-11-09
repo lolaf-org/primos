@@ -38,7 +38,7 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration(after = PrimosAutoConfiguration.class,
         afterName = "org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration")
 @ConditionalOnClass({MeterRegistry.class, PrimosMetrics.class})
-@ConditionalOnBean(MeterRegistry.class)
+@ConditionalOnBean({MeterRegistry.class, ClusterConfig.class, PrimosNode.class})
 public class PrimosMetricsAutoConfiguration {
 
     @Bean

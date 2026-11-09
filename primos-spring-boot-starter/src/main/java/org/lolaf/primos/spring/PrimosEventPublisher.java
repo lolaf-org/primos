@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.spring;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PeerDownReason;
@@ -30,13 +32,10 @@ import java.util.Optional;
  * <p>Runs wherever the node's listener dispatch runs, which is off the node thread, so a slow
  * {@code @EventListener} cannot stall consensus.
  */
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 class PrimosEventPublisher implements PrimosListener {
 
     private final ApplicationEventPublisher events;
-
-    PrimosEventPublisher(ApplicationEventPublisher events) {
-        this.events = events;
-    }
 
     @Override
     public void onRoleChanged(Role previous, Role current, long term) {

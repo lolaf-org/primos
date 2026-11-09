@@ -110,12 +110,6 @@ public enum MessageType {
     private final int code;
 
     /**
-     * Bytes after the header.
-     */
-    @Getter
-    private final int payloadBytes;
-
-    /**
      * Header plus payload, excluding any authentication tag.
      */
     @Getter
@@ -123,7 +117,6 @@ public enum MessageType {
 
     MessageType(int code, int payloadBytes) {
         this.code = code;
-        this.payloadBytes = payloadBytes;
         this.messageBytes = WireFormat.HEADER_BYTES + payloadBytes;
     }
 

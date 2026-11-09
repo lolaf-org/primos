@@ -101,11 +101,11 @@ class ReadmeExamplesTest {
             if (node.transferLeadership()) {
                 // told a follower to campaign; wait for onRoleChanged with a deadline of your own
             }
-            node.setCandidate(false); // votes, never campaigns
-            node.setCandidate(true);  // stands again, after a full election timeout
+            node.setElectable(false); // votes, never campaigns
+            node.setElectable(true);  // stands again, after a full election timeout
 
             assertThat(node.transferLeadership()).as("its only peer never answers, so it never leads").isFalse();
-            assertThat(node.isCandidate()).isTrue();
+            assertThat(node.isElectable()).isTrue();
         }
     }
 

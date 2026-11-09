@@ -55,10 +55,7 @@ final class WitnessClient implements AutoCloseable {
     WitnessClient(String application, int nodeId, String secret, String previousSecret,
                   int witnessId, InetSocketAddress witness) {
         this.witness = witness;
-        MessageAuthenticator authenticator = secret == null
-                ? MessageAuthenticator.disabled()
-                : MessageAuthenticator.hmacSha256(secret.getBytes(StandardCharsets.UTF_8),
-                previousSecret == null ? null : previousSecret.getBytes(StandardCharsets.UTF_8));
+        MessageAuthenticator authenticator = authenticator(secret, previousSecret);
         this.encoder = new MessageEncoder(application, nodeId, authenticator);
         this.decoder = new MessageDecoder(application, authenticator,
                 id -> id == witnessId, new org.lolaf.primos.RecordingStats());
@@ -69,6 +66,18 @@ final class WitnessClient implements AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static MessageAuthenticator authenticator(String secret, String previousSecret) {
+        if (secret == null) {
+            return MessageAuthenticator.disabled();
+        }
+        byte[] key = secret.getBytes(StandardCharsets.UTF_8);
+        if (previousSecret == null) {
+            return MessageAuthenticator.hmac(MessageAuthenticator.DEFAULT_ALGORITHM, key);
+        }
+        return MessageAuthenticator.keyring(java.util.Arrays.asList(MessageAuthenticator.KeySpec.of(null, key),
+                MessageAuthenticator.KeySpec.of(null, previousSecret.getBytes(StandardCharsets.UTF_8))));
     }
 
     /**
@@ -250,7 +259,7 @@ final class WitnessClient implements AutoCloseable {
         }
 
         @Override
-        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
+        public void onAppendEntriesReply(int senderId, long term, boolean success, boolean electable, long sentNanos) {
             this.answered = true;
         }
 

@@ -95,7 +95,7 @@ public final class WitnessMetrics {
 
         ROUTING.forEach((reason, value) -> FunctionCounter
                 .builder("primos.witness.routing", server, s -> value.applyAsDouble(s.routing()))
-                .description("Datagrams that reached no application, and replies that reached no node")
+                .description("Datagrams that reached no application")
                 .tags(base.and("reason", reason))
                 .register(registry));
 
@@ -120,16 +120,13 @@ public final class WitnessMetrics {
         return metrics;
     }
 
-    /**
-     * A served tenant's term and quarantine state, once both the tenant and the server are known.
-     */
     private void registerTenantGauges(String application) {
         WitnessServer bound = server;
         if (bound == null || !gauged.add(application)) {
             return;
         }
         Tags tags = base.and("application", application);
-        Gauge.builder("primos.witness.term", bound, s -> term(s, application))
+        Gauge.builder("primos.witness.term", bound, s -> termOrNaN(s, application))
                 .description("The term this witness holds for one served cluster")
                 .tags(tags)
                 .strongReference(true)
@@ -142,21 +139,14 @@ public final class WitnessMetrics {
                 .register(registry);
     }
 
-    /**
-     * NaN rather than zero once a cluster is no longer served: a term of 0 is a real value and
-     * would read as a witness that had forgotten its vote.
-     */
-    private static double term(WitnessServer server, String application) {
+    private static double termOrNaN(WitnessServer server, String application) {
+        // Not zero once a cluster is no longer served: a term of 0 would read as a witness that forgot its vote.
         return server.servedApplications().contains(application)
                 ? server.currentTerm(application)
                 : Double.NaN;
     }
 
-    /**
-     * Every field of {@code RoutingStats}, as function counters: the server maintains the counts,
-     * so this reads them rather than keeping a second set that could drift. They can step
-     * backwards when a tenant is removed, since two of them are sums over the served set.
-     */
+    // inbox_overflowed is a sum over the served set, so it can step backwards when a tenant is removed.
     private static Map<String, ToDoubleFunction<WitnessServer.RoutingStats>> routingMeters() {
         Map<String, ToDoubleFunction<WitnessServer.RoutingStats>> meters = new LinkedHashMap<>();
         meters.put("unroutable", WitnessServer.RoutingStats::unroutable);
@@ -168,7 +158,6 @@ public final class WitnessMetrics {
         meters.put("awaiting_node_config", WitnessServer.RoutingStats::awaitingNodeConfig);
         meters.put("registration_bad_tag", WitnessServer.RoutingStats::registrationBadTag);
         meters.put("inbox_overflowed", WitnessServer.RoutingStats::inboxOverflowed);
-        meters.put("undeliverable_replies", WitnessServer.RoutingStats::undeliverableReplies);
         return meters;
     }
 }

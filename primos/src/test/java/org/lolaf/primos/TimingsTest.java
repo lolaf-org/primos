@@ -88,7 +88,7 @@ class TimingsTest {
                 .electionTimeoutMax(Duration.ofMillis(300))
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be greater than electionTimeoutMin");
+                .hasMessageContaining("spans only 0ms");
     }
 
     @Test

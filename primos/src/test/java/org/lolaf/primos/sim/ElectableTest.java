@@ -27,7 +27,7 @@ import org.lolaf.primos.Timings;
 /**
  * A node withdrawing from elections at runtime: the witness's rules, switched on and off.
  */
-class CandidacyTest {
+class ElectableTest {
 
     private static final Duration SETTLE = Duration.ofSeconds(5);
     private static final Timings TIMINGS = Timings.lan();
@@ -41,12 +41,12 @@ class CandidacyTest {
         ElectionCluster.NodeUnderTest withdrawn = followers(cluster)[0];
         ElectionCluster.NodeUnderTest standing = followers(cluster)[1];
 
-        withdrawn.election().setCandidate(false);
+        withdrawn.election().setElectable(false);
         cluster.node(leader).crash();
         simulation.run(Duration.ofSeconds(10));
 
         assertThat(cluster.leader()).hasValueSatisfying(node -> assertThat(node.id()).isEqualTo(standing.id()));
-        assertThat(withdrawn.election().isCandidate()).isFalse();
+        assertThat(withdrawn.election().isElectable()).isFalse();
         assertThat(withdrawn.election().preVotesStarted()).as("no timer, so not even a pre-vote").isZero();
     }
 
@@ -56,7 +56,7 @@ class CandidacyTest {
         ElectionCluster cluster = ElectionCluster.of(simulation, 3, false);
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         int leader = cluster.leader().get().id();
-        followers(cluster)[0].election().setCandidate(false);
+        followers(cluster)[0].election().setElectable(false);
 
         cluster.node(leader).crash();
 
@@ -73,7 +73,7 @@ class CandidacyTest {
         ElectionCluster.NodeUnderTest leader = cluster.leader().get();
         long term = leader.currentTerm();
         ElectionCluster.NodeUnderTest withdrawn = followers(cluster)[0];
-        withdrawn.election().setCandidate(false);
+        withdrawn.election().setElectable(false);
 
         // A leader that has not learned of the withdrawal can still pick the node; it says no.
         assertThat(leader.election().transferLeadership(withdrawn.id())).isTrue();
@@ -91,7 +91,7 @@ class CandidacyTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest old = cluster.leader().get();
 
-        old.election().setCandidate(false);
+        old.election().setElectable(false);
 
         assertThat(simulation.runUntil(() -> cluster.hasSingleLeader() && cluster.leader().get().id() != old.id(),
                 TIMINGS.electionTimeoutMin().dividedBy(2))).isTrue();
@@ -106,10 +106,10 @@ class CandidacyTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest old = cluster.leader().get();
         ElectionCluster.NodeUnderTest[] followers = followers(cluster);
-        followers[0].election().setCandidate(false);
-        followers[1].election().setCandidate(false);
+        followers[0].election().setElectable(false);
+        followers[1].election().setElectable(false);
 
-        old.election().setCandidate(false);
+        old.election().setElectable(false);
         simulation.run(Duration.ofSeconds(5));
 
         assertThat(cluster.leader().get().id()).as("nobody would take it, and leaving would leave no leader")
@@ -125,13 +125,13 @@ class CandidacyTest {
         ElectionCluster.NodeUnderTest old = cluster.leader().get();
         ElectionCluster.NodeUnderTest[] followers = followers(cluster);
         for (int i = 0; i < followers.length - 1; i++) {
-            followers[i].election().setCandidate(false);
+            followers[i].election().setElectable(false);
         }
         ElectionCluster.NodeUnderTest standing = followers[followers.length - 1];
         // Long enough for every follower's next heartbeat reply to have said so.
         simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
 
-        old.election().setCandidate(false);
+        old.election().setElectable(false);
 
         assertThat(simulation.runUntil(() -> cluster.hasSingleLeader() && cluster.leader().get().id() == standing.id(),
                 TIMINGS.electionTimeoutMin().dividedBy(2)))
@@ -146,12 +146,12 @@ class CandidacyTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest old = cluster.leader().get();
         ElectionCluster.NodeUnderTest[] followers = followers(cluster);
-        followers[0].election().setCandidate(false);
-        followers[1].election().setCandidate(false);
-        old.election().setCandidate(false);
+        followers[0].election().setElectable(false);
+        followers[1].election().setElectable(false);
+        old.election().setElectable(false);
         simulation.run(Duration.ofSeconds(5));
 
-        followers[1].election().setCandidate(true);
+        followers[1].election().setElectable(true);
 
         assertThat(simulation.runUntil(() -> cluster.hasSingleLeader() && cluster.leader().get().id() == followers[1].id(),
                 SETTLE)).as("the withdrawn leader kept offering").isTrue();
@@ -164,7 +164,7 @@ class CandidacyTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest leader = cluster.leader().get();
         ElectionCluster.NodeUnderTest withdrawn = followers(cluster)[0];
-        withdrawn.election().setCandidate(false);
+        withdrawn.election().setElectable(false);
         simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
 
         assertThat(leader.election().transferLeadership(withdrawn.id())).isFalse();
@@ -182,11 +182,11 @@ class CandidacyTest {
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest leader = cluster.leader().get();
         for (ElectionCluster.NodeUnderTest follower : followers(cluster)) {
-            follower.election().setCandidate(false);
+            follower.election().setElectable(false);
         }
         simulation.run(TIMINGS.heartbeatInterval().multipliedBy(3));
 
-        leader.election().setCandidate(false);
+        leader.election().setElectable(false);
         simulation.run(TIMINGS.electionTimeoutMin().multipliedBy(3));
 
         assertThat(recorded[leader.id()].noSuccessors.get()).as("the first attempt and its retries").isGreaterThanOrEqualTo(3);
@@ -204,7 +204,7 @@ class CandidacyTest {
         ElectionCluster.NodeUnderTest campaigning = cluster.nodes().stream()
                 .filter(node -> node.role() == Role.CANDIDATE).findFirst().get();
 
-        campaigning.election().setCandidate(false);
+        campaigning.election().setElectable(false);
         simulation.run(Duration.ofSeconds(10));
 
         assertThat(campaigning.role()).isEqualTo(Role.FOLLOWER);
@@ -217,12 +217,12 @@ class CandidacyTest {
         ElectionCluster cluster = ElectionCluster.of(simulation, 2, true);
         simulation.runUntil(cluster::hasSingleLeader, SETTLE);
         ElectionCluster.NodeUnderTest follower = followers(cluster)[0];
-        follower.election().setCandidate(false);
+        follower.election().setElectable(false);
         cluster.node(cluster.leader().get().id()).crash();
         simulation.run(Duration.ofSeconds(5));
         assertThat(cluster.leaderCount()).isZero();
 
-        follower.election().setCandidate(true);
+        follower.election().setElectable(true);
 
         assertThat(simulation.runUntil(() -> follower.role() != Role.FOLLOWER, TIMINGS.electionTimeoutMin().dividedBy(2)))
                 .as("its timer restarts when it stands again")

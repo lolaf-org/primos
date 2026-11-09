@@ -49,15 +49,6 @@ public final class ConfigSnapshot {
         return applications.containsKey(name);
     }
 
-    /**
-     * The same settings with one more application, for a name created from the cluster.
-     */
-    public ConfigSnapshot with(ApplicationConfig application) {
-        Map<String, ApplicationConfig> extended = new LinkedHashMap<>(applications);
-        extended.put(application.name(), application);
-        return new ConfigSnapshot(settings, extended);
-    }
-
     @Override
     public String toString() {
         return "ConfigSnapshot(" + applications.size() + " applications: "

@@ -156,11 +156,6 @@ public final class MessageDecoder {
         return true;
     }
 
-    /**
-     * The name a foreign datagram claims, for the log line. Naming it is the entire reason the
-     * field is stored readable rather than hashed: "expected orders, got ordres" diagnoses a typo
-     * instantly, where a hash mismatch would not.
-     */
     private static String readApplicationName(ByteBuffer datagram) {
         byte[] raw = new byte[WireFormat.APPLICATION_BYTES];
         int length = 0;
@@ -237,7 +232,7 @@ public final class MessageDecoder {
                 break;
             case APPEND_ENTRIES_REPLY:
                 handler.onAppendEntriesReply(senderId, term,
-                        datagram.get(WireFormat.HEADER_BYTES) != 0, (flags & WireFormat.FLAG_DECLINES_CANDIDACY) == 0,
+                        datagram.get(WireFormat.HEADER_BYTES) != 0, (flags & WireFormat.FLAG_NOT_ELECTABLE) == 0,
                         datagram.getLong(WireFormat.HEADER_BYTES + 1));
                 break;
             case PING:
@@ -274,20 +269,7 @@ public final class MessageDecoder {
         return true;
     }
 
-    /**
-     * Refuses a datagram: tells the listener, and says why at DEBUG.
-     *
-     * <p><strong>DEBUG and not WARN, deliberately.</strong> Logging every dropped datagram at a
-     * visible level turns a flood into a second denial of service: the attacker sends garbage and
-     * the victim writes all of it down. The listener is the signal; the line is for somebody who
-     * turned it on because they are already diagnosing something.
-     *
-     * <p>Guarded rather than left to the logger, and that was measured rather than assumed. SLF4J
-     * takes {@code Object}, so an {@code int} sender id is boxed and gathered into a varargs array
-     * <em>at the call site</em>, before the logger can decide the level is off: an allocation on
-     * the one path whose rate an attacker chooses, which is precisely the path that must not
-     * allocate. Hence primitives in the signatures and the boxing inside the guard.
-     */
+    // Guarded: SLF4J boxes its arguments before checking the level, and an attacker chooses this path's rate.
     private boolean drop(DropReason reason, String detail) {
         stats.onDatagramDropped(reason);
         if (log.isDebugEnabled()) {

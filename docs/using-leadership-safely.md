@@ -32,7 +32,7 @@ When the external system cannot check a term, the best left is to stop before a 
 `leadershipConfirmedNanos()` is when the latest heartbeat a quorum answered was sent; no successor is elected before
 `electionTimeoutMin` after it. End your lease earlier, by a margin covering clock drift and the time your own stop
 takes, and check it when it ends, not on your next poll. Handing leadership over (`stop()`, `transferLeadership()`,
-`setCandidate(false)`) lets the successor campaign at once: stop the guarded work before.
+`setElectable(false)`) lets the successor campaign at once: stop the guarded work before.
 
 ## Keep callbacks short
 

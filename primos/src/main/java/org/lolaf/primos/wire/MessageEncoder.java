@@ -99,8 +99,8 @@ public final class MessageEncoder {
      * A heartbeat acknowledgement, saying whether the sender stands for election, and echoing the heartbeat's send
      * instant.
      */
-    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success, boolean candidate, long sentNanos) {
-        header(out, MessageType.APPEND_ENTRIES_REPLY, candidate ? 0 : WireFormat.FLAG_DECLINES_CANDIDACY, term);
+    public ByteBuffer appendEntriesReply(ByteBuffer out, long term, boolean success, boolean electable, long sentNanos) {
+        header(out, MessageType.APPEND_ENTRIES_REPLY, electable ? 0 : WireFormat.FLAG_NOT_ELECTABLE, term);
         out.put(success ? (byte) 1 : (byte) 0);
         out.putLong(sentNanos);
         return finish(out);
@@ -163,15 +163,8 @@ public final class MessageEncoder {
         return finish(out);
     }
 
-    /**
-     * How many bytes a message of this type occupies, tag included.
-     */
-    public int sizeOf(MessageType type) {
-        return type.messageBytes() + authenticator.tagBytes();
-    }
-
     private void header(ByteBuffer out, MessageType type, int flags, long term) {
-        int needed = sizeOf(type);
+        int needed = type.messageBytes() + authenticator.tagBytes();
         if (out.capacity() < needed) {
             throw new IllegalArgumentException(
                     "buffer holds " + out.capacity() + " bytes but " + type + " needs " + needed);

@@ -31,7 +31,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.zip.CRC32;
 
 /**
@@ -59,13 +58,20 @@ public final class FileConfigStore implements ConfigStore {
     private static final String APPLICATIONS_DIRECTORY = "applications";
     private static final String SETTINGS_FILE = "witness.properties";
     private static final String SUFFIX = ".properties";
-    private static final String KEY_PREFIX = "secret.";
+    private static final String SECRET_PREFIX = "secret.";
     private static final String FILE_SECRET = "file:";
     private static final String ENV_SECRET = "env:";
+    private static final String HEARTBEAT_KEY = "timings.heartbeat.millis";
+    private static final String ELECTION_MIN_KEY = "timings.election.min.millis";
+    private static final String ELECTION_MAX_KEY = "timings.election.max.millis";
+    private static final String PROBE_KEY = "timings.probe.millis";
+    private static final String ADVERTISEMENT_KEY = "timings.advertisement.millis";
+    private static final String FAILURE_THRESHOLD_KEY = "timings.failure.threshold";
+    private static final List<String> INTERVAL_KEYS = Collections.unmodifiableList(Arrays.asList(
+            HEARTBEAT_KEY, ELECTION_MIN_KEY, ELECTION_MAX_KEY, PROBE_KEY, ADVERTISEMENT_KEY, FAILURE_THRESHOLD_KEY));
 
     private final Path directory;
     private final Path applicationsDirectory;
-    private final List<ConfigChangeListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
      * Names already told that their timing keys are being ignored, so it is said once each.
@@ -78,7 +84,7 @@ public final class FileConfigStore implements ConfigStore {
     /**
      * A checksum of the configuration as last read. A tick that produces the same one does nothing.
      */
-    private long stamp;
+    private long lastChecksum;
     private volatile ConfigSnapshot current;
     private long nextRescanNanos;
     private boolean closed;
@@ -96,87 +102,42 @@ public final class FileConfigStore implements ConfigStore {
     public FileConfigStore(Path directory, MonotonicClock clock) {
         this.directory = directory;
         this.applicationsDirectory = directory.resolve(APPLICATIONS_DIRECTORY);
+        // Before the read, so an edit landing between the two is seen by the next rescan rather than absorbed.
+        this.lastChecksum = checksum();
         this.current = read();
         this.nextRescanNanos = clock.nanoTime() + current.settings().rescanInterval().toNanos();
-        this.stamp = stamp();
         logServedApplications();
     }
 
-    /**
-     * The intervals the served nodes run with: <strong>either</strong> a named profile
-     * <strong>or</strong> the values spelled out, never both.
-     *
-     * <p>A profile is a set of intervals chosen so the relationships between them hold: the
-     * election timeout an order of magnitude above the round trip, and so on. Overriding part of
-     * one leaves a custom set whose author has not seen the other values, so the mixture is refused
-     * rather than merged.
-     *
-     * <p><strong>Whatever is set here must match the clusters this witness serves.</strong> A node
-     * refuses a pre-vote while it has heard from a leader within {@code electionTimeoutMin}, so a
-     * witness with a longer one is proportionally more reluctant to agree to the failover its vote
-     * is needed for, and for a two-node pair the witness's vote is the one everything waits on.
-     * Nothing detects the mismatch; failover just gets slower.
-     *
-     * <p>Durations are milliseconds rather than {@code 250ms} strings, because this file is parsed
-     * with {@link Properties} and nothing else, and a duration parser is not worth writing twice.
-     */
     private static Timings timings(Properties properties, Timings fallback) {
-        String profile = properties.getProperty("timings.profile");
-        List<String> explicit = new ArrayList<>(5);
-        Duration heartbeat = optionalMillis(properties, "timings.heartbeat.millis", explicit);
-        Duration electionMin = optionalMillis(properties, "timings.election.min.millis", explicit);
-        Duration electionMax = optionalMillis(properties, "timings.election.max.millis", explicit);
-        Duration probe = optionalMillis(properties, "timings.probe.millis", explicit);
-        Duration advertisement = optionalMillis(properties, "timings.advertisement.millis", explicit);
-        Integer failureThreshold = optionalInt(properties, "timings.failure.threshold", explicit);
-
-        if (profile != null && !profile.trim().isEmpty() && !explicit.isEmpty()) {
-            throw new IllegalArgumentException("timings.profile is set to '" + profile.trim()
-                    + "' and so is " + String.join(", ", explicit) + ". Choose one: a profile is a"
-                    + " set of intervals picked to hold together, so overriding part of one leaves"
-                    + " a custom set whose author has not seen the other values. Either drop"
-                    + " timings.profile and name every interval, or drop the individual keys.");
-        }
-        if (profile != null && !profile.trim().isEmpty()) {
-            return timingsProfile(profile);
-        }
-        if (explicit.isEmpty()) {
-            return fallback;
-        }
-        Timings.requireElectionBoundsTogether(electionMin, electionMax,
-                "timings.election.min.millis", "timings.election.max.millis");
-        return Timings.builder()
-                .heartbeatIntervalIfSet(heartbeat)
-                .electionTimeoutIfSet(electionMin, electionMax)
-                .probeIntervalIfSet(probe)
-                .advertisementIntervalIfSet(advertisement)
-                .failureThresholdIfSet(failureThreshold)
-                .build();
+        return Timings.resolve("timings.profile", properties.getProperty("timings.profile"),
+                intervalKeysSet(properties), fallback,
+                () -> Timings.builder()
+                        .heartbeatIntervalIfSet(optionalMillis(properties, HEARTBEAT_KEY))
+                        .electionTimeoutIfSet(optionalMillis(properties, ELECTION_MIN_KEY),
+                                optionalMillis(properties, ELECTION_MAX_KEY), ELECTION_MIN_KEY, ELECTION_MAX_KEY)
+                        .probeIntervalIfSet(optionalMillis(properties, PROBE_KEY))
+                        .advertisementIntervalIfSet(optionalMillis(properties, ADVERTISEMENT_KEY))
+                        .failureThresholdIfSet(optionalInt(properties, FAILURE_THRESHOLD_KEY))
+                        .build());
     }
 
-    private static Timings timingsProfile(String profile) {
-        String name = profile.trim().toLowerCase(Locale.ROOT);
-        if ("lan".equals(name)) {
-            return Timings.lan();
+    private static List<String> intervalKeysSet(Properties properties) {
+        List<String> set = new ArrayList<>(INTERVAL_KEYS.size());
+        for (String key : INTERVAL_KEYS) {
+            String raw = properties.getProperty(key);
+            if (raw != null && !raw.trim().isEmpty()) {
+                set.add(key);
+            }
         }
-        if ("wan".equals(name)) {
-            return Timings.wan();
-        }
-        throw new IllegalArgumentException(
-                "timings.profile must be 'lan' or 'wan', but was '" + profile + "'");
+        return set;
     }
 
-    /**
-     * Reads an optional integer, recording the key in {@code explicit} when it was actually set,
-     * which is the question the exclusivity check has to answer, and the reason this cannot simply
-     * default.
-     */
-    private static Integer optionalInt(Properties properties, String key, List<String> explicit) {
+    private static Integer optionalInt(Properties properties, String key) {
         String raw = properties.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
-        explicit.add(key);
         try {
             return Integer.valueOf(raw.trim());
         } catch (NumberFormatException e) {
@@ -186,21 +147,14 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    private static Duration optionalMillis(Properties properties, String key, List<String> explicit) {
-        Integer millis = optionalInt(properties, key, explicit);
+    private static Duration optionalMillis(Properties properties, String key) {
+        Integer millis = optionalInt(properties, key);
         return millis == null ? null : Duration.ofMillis(millis);
     }
 
-    /**
-     * Anything but an explicit {@code false} is true, because a setting that is on by default
-     * should not be turned off by a typo.
-     */
-    private static boolean booleanValue(Properties properties, String key, boolean fallback) {
+    private static boolean trueUnlessFalse(Properties properties, String key) {
         String value = properties.getProperty(key);
-        if (value == null || value.trim().isEmpty()) {
-            return fallback;
-        }
-        return !"false".equalsIgnoreCase(value.trim());
+        return value == null || !"false".equalsIgnoreCase(value.trim());
     }
 
     private static int intValue(Properties properties, String key, int fallback) {
@@ -215,11 +169,29 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
+    private static ConfigSource configSource(Properties properties) {
+        String source = properties.getProperty("config.source", "file").trim();
+        try {
+            return ConfigSource.valueOf(source.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("config.source must be 'file' or 'cluster', but was '" + source + "'", e);
+        }
+    }
+
+    private static Duration rescanInterval(Properties properties) {
+        int seconds = intValue(properties, "reload.rescan.seconds", 5);
+        if (seconds < 1) {
+            throw new IllegalArgumentException("reload.rescan.seconds must be at least 1, but was " + seconds
+                    + ": the check runs on the witness's own loop, which would then do nothing else");
+        }
+        return Duration.ofSeconds(seconds);
+    }
+
     private static List<String> splitPatterns(String raw) {
         return raw == null ? Collections.emptyList() : Arrays.asList(raw.split(","));
     }
 
-    private static byte[] secretValue(Properties properties, String key, Path base) {
+    private byte[] secretValue(Properties properties, String key) {
         String raw = properties.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
             return null;
@@ -235,7 +207,7 @@ public final class FileConfigStore implements ConfigStore {
             return fromEnvironment.getBytes(StandardCharsets.UTF_8);
         }
         if (value.startsWith(FILE_SECRET)) {
-            Path path = secretFile(value, base);
+            Path path = secretFile(value);
             try {
                 return Files.readAllBytes(path);
             } catch (IOException e) {
@@ -244,13 +216,18 @@ public final class FileConfigStore implements ConfigStore {
             }
         }
         if (value.startsWith("base64:")) {
-            return Base64.getDecoder().decode(value.substring(7));
+            try {
+                return Base64.getDecoder().decode(value.substring(7));
+            } catch (IllegalArgumentException e) {
+                // No cause and no value: the decoder's message would quote part of a secret.
+                throw new IllegalArgumentException(key + " is not valid base64");
+            }
         }
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static Path secretFile(String value, Path base) {
-        return base.getFileSystem().getPath(value.substring(FILE_SECRET.length()));
+    private Path secretFile(String value) {
+        return directory.resolve(value.substring(FILE_SECRET.length()));
     }
 
     private static void absorb(CRC32 sum, Path file) {
@@ -265,13 +242,9 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * Refused rather than ignored, because an operator would believe a tenant has its own secret
-     * while the witness verifies it with whatever the keyring offers.
-     */
     private static void refuseKeysHere(String name, Properties properties) {
         for (String property : properties.stringPropertyNames()) {
-            if (property.equals("secret") || property.startsWith(KEY_PREFIX)) {
+            if (property.equals("secret") || property.startsWith(SECRET_PREFIX)) {
                 throw new IllegalArgumentException("application '" + name + "' sets '" + property
                         + "', but keys live in witness.properties as secret.<name>.value, with an"
                         + " optional secret.<name>.applications naming what each covers. Leaving"
@@ -281,21 +254,22 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * Every {@code secret.<name>.value} in the file, with its algorithm and the names it claims.
-     *
-     * <p>Sorted by key name, so the ring's order does not depend on {@code Properties} hashing.
-     * Order decides nothing about correctness (a datagram is authentic if any candidate accepts
-     * it) but a configuration that reads differently on two runs is not one anybody can reason
-     * about.
-     */
     private Keyring readKeyring(Properties properties) {
+        List<WitnessKey> keys = new ArrayList<>();
+        for (String name : keyNames(properties)) {
+            keys.add(readKey(properties, name));
+        }
+        return new Keyring(keys);
+    }
+
+    // Sorted, so a configuration does not read differently from one run to the next.
+    private static Set<String> keyNames(Properties properties) {
         Set<String> names = new TreeSet<>();
         for (String property : properties.stringPropertyNames()) {
-            if (!property.startsWith(KEY_PREFIX)) {
+            if (!property.startsWith(SECRET_PREFIX)) {
                 continue;
             }
-            String rest = property.substring(KEY_PREFIX.length());
+            String rest = property.substring(SECRET_PREFIX.length());
             int dot = rest.indexOf('.');
             if (dot <= 0) {
                 throw new IllegalArgumentException("'" + property + "' names no key: a secret is"
@@ -304,29 +278,24 @@ public final class FileConfigStore implements ConfigStore {
             }
             names.add(rest.substring(0, dot));
         }
-        List<WitnessKey> keys = new ArrayList<>(names.size());
-        for (String name : names) {
-            byte[] secret = secretValue(properties, KEY_PREFIX + name + ".value", directory);
-            if (secret == null) {
-                throw new IllegalArgumentException("key '" + name + "' has no "
-                        + KEY_PREFIX + name + ".value; a key without a secret cannot verify"
-                        + " anything and is more likely a typo than an intention");
-            }
-            keys.add(new WitnessKey(name, secret,
-                    properties.getProperty(KEY_PREFIX + name + ".algorithm"),
-                    splitPatterns(properties.getProperty(KEY_PREFIX + name + ".applications"))));
+        return names;
+    }
+
+    private WitnessKey readKey(Properties properties, String name) {
+        byte[] secret = secretValue(properties, SECRET_PREFIX + name + ".value");
+        if (secret == null) {
+            throw new IllegalArgumentException("key '" + name + "' has no "
+                    + SECRET_PREFIX + name + ".value; a key without a secret cannot verify"
+                    + " anything and is more likely a typo than an intention");
         }
-        return new Keyring(keys);
+        return new WitnessKey(name, secret,
+                properties.getProperty(SECRET_PREFIX + name + ".algorithm"),
+                splitPatterns(properties.getProperty(SECRET_PREFIX + name + ".applications")));
     }
 
     @Override
     public ConfigSnapshot current() {
         return current;
-    }
-
-    @Override
-    public void addListener(ConfigChangeListener listener) {
-        listeners.add(listener);
     }
 
     @Override
@@ -336,13 +305,13 @@ public final class FileConfigStore implements ConfigStore {
         }
         nextRescanNanos = nowNanos + current.settings().rescanInterval().toNanos();
 
-        long seen = stamp();
-        if (seen == stamp) {
-            // The common case by an enormous margin, and it costs a handful of stats rather than
-            // parsing every file to discover nothing moved.
+        long seen = checksum();
+        if (seen == lastChecksum) {
+            // The common case by an enormous margin, and it costs a checksum rather than rebuilding
+            // and comparing a whole configuration to discover nothing moved.
             return false;
         }
-        stamp = seen;
+        lastChecksum = seen;
         return reload();
     }
 
@@ -356,14 +325,6 @@ public final class FileConfigStore implements ConfigStore {
         closed = true;
     }
 
-    /**
-     * Re-reads everything and publishes it, unless it cannot be read.
-     *
-     * <p><strong>A malformed file never takes down the running configuration.</strong> The whole
-     * directory is parsed into a candidate, validated, and published only if it is good; otherwise
-     * the last good snapshot stays in force and the problem is logged. Someone editing a file at
-     * three in the morning must not be able to unconfigure a running witness with a typo.
-     */
     private boolean reload() {
         ConfigSnapshot candidate;
         try {
@@ -386,20 +347,11 @@ public final class FileConfigStore implements ConfigStore {
             reportRestartRequired(previous.settings(), candidate.settings());
         }
         if (applicationsChanged) {
-            announce(previous, candidate);
+            logApplicationChanges(previous, candidate);
         }
         return true;
     }
 
-    /**
-     * Says what was read and not applied, rather than half-applying it.
-     *
-     * <p>Everything else in {@code witness.properties} takes effect on the next reload. These three
-     * cannot: the socket is bound once, the state directory is opened once, and vote logging is
-     * taken by the server when it starts. Publishing the new snapshot without saying so would leave
-     * the file on disk disagreeing with the running process, with nothing anywhere to say which one
-     * was winning, and the witness manual has promised this line since it was written.
-     */
     private void reportRestartRequired(WitnessSettings previous, WitnessSettings candidate) {
         warnIfChanged("bind.host/bind.port", previous.bindAddress(), candidate.bindAddress());
         warnIfChanged("state.directory", previous.stateDirectory(), candidate.stateDirectory());
@@ -413,15 +365,13 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    private void announce(ConfigSnapshot previous, ConfigSnapshot candidate) {
+    private void logApplicationChanges(ConfigSnapshot previous, ConfigSnapshot candidate) {
         for (ApplicationConfig application : candidate.applications().values()) {
             ApplicationConfig before = previous.application(application.name());
             if (before == null) {
                 log.info("now serving application '{}'", application.name());
-                listeners.forEach(listener -> listener.onApplicationAdded(application));
             } else if (!before.equals(application)) {
                 log.info("configuration changed for application '{}'", application.name());
-                listeners.forEach(listener -> listener.onApplicationChanged(before, application));
             }
         }
         for (ApplicationConfig application : previous.applications().values()) {
@@ -429,40 +379,34 @@ public final class FileConfigStore implements ConfigStore {
                 log.info("no longer serving application '{}'. Its state is kept: a cluster that"
                                 + " returns still needs the vote it was given remembered.",
                         application.name());
-                listeners.forEach(listener -> listener.onApplicationRemoved(application));
             }
         }
     }
 
-    /**
-     * A checksum over every file the configuration is made of, names included.
-     *
-     * <p>Not a {@code WatchService}, which stops firing without saying so on a Kubernetes ConfigMap
-     * and does nothing on NFS. Content rather than size and modification time, because an edit can
-     * keep the length and land on the same coarse timestamp. {@link CRC32} because this detects an
-     * edit, it does not defend against one.
-     */
-    private long stamp() {
+    private long checksum() {
         CRC32 sum = new CRC32();
         absorb(sum, directory.resolve(SETTINGS_FILE));
         currentSecretFiles().forEach(file -> absorb(sum, file));
-        if (Files.isDirectory(applicationsDirectory)) {
-            List<Path> files = new ArrayList<>();
-            try (DirectoryStream<Path> stream =
-                         Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
-                stream.forEach(files::add);
-            } catch (IOException e) {
-                // Unreadable is a state like any other: it sums differently from readable, so it
-                // reloads once and the existing keep-the-last-good-configuration path reports it.
-                sum.update('?');
-                return sum.getValue();
-            }
-            files.sort(Comparator.comparing(Path::toString));
-            for (Path file : files) {
-                absorb(sum, file);
-            }
+        try {
+            applicationFiles().forEach(file -> absorb(sum, file));
+        } catch (IOException e) {
+            // Unreadable is a state like any other: it sums differently from readable, so it
+            // reloads once and the existing keep-the-last-good-configuration path reports it.
+            sum.update('?');
         }
         return sum.getValue();
+    }
+
+    private List<Path> applicationFiles() throws IOException {
+        if (!Files.isDirectory(applicationsDirectory)) {
+            return Collections.emptyList();
+        }
+        List<Path> files = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
+            stream.forEach(files::add);
+        }
+        files.sort(Comparator.comparing(Path::toString));
+        return files;
     }
 
     private List<Path> currentSecretFiles() {
@@ -479,14 +423,14 @@ public final class FileConfigStore implements ConfigStore {
         for (String key : new TreeSet<>(properties.stringPropertyNames())) {
             String value = properties.getProperty(key).trim();
             if (isSecretValue(key) && value.startsWith(FILE_SECRET)) {
-                files.add(secretFile(value, directory));
+                files.add(secretFile(value));
             }
         }
         return files;
     }
 
     private static boolean isSecretValue(String key) {
-        return key.startsWith(KEY_PREFIX) && key.endsWith(".value");
+        return key.startsWith(SECRET_PREFIX) && key.endsWith(".value");
     }
 
     private static boolean holdsInlineSecret(Properties properties) {
@@ -509,27 +453,20 @@ public final class FileConfigStore implements ConfigStore {
     private ConfigSnapshot read() {
         WitnessSettings settings = readSettings();
         Map<String, ApplicationConfig> applications = new LinkedHashMap<>();
-
-        if (Files.isDirectory(applicationsDirectory)) {
-            List<Path> files = new ArrayList<>();
-            try (DirectoryStream<Path> stream =
-                         Files.newDirectoryStream(applicationsDirectory, "*" + SUFFIX)) {
-                stream.forEach(files::add);
-            } catch (IOException e) {
-                throw new UncheckedIOException("cannot list " + applicationsDirectory, e);
-            }
-            files.sort(Comparator.comparing(Path::toString));
-            for (Path file : files) {
+        try {
+            for (Path file : applicationFiles()) {
                 ApplicationConfig application = readApplication(file, settings);
                 applications.put(application.name(), application);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot list " + applicationsDirectory, e);
         }
         return new ConfigSnapshot(settings, applications);
     }
 
     private WitnessSettings readSettings() {
         Properties properties = load(directory.resolve(SETTINGS_FILE), true);
-        WitnessSettings.Builder builder = WitnessSettings.builder()
+        WitnessSettings.WitnessSettingsBuilder builder = WitnessSettings.builder()
                 .stateDirectory(directory.resolve("state"));
 
         String host = properties.getProperty("bind.host", "0.0.0.0");
@@ -542,14 +479,13 @@ public final class FileConfigStore implements ConfigStore {
             // another directory must not find an empty state directory and forget its votes.
             builder.stateDirectory(directory.resolve(state.trim()).normalize());
         }
-        String source = properties.getProperty("config.source", "file").trim();
-        builder.configSource(ConfigSource.valueOf(source.toUpperCase(Locale.ROOT)));
+        builder.configSource(configSource(properties));
         builder.clusterApplicationLimit(intValue(properties, "config.cluster.limit", 64));
         builder.keyring(readKeyring(properties));
         warnAboutReadableSecrets(properties);
-        builder.rescanInterval(Duration.ofSeconds(intValue(properties, "reload.rescan.seconds", 5)));
+        builder.rescanInterval(rescanInterval(properties));
         builder.defaultTimings(timings(properties, Timings.lan()));
-        builder.voteLogging(booleanValue(properties, "vote.logging", true));
+        builder.voteLogging(trueUnlessFalse(properties, "vote.logging"));
         return builder.build();
     }
 
@@ -566,14 +502,6 @@ public final class FileConfigStore implements ConfigStore {
         return new ApplicationConfig(name, timings, false);
     }
 
-    /**
-     * Says so when a file sets intervals that {@link ConfigSource#CLUSTER} will overrule.
-     *
-     * <p>Under that setting a cluster states its own profile and the witness follows it, so
-     * whatever is written here is read, parsed, and then replaced by the first thing its nodes
-     * say. One source or the other, never a merge of the two, but a key that is quietly ignored
-     * is worse than one that is refused, so it is said out loud, once per application.
-     */
     private void warnIfTimingsIgnored(String name, Properties properties, WitnessSettings settings) {
         if (!settings.configSource().isCluster()) {
             return;
@@ -589,10 +517,6 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * The application name comes from the filename, and is held to the same rules as the field it
-     * travels in: a name too long to fit on the wire would be served here and unreachable there.
-     */
     private String applicationNameOf(Path file) {
         String fileName = file.getFileName().toString();
         String name = fileName.substring(0, fileName.length() - SUFFIX.length());
@@ -617,9 +541,6 @@ public final class FileConfigStore implements ConfigStore {
         return name;
     }
 
-    /**
-     * Warns the way {@code ssh} does, rather than refusing: the operator owns their filesystem.
-     */
     private void warnIfWorldReadable(Path file) {
         try {
             Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
@@ -648,15 +569,6 @@ public final class FileConfigStore implements ConfigStore {
         return properties;
     }
 
-    /**
-     * Says what is being served, and warns only where an empty set is actually wrong.
-     *
-     * <p>Under {@link ConfigSource#CLUSTER} an empty {@code applications/} is the intended shape,
-     * not a mistake: applications are created from the config messages their nodes send, timings
-     * come from those messages, and keys live in the keyring, so a plug-and-play witness needs
-     * that directory not to exist at all. Warning there would put a line in every startup log of a
-     * correct deployment, which is how a warning stops being read.
-     */
     private void logServedApplications() {
         ConfigSnapshot snapshot = current;
         if (snapshot.applications().isEmpty()) {

@@ -61,6 +61,8 @@ public final class ElectionNode implements MessageHandler {
      */
     private static final long NO_READING = Long.MIN_VALUE;
     private static final long NO_TERM = -1;
+    private static final int NO_LEADER = -1;
+    private static final long NOTHING_PUBLISHED = 0;
     /**
      * Probe intervals of silence after which a witness stops tracking a learned voter.
      */
@@ -97,7 +99,7 @@ public final class ElectionNode implements MessageHandler {
     private long leaderSinceNanos;
     private long leaderlessSinceNanos = NO_READING;
     private TrackedPeer[] peers;
-    private long[] confirmationScratch = new long[0];
+    private final long[] confirmationScratch;
     @Getter
     private Role role = Role.FOLLOWER;
     // Volatile because a witness's term gauge reads it from a metrics thread.
@@ -105,7 +107,7 @@ public final class ElectionNode implements MessageHandler {
     private volatile long currentTerm;
     @Getter
     private int votedFor = PersistentState.NO_VOTE;
-    private int leaderId = -1;
+    private int leaderId = NO_LEADER;
     @Getter
     private Leader leader;
     private long electionDeadlineNanos;
@@ -124,11 +126,11 @@ public final class ElectionNode implements MessageHandler {
     /**
      * Whether this node stands for election; a witness never does, whatever this says.
      */
-    private boolean candidate = true;
+    private boolean electable = true;
     /**
      * When a leader that withdrew next tries to hand over, until a successor deposes it.
      */
-    private long withdrawalHandOverNanos;
+    private long handOverRetryDeadlineNanos;
     private boolean started;
     /**
      * What killed the node, if anything has.
@@ -220,6 +222,7 @@ public final class ElectionNode implements MessageHandler {
         this.electionTimeoutSpreadNanos = timings.electionTimeoutSpread().toNanos();
         List<Peer> configured = config.allPeers();
         this.peers = new TrackedPeer[configured.size()];
+        this.confirmationScratch = new long[configured.size()];
         for (int i = 0; i < peers.length; i++) {
             peers[i] = new TrackedPeer(configured.get(i));
         }
@@ -229,20 +232,17 @@ public final class ElectionNode implements MessageHandler {
         // are not configured, so it has nothing to compare an id against and the authentication
         // tag is the whole of its admission control. See ClusterConfig.ClusterConfigBuilder#learnedMembership.
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
-                config.isLearnedMembership() ? Peer::isValidId : this::isConfiguredPeer, this.stats);
+                config.isLearnedMembership() ? Peer::isValidId : this::isTrackedPeer, this.stats);
     }
 
-    private static boolean isSilentTooLong(TrackedPeer trackedPeer, long now, long silence) {
-        return now - trackedPeer.lastHeardNanos > silence;
+    private static boolean isSilentTooLong(TrackedPeer tracked, long now, long silence) {
+        return now - tracked.lastHeardNanos > silence;
     }
 
-    /**
-     * A partial selection sort, descending, stopped at the n-th: a handful of peers, and no allocation.
-     */
-    private static long nthLatest(long[] values, int count, int n) {
+    private static long nthLatest(long[] values, int n) {
         for (int i = 0; i < n; i++) {
             int latest = i;
-            for (int j = i + 1; j < count; j++) {
+            for (int j = i + 1; j < values.length; j++) {
                 if (values[j] > values[latest]) {
                     latest = j;
                 }
@@ -255,15 +255,15 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private TrackedPeer trackedPeer(int id) {
-        for (TrackedPeer peer : peers) {
-            if (peer.peer.id() == id) {
-                return peer;
+        for (TrackedPeer tracked : peers) {
+            if (tracked.id() == id) {
+                return tracked;
             }
         }
         return null;
     }
 
-    private boolean isConfiguredPeer(int id) {
+    private boolean isTrackedPeer(int id) {
         return trackedPeer(id) != null;
     }
 
@@ -279,7 +279,7 @@ public final class ElectionNode implements MessageHandler {
                     "node " + config.nodeId() + " has a configured peer set, so peer " + peer.id()
                             + " cannot be learned; build the config with learnedMembership()");
         }
-        if (peer.id() == config.nodeId() || isConfiguredPeer(peer.id())) {
+        if (peer.id() == config.nodeId() || isTrackedPeer(peer.id())) {
             return false;
         }
         TrackedPeer tracked = new TrackedPeer(peer);
@@ -287,14 +287,14 @@ public final class ElectionNode implements MessageHandler {
         // this a new peer would look infinitely silent and be forgotten on the next probe round.
         tracked.lastHeardNanos = clock.nanoTime();
 
-        int evicted = peers.length < MAX_LEARNED_PEERS ? -1 : leastRecentlyHeard();
-        if (evicted < 0) {
+        if (peers.length < MAX_LEARNED_PEERS) {
             peers = Arrays.copyOf(peers, peers.length + 1);
             peers[peers.length - 1] = tracked;
         } else {
             // At the bound, so the quietest peer makes room. The bound is what stops a set keyed on
             // something arriving from the network being a leak somebody else controls; eviction is
             // cheap for the same reason forgetting is, since the next datagram teaches it again.
+            int evicted = leastRecentlyHeard();
             Peer gone = peers[evicted].peer;
             log.info("cluster '{}': witness {} is tracking {} voters, so voter {} makes room for voter {}",
                     config.applicationName(), config.nodeId(), MAX_LEARNED_PEERS, gone.id(), peer.id());
@@ -325,7 +325,6 @@ public final class ElectionNode implements MessageHandler {
         PersistentState state = store.load();
         currentTerm = state.currentTerm();
         votedFor = state.votedFor();
-        role = Role.FOLLOWER;
 
         if (config.isLearnedMembership()) {
             // There is no quorum summary to print: this witness does not know how many voters the
@@ -352,15 +351,16 @@ public final class ElectionNode implements MessageHandler {
                             + " elect two leaders. Use this only for tests.",
                     config.applicationName(), config.nodeId());
         }
-        lastLeaderContactNanos = clock.nanoTime();
-        probeDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        long now = clock.nanoTime();
+        lastLeaderContactNanos = now;
+        probeDeadlineNanos = now + timings.probeInterval().toNanos();
         // One probe interval, not immediately. A node starting up has peers that may not be
         // listening yet, so an advert sent on the first turn is likely to be thrown away and the
         // next one is half a minute off, while a second later they are up and a mismatch is
         // reported almost as promptly. Not zero for a second reason: a deadline of "now" is shared
         // by every node in the cluster, which would make nextDeadlineNanos() identical everywhere
         // at startup and hide the randomised election timeout behind it.
-        nodeConfigDeadlineNanos = clock.nanoTime() + timings.probeInterval().toNanos();
+        nodeConfigDeadlineNanos = now + timings.probeInterval().toNanos();
         resetElectionTimer();
     }
 
@@ -391,11 +391,8 @@ public final class ElectionNode implements MessageHandler {
     private void fail(Throwable cause) {
         Role previous = role;
         setRole(Role.FAILED);
-        setLeader(-1);
+        setLeader(NO_LEADER);
         failureCause = cause;
-        abandonPreVote();
-        votesGranted.clear();
-        forgetQuorumContact();
 
         log.error("cluster '{}': node {} has failed while {} in term {} and will not lead again."
                         + " Restart the process; this node cannot recover in place.",
@@ -424,7 +421,7 @@ public final class ElectionNode implements MessageHandler {
             deadline = Math.min(deadline, Math.min(heartbeatDeadlineNanos, quorumContactDeadlineNanos()));
             return deadline;
         }
-        if (campaigns()) {
+        if (isElectable()) {
             deadline = Math.min(deadline, electionDeadlineNanos);
         }
         if (isFollowingLeader()) {
@@ -435,7 +432,7 @@ public final class ElectionNode implements MessageHandler {
 
     // Not a witness: it has no timer of this kind, and nothing reads the leader it holds.
     private boolean isFollowingLeader() {
-        return role != Role.LEADER && leaderId >= 0 && !config.isWitness();
+        return role != Role.LEADER && leaderId != NO_LEADER && !config.isWitness();
     }
 
     // The moment this node would grant a pre-vote anyway, so it no longer vouches for that leader.
@@ -460,7 +457,7 @@ public final class ElectionNode implements MessageHandler {
         if (next == Role.LEADER || previous == Role.LEADER) {
             synchronized (publication) {
                 publishingTerm = next == Role.LEADER ? currentTerm : NO_TERM;
-                publishedVersion = 0;
+                publishedVersion = NOTHING_PUBLISHED;
             }
         }
         listener.onRoleChanged(previous, next, currentTerm);
@@ -486,27 +483,16 @@ public final class ElectionNode implements MessageHandler {
         return Optional.of(new PublishedVersion(term, version));
     }
 
-    /**
-     * Sends a publication at once rather than at the next heartbeat, and reports it to this node.
-     */
     private void announcePublication() {
         long version = publishedVersion;
         if (version != sentVersion) {
             broadcastHeartbeat();
-            heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
         }
         reportLeaderVersion(currentTerm, version);
     }
 
-    /**
-     * Reports a pair newer than the last one reported. Version 0 is never reported: it means the
-     * leader has published nothing, and onLeaderChanged has already said who leads.
-     */
     private void reportLeaderVersion(long term, long version) {
-        if (version < 1 || config.isWitness()) {
-            return;
-        }
-        if (term < reportedTerm || (term == reportedTerm && version <= reportedVersion)) {
+        if (version <= NOTHING_PUBLISHED || config.isWitness() || !isNewerThanReported(term, version)) {
             return;
         }
         reportedTerm = term;
@@ -514,12 +500,16 @@ public final class ElectionNode implements MessageHandler {
         listener.onLeaderVersion(leader, term, version);
     }
 
+    private boolean isNewerThanReported(long term, long version) {
+        return term > reportedTerm || (term == reportedTerm && version > reportedVersion);
+    }
+
     private void setLeader(int next) {
         if (leaderId == next) {
             return;
         }
         long now = clock.nanoTime();
-        if (next < 0) {
+        if (next == NO_LEADER) {
             // Only the first loss starts the clock: an outage that runs through several elections
             // is one outage, and restarting it per election would report the last one instead.
             if (leaderlessSinceNanos == NO_READING) {
@@ -535,14 +525,14 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private Leader identify(int id) {
-        if (id < 0) {
+        if (id == NO_LEADER) {
             return null;
         }
         if (id == config.nodeId()) {
             return Leader.self(id);
         }
-        TrackedPeer trackedPeer = trackedPeer(id);
-        return trackedPeer == null ? Leader.byId(id) : Leader.at(trackedPeer.peer);
+        TrackedPeer tracked = trackedPeer(id);
+        return tracked == null ? Leader.byId(id) : Leader.at(tracked.peer);
     }
 
     /**
@@ -553,8 +543,8 @@ public final class ElectionNode implements MessageHandler {
      */
     public Set<Integer> trackedPeerIds() {
         Set<Integer> ids = new LinkedHashSet<>();
-        for (TrackedPeer peer : peers) {
-            ids.add(peer.peer.id());
+        for (TrackedPeer tracked : peers) {
+            ids.add(tracked.id());
         }
         return ids;
     }
@@ -586,49 +576,45 @@ public final class ElectionNode implements MessageHandler {
             nodeConfigDeadlineNanos = now + nextNodeConfigIntervalNanos();
         }
         if (role == Role.LEADER) {
-            if (!hasQuorumContact(now)) {
+            if (now >= quorumContactDeadlineNanos()) {
                 relinquishLeadership();
                 return;
             }
-            if (!candidate && now >= withdrawalHandOverNanos) {
+            if (!electable && now >= handOverRetryDeadlineNanos) {
+                // Quietly: this repeats every election timeout while nobody will take over.
                 withdrawalHandOver(now, true);
             }
             if (now >= heartbeatDeadlineNanos) {
                 broadcastHeartbeat();
-                heartbeatDeadlineNanos = now + timings.heartbeatInterval().toNanos();
             }
             announcePublication();
             return;
         }
         if (isFollowingLeader() && now >= leaderSilenceDeadlineNanos()) {
-            setLeader(-1);
+            setLeader(NO_LEADER);
         }
-        if (campaigns() && now >= electionDeadlineNanos) {
+        if (isElectable() && now >= electionDeadlineNanos) {
             startPreVote();
         }
     }
 
-    private boolean campaigns() {
-        return candidate && !config.isWitness();
-    }
-
-    public boolean isCandidate() {
-        return campaigns();
+    public boolean isElectable() {
+        return electable && !config.isWitness();
     }
 
     /**
-     * Takes this node out of elections, or puts it back. A non-candidate keeps voting, replying and
-     * probing, as a witness does, but never campaigns. A candidate withdrawing mid-campaign drops
+     * Takes this node out of elections, or puts it back. One that is not electable keeps voting,
+     * replying and probing, as a witness does, but never campaigns. One withdrawing mid-campaign drops
      * back to follower, so the votes still in flight cannot elect it; a leader hands leadership
      * over, and keeps trying every election timeout until a successor deposes it rather than leave
      * the cluster without one.
      */
-    public void setCandidate(boolean candidate) {
-        if (this.candidate == candidate || config.isWitness()) {
+    public void setElectable(boolean electable) {
+        if (this.electable == electable || config.isWitness()) {
             return;
         }
-        this.candidate = candidate;
-        if (candidate) {
+        this.electable = electable;
+        if (electable) {
             // From now, not from whenever the timer was last set: an expired deadline would campaign at once.
             resetElectionTimer();
             log.info("cluster '{}': node {} stands for election again", config.applicationName(), config.nodeId());
@@ -645,9 +631,9 @@ public final class ElectionNode implements MessageHandler {
         }
     }
 
-    private void withdrawalHandOver(long now, boolean retry) {
-        transferToBest(retry);
-        withdrawalHandOverNanos = now + electionTimeoutMinNanos;
+    private void withdrawalHandOver(long now, boolean quiet) {
+        transferToBest(quiet);
+        handOverRetryDeadlineNanos = now + electionTimeoutMinNanos;
     }
 
     private void startPreVote() {
@@ -665,8 +651,8 @@ public final class ElectionNode implements MessageHandler {
             startElection(false);
             return;
         }
-        for (TrackedPeer trackedPeer : peers) {
-            send(trackedPeer.peer.id(), encoder.requestVote(sendBuffer, preVoteTerm, true));
+        for (TrackedPeer tracked : peers) {
+            send(tracked.id(), encoder.requestVote(sendBuffer, preVoteTerm, true));
         }
     }
 
@@ -681,22 +667,11 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void abandonPreVote() {
+        // Not where a campaign ends: startElection calls this on its way from a won pre-vote to the real election.
         preVoting = false;
         preVotesGranted.clear();
     }
 
-    /**
-     * Closes a campaign, won or lost, and reports how long it took.
-     *
-     * <p>A lost one is the more interesting of the two when a cluster will not fail over: a
-     * pre-vote refused is <em>why no election happened</em>, and no other signal says so.
-     *
-     * <p>Deliberately <strong>not</strong> hooked into {@link #abandonPreVote()}, which reads as
-     * the place a campaign ends and is not: {@link #startElection(boolean)} calls it on the way from a
-     * <em>won</em> pre-vote into the real election, so ending the campaign there would report every
-     * successful failover as a lost one. A campaign ends when this node leads, or when it gives
-     * up without leading.
-     */
     private void endCampaign(boolean won) {
         if (campaignStartedNanos == NO_READING) {
             return;
@@ -727,7 +702,7 @@ public final class ElectionNode implements MessageHandler {
         electionStartedNanos = clock.nanoTime();
 
         setRole(Role.CANDIDATE);
-        setLeader(-1);
+        setLeader(NO_LEADER);
         votesGranted.clear();
         votesGranted.add(config.nodeId());
         electionsStarted++;
@@ -740,8 +715,8 @@ public final class ElectionNode implements MessageHandler {
             becomeLeader();
             return;
         }
-        for (TrackedPeer trackedPeer : peers) {
-            send(trackedPeer.peer.id(), handover
+        for (TrackedPeer tracked : peers) {
+            send(tracked.id(), handover
                     ? encoder.handoverVote(sendBuffer, currentTerm)
                     : encoder.requestVote(sendBuffer, currentTerm, false));
         }
@@ -757,17 +732,16 @@ public final class ElectionNode implements MessageHandler {
         // Start the contact clock, or a new leader would step down before its first heartbeat had a
         // chance to be answered. From the vote requests, not the win: a voter's stickiness counts from
         // when it granted, which is no earlier.
-        for (TrackedPeer trackedPeer : peers) {
-            trackedPeer.lastConfirmedNanos = electionStartedNanos;
+        for (TrackedPeer tracked : peers) {
+            tracked.lastConfirmedNanos = electionStartedNanos;
             // Learned again from this leadership's first replies, rather than kept from an older one.
-            trackedPeer.candidate = true;
+            tracked.electable = true;
         }
 
         log.info("cluster '{}': node {} became leader for term {}",
                 config.applicationName(), config.nodeId(), currentTerm);
 
         broadcastHeartbeat();
-        heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
     private void stepDown(long term) {
@@ -780,8 +754,7 @@ public final class ElectionNode implements MessageHandler {
 
         Role previous = role;
         setRole(Role.FOLLOWER);
-        setLeader(-1);
-        votesGranted.clear();
+        setLeader(NO_LEADER);
         resetElectionTimer();
 
         if (previous != Role.FOLLOWER) {
@@ -793,27 +766,28 @@ public final class ElectionNode implements MessageHandler {
     private void broadcastHeartbeat() {
         long version = publishedVersion;
         sentVersion = version;
-        for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.appendEntries(sendBuffer, currentTerm, version, clock.nanoTime()));
+        for (TrackedPeer tracked : peers) {
+            send(tracked.id(), encoder.appendEntries(sendBuffer, currentTerm, version, clock.nanoTime()));
         }
+        heartbeatDeadlineNanos = clock.nanoTime() + timings.heartbeatInterval().toNanos();
     }
 
-    /**
-     * How long until this node restates itself: probe cadence while anybody is silent, else the
-     * advertisement interval.
-     */
     private long nextNodeConfigIntervalNanos() {
-        for (TrackedPeer peer : peers) {
-            if (peer.reachability != Reachability.UP) {
-                return timings.probeInterval().toNanos();
+        return (anyPeerNotUp() ? timings.probeInterval() : timings.advertisementInterval()).toNanos();
+    }
+
+    private boolean anyPeerNotUp() {
+        for (TrackedPeer tracked : peers) {
+            if (tracked.reachability != Reachability.UP) {
+                return true;
             }
         }
-        return timings.advertisementInterval().toNanos();
+        return false;
     }
 
     private void advertiseNodeConfig() {
-        for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.nodeConfig(sendBuffer, currentTerm,
+        for (TrackedPeer tracked : peers) {
+            send(tracked.id(), encoder.nodeConfig(sendBuffer, currentTerm,
                     (int) timings.heartbeatInterval().toMillis(),
                     (int) timings.electionTimeoutMin().toMillis(),
                     (int) timings.electionTimeoutMax().toMillis(),
@@ -839,8 +813,8 @@ public final class ElectionNode implements MessageHandler {
         // Departure from the paper's figure 2, per thesis section 4.2.3: a pre-vote granted before a heartbeat would
         // otherwise elect a successor during the lease that heartbeat renewed. A repeat of this term's vote is exempt,
         // and a handover, which the leader asked for.
-        boolean alreadyThisVoter = term == currentTerm && votedFor == senderId;
-        if (!handover && !alreadyThisVoter && term >= currentTerm && !wouldGrantVote(term, clock.nanoTime())) {
+        boolean repeatsThisTermsVote = term == currentTerm && votedFor == senderId;
+        if (!handover && !repeatsThisTermsVote && term >= currentTerm && !wouldGrantVote(term, clock.nanoTime())) {
             logVote("cluster '{}': node {} refused node {} a vote for term {}; it has heard from a leader too recently",
                     config.applicationName(), config.nodeId(), senderId, term);
             send(senderId, encoder.requestVoteReply(sendBuffer, currentTerm, false, false));
@@ -862,16 +836,16 @@ public final class ElectionNode implements MessageHandler {
         // Deliberately no step-down, no persistence and no timer reset. A pre-vote must be
         // answerable without changing anything, or it would inflate terms exactly as the real
         // vote it is meant to avoid, and a node could suppress elections by spamming them.
-        boolean would = wouldGrantVote(term, clock.nanoTime());
+        boolean wouldGrant = wouldGrantVote(term, clock.nanoTime());
         // Worth a line even though nothing changed: a pre-vote that is refused is why an
         // election never happens, and without this the outage it explains is silent.
-        logVote(would
+        logVote(wouldGrant
                         ? "cluster '{}': node {} would vote for node {} in a term {} election"
                         : "cluster '{}': node {} would not vote for node {} in a term {}"
                         + " election; it has heard from a leader too recently, or its own"
                         + " term is ahead",
                 config.applicationName(), config.nodeId(), senderId, term);
-        send(senderId, encoder.requestVoteReply(sendBuffer, term, would, true));
+        send(senderId, encoder.requestVoteReply(sendBuffer, term, wouldGrant, true));
     }
 
     private void spendVote(int senderId) {
@@ -951,8 +925,8 @@ public final class ElectionNode implements MessageHandler {
             recordObservedTimings(senderId, heartbeatMillis, electionMinMillis, electionMaxMillis,
                     probeMillis, failureThreshold);
         }
-        TrackedPeer trackedPeer = trackedPeer(senderId);
-        if (trackedPeer == null) {
+        TrackedPeer tracked = trackedPeer(senderId);
+        if (tracked == null) {
             return;
         }
         if (config.isFollowingStatedTimings()) {
@@ -966,10 +940,10 @@ public final class ElectionNode implements MessageHandler {
                 && electionMaxMillis == (int) timings.electionTimeoutMax().toMillis()
                 && probeMillis == (int) timings.probeInterval().toMillis()
                 && failureThreshold == timings.failureThreshold();
-        if (matches == trackedPeer.timingsMatch) {
+        if (matches == tracked.timingsMatch) {
             return;
         }
-        trackedPeer.timingsMatch = matches;
+        tracked.timingsMatch = matches;
         if (matches) {
             log.info("cluster '{}': node {} now runs the same intervals as node {}",
                     config.applicationName(), senderId, config.nodeId());
@@ -991,9 +965,6 @@ public final class ElectionNode implements MessageHandler {
                 failureThreshold, timings.failureThreshold());
     }
 
-    /**
-     * Assembles what a peer stated into a {@link Timings}, so an owner can read one value.
-     */
     private void recordObservedTimings(int senderId, int heartbeatMillis, int electionMinMillis,
                                        int electionMaxMillis, int probeMillis,
                                        int failureThreshold) {
@@ -1021,7 +992,7 @@ public final class ElectionNode implements MessageHandler {
     @Override
     public void onAppendEntries(int senderId, long term, long leaderVersion, long sentNanos) {
         if (term < currentTerm) {
-            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, campaigns(), sentNanos));
+            send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, false, isElectable(), sentNanos));
             return;
         }
         if (term > currentTerm) {
@@ -1032,30 +1003,29 @@ public final class ElectionNode implements MessageHandler {
         endCampaign(false);
         setRole(Role.FOLLOWER);
         setLeader(senderId);
-        votesGranted.clear();
         lastLeaderContactNanos = clock.nanoTime();
         resetElectionTimer();
 
-        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, campaigns(), sentNanos));
+        send(senderId, encoder.appendEntriesReply(sendBuffer, currentTerm, true, isElectable(), sentNanos));
         reportLeaderVersion(term, leaderVersion);
     }
 
     @Override
-    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos) {
+    public void onAppendEntriesReply(int senderId, long term, boolean success, boolean electable, long sentNanos) {
         if (term > currentTerm) {
             stepDown(term);
             return;
         }
         // This is the only thing that proves a round trip: the peer received a heartbeat this node
         // sent, and answered it. It counts from the send, which is before the peer reset its own
-        // election clock. See hasQuorumContact.
+        // election clock. See leadershipConfirmedNanos.
         if (role == Role.LEADER && term == currentTerm) {
-            TrackedPeer trackedPeer = trackedPeer(senderId);
-            if (trackedPeer != null) {
+            TrackedPeer tracked = trackedPeer(senderId);
+            if (tracked != null) {
                 if (sentNanos <= clock.nanoTime()) {
-                    trackedPeer.lastConfirmedNanos = Math.max(trackedPeer.lastConfirmedNanos, sentNanos);
+                    tracked.lastConfirmedNanos = Math.max(tracked.lastConfirmedNanos, sentNanos);
                 }
-                trackedPeer.candidate = candidate;
+                tracked.electable = electable;
             }
         }
     }
@@ -1081,7 +1051,7 @@ public final class ElectionNode implements MessageHandler {
                     config.applicationName(), config.nodeId(), senderId);
             return;
         }
-        if (!candidate) {
+        if (!electable) {
             // The same rule switched on at runtime. A leader that has not learned this node withdrew
             // may still pick it, and only costs itself a retry.
             log.debug("cluster '{}': node {} withdrew from elections, ignoring a handover from node {}",
@@ -1115,49 +1085,48 @@ public final class ElectionNode implements MessageHandler {
             // The universal rule, applied here as everywhere else. Nothing below depends on it.
             stepDown(term);
         }
-        TrackedPeer trackedPeer = trackedPeer(senderId);
-        if (trackedPeer == null) {
+        TrackedPeer tracked = trackedPeer(senderId);
+        if (tracked == null) {
             return;
         }
-        trackedPeer.awaitingReply = false;
+        tracked.awaitingReply = false;
         // Held at the threshold rather than merely marked down, so it stays down until the peer
         // actually answers something. A reply resets this to zero and reports it up again.
-        trackedPeer.consecutiveMisses = timings.failureThreshold();
+        tracked.consecutiveMisses = timings.failureThreshold();
         departuresObserved++;
         stats.onDepartureObserved(senderId);
-        if (trackedPeer.reachability == Reachability.DOWN) {
+        if (tracked.reachability == Reachability.DOWN) {
             // Already reported down: one departure is never two events, the same discipline the
             // probe path follows. A peer never yet seen up is reported, or nobody would ever hear
             // that it left.
             return;
         }
-        trackedPeer.reachability = Reachability.DOWN;
+        tracked.reachability = Reachability.DOWN;
         log.info("cluster '{}': node {} {} {} said it is shutting down",
-                config.applicationName(), config.nodeId(), trackedPeer.peer.isWitness() ? "witness" : "peer", senderId);
-        listener.onPeerDown(trackedPeer.peer, PeerDownReason.LEFT);
+                config.applicationName(), config.nodeId(), tracked.peer.isWitness() ? "witness" : "peer", senderId);
+        listener.onPeerDown(tracked.peer, PeerDownReason.LEFT);
     }
 
     /**
      * Tells every peer this node is going away, so none of them has to wait out a probe timeout.
      */
-    public int announceDeparture() {
+    public void announceDeparture() {
         if (peers.length == 0) {
-            return 0;
+            return;
         }
-        for (TrackedPeer peer : peers) {
-            send(peer.peer.id(), encoder.leaving(sendBuffer, currentTerm));
+        for (TrackedPeer tracked : peers) {
+            send(tracked.id(), encoder.leaving(sendBuffer, currentTerm));
         }
         log.info("cluster '{}': node {} told {} peer(s) it is shutting down",
                 config.applicationName(), config.nodeId(), peers.length);
-        return peers.length;
     }
 
     /**
      * Hands leadership to a follower on the way out, instead of just going quiet.
      */
-    public boolean handOverLeadership() {
+    public void handOverLeadership() {
         if (role != Role.LEADER) {
-            return false;
+            return;
         }
         Peer target = handoverTarget();
         if (target == null) {
@@ -1165,13 +1134,12 @@ public final class ElectionNode implements MessageHandler {
                             + " follower to hand over to; the cluster will elect a replacement on"
                             + " its own timeout", config.applicationName(), config.nodeId(),
                     currentTerm);
-            return false;
+            return;
         }
         log.info("cluster '{}': node {} is stopping and handing leadership of term {} to node {}",
                 config.applicationName(), config.nodeId(), currentTerm, target.id());
         stats.onHandoverSent(target.id());
         sendTimeoutNow(target);
-        return true;
     }
 
     /**
@@ -1186,23 +1154,18 @@ public final class ElectionNode implements MessageHandler {
         return transferToBest(false);
     }
 
-    /**
-     * @param retry a withdrawn leader's retry, logged at DEBUG: it repeats every election timeout
-     *              while nobody will take over, and the first attempt was already logged
-     */
-    private boolean transferToBest(boolean retry) {
+    private boolean transferToBest(boolean quiet) {
         if (role != Role.LEADER) {
             return false;
         }
         Peer target = handoverTarget();
         if (target == null) {
             stats.onNoSuccessor(currentTerm);
-            logTransfer(retry, "cluster '{}': node {} keeps leading term {}: no reachable follower standing for"
+            logTransfer(quiet, "cluster '{}': node {} keeps leading term {}: no reachable follower standing for"
                     + " election to transfer leadership to", config.applicationName(), config.nodeId(), currentTerm);
             return false;
         }
-        logTransferTo(target, retry);
-        transferTo(target);
+        transferTo(target, quiet);
         return true;
     }
 
@@ -1214,35 +1177,31 @@ public final class ElectionNode implements MessageHandler {
         if (role != Role.LEADER) {
             return false;
         }
-        TrackedPeer trackedPeer = trackedPeer(targetId);
-        String refusal = trackedPeer == null ? "not a peer"
-                : trackedPeer.peer.isWitness() ? "a witness, which never leads"
-                : !trackedPeer.candidate ? "withdrawn from elections"
-                : isDeclaredDown(trackedPeer) ? "down" : null;
+        TrackedPeer tracked = trackedPeer(targetId);
+        String refusal = tracked == null ? "not a peer"
+                : tracked.peer.isWitness() ? "a witness, which never leads"
+                : !tracked.electable ? "withdrawn from elections"
+                : isDeclaredDown(tracked) ? "down" : null;
         if (refusal != null) {
             log.info("cluster '{}': node {} keeps leading term {}: node {} is {}", config.applicationName(),
                     config.nodeId(), currentTerm, targetId, refusal);
             return false;
         }
-        logTransferTo(trackedPeer.peer, false);
-        transferTo(trackedPeer.peer);
+        transferTo(tracked.peer, false);
         return true;
     }
 
-    private void logTransferTo(Peer target, boolean retry) {
-        logTransfer(retry, "cluster '{}': node {} is transferring leadership of term {} to node {}",
-                config.applicationName(), config.nodeId(), currentTerm, target.id());
-    }
-
-    private void logTransfer(boolean retry, String message, Object... args) {
-        if (retry) {
+    private void logTransfer(boolean quiet, String message, Object... args) {
+        if (quiet) {
             log.debug(message, args);
         } else {
             log.info(message, args);
         }
     }
 
-    private void transferTo(Peer target) {
+    private void transferTo(Peer target, boolean quiet) {
+        logTransfer(quiet, "cluster '{}': node {} is transferring leadership of term {} to node {}",
+                config.applicationName(), config.nodeId(), currentTerm, target.id());
         stats.onLeadershipTransferSent(target.id());
         sendTimeoutNow(target);
     }
@@ -1251,8 +1210,8 @@ public final class ElectionNode implements MessageHandler {
         send(target.id(), encoder.timeoutNow(sendBuffer, currentTerm));
     }
 
-    private boolean isDeclaredDown(TrackedPeer trackedPeer) {
-        return trackedPeer.consecutiveMisses >= timings.failureThreshold();
+    private boolean isDeclaredDown(TrackedPeer tracked) {
+        return tracked.consecutiveMisses >= timings.failureThreshold();
     }
 
     private Peer handoverTarget() {
@@ -1260,16 +1219,16 @@ public final class ElectionNode implements MessageHandler {
         Peer best = null;
         long bestContactNanos = Long.MIN_VALUE;
 
-        for (TrackedPeer trackedPeer : peers) {
-            if (trackedPeer.peer.isWitness() || !trackedPeer.candidate || isDeclaredDown(trackedPeer)) {
+        for (TrackedPeer tracked : peers) {
+            if (tracked.peer.isWitness() || !tracked.electable || isDeclaredDown(tracked)) {
                 continue;
             }
-            long lastContact = trackedPeer.lastConfirmedNanos;
-            if (lastContact == NO_READING || now - lastContact > electionTimeoutMinNanos) {
+            long lastContact = tracked.lastConfirmedNanos;
+            if (now - lastContact > electionTimeoutMinNanos) {
                 continue;
             }
             if (best == null || lastContact > bestContactNanos) {
-                best = trackedPeer.peer;
+                best = tracked.peer;
                 bestContactNanos = lastContact;
             }
         }
@@ -1281,75 +1240,63 @@ public final class ElectionNode implements MessageHandler {
         if (term > currentTerm) {
             stepDown(term);
         }
-        TrackedPeer trackedPeer = trackedPeer(senderId);
-        if (trackedPeer == null || sequence != trackedPeer.outstandingSequence || !trackedPeer.awaitingReply) {
+        TrackedPeer tracked = trackedPeer(senderId);
+        if (tracked == null || sequence != tracked.outstandingSequence || !tracked.awaitingReply) {
             // A reply to a probe we have already given up on or already counted. Counting it would
             // let one badly delayed datagram keep a peer that is long gone looking alive.
             return;
         }
         long now = clock.nanoTime();
-        trackedPeer.awaitingReply = false;
-        trackedPeer.consecutiveMisses = 0;
-        stats.onProbeRoundTrip(senderId, now - trackedPeer.sentAtNanos);
-        trackedPeer.lastHeardNanos = now;
-        if (trackedPeer.reachability != Reachability.UP) {
-            trackedPeer.reachability = Reachability.UP;
-            notifyPeerUp(trackedPeer.peer);
+        tracked.awaitingReply = false;
+        tracked.consecutiveMisses = 0;
+        stats.onProbeRoundTrip(senderId, now - tracked.sentAtNanos);
+        tracked.lastHeardNanos = now;
+        if (tracked.reachability != Reachability.UP) {
+            tracked.reachability = Reachability.UP;
+            notifyPeerUp(tracked.peer);
         }
     }
 
     private void probeRound(long now) {
         forgetSilentPeers(now);
-        for (TrackedPeer trackedPeer : peers) {
-            if (trackedPeer.awaitingReply) {
-                trackedPeer.consecutiveMisses++;
-                if (trackedPeer.reachability != Reachability.DOWN
-                        && trackedPeer.consecutiveMisses >= timings.failureThreshold()) {
-                    trackedPeer.reachability = Reachability.DOWN;
-                    notifyPeerDown(trackedPeer.peer);
+        for (TrackedPeer tracked : peers) {
+            if (tracked.awaitingReply) {
+                tracked.consecutiveMisses++;
+                if (tracked.reachability != Reachability.DOWN
+                        && tracked.consecutiveMisses >= timings.failureThreshold()) {
+                    tracked.reachability = Reachability.DOWN;
+                    notifyPeerDown(tracked.peer);
                 }
             }
-            trackedPeer.outstandingSequence = ++probeSequence;
-            trackedPeer.sentAtNanos = now;
-            trackedPeer.awaitingReply = true;
-            send(trackedPeer.peer.id(), encoder.ping(sendBuffer, currentTerm, trackedPeer.outstandingSequence));
+            tracked.outstandingSequence = ++probeSequence;
+            tracked.sentAtNanos = now;
+            tracked.awaitingReply = true;
+            send(tracked.id(), encoder.ping(sendBuffer, currentTerm, tracked.outstandingSequence));
         }
     }
 
-    /**
-     * Drops learned voters that have gone quiet for far longer than being down.
-     */
     private void forgetSilentPeers(long now) {
         if (!config.isLearnedMembership()) {
             return;
         }
         long silence = timings.probeInterval().toNanos() * FORGET_AFTER_PROBES;
-        int surviving = 0;
-        for (TrackedPeer trackedPeer : peers) {
-            if (!isSilentTooLong(trackedPeer, now, silence)) {
-                surviving++;
-            }
-        }
-        if (surviving == peers.length) {
-            // The steady state, and it allocates nothing: a scan and no array.
-            return;
-        }
-        TrackedPeer[] kept = new TrackedPeer[surviving];
-        int at = 0;
-        for (TrackedPeer trackedPeer : peers) {
-            if (isSilentTooLong(trackedPeer, now, silence)) {
+        int kept = 0;
+        for (TrackedPeer tracked : peers) {
+            if (isSilentTooLong(tracked, now, silence)) {
                 log.info("cluster '{}': witness {} has not heard from voter {} for {}s and has"
                                 + " stopped tracking it; it will be learned again if it returns",
-                        config.applicationName(), config.nodeId(), trackedPeer.peer.id(),
-                        TimeUnit.NANOSECONDS.toSeconds(now - trackedPeer.lastHeardNanos));
-                transport.forgetSender(trackedPeer.peer.id());
+                        config.applicationName(), config.nodeId(), tracked.id(),
+                        TimeUnit.NANOSECONDS.toSeconds(now - tracked.lastHeardNanos));
+                transport.forgetSender(tracked.id());
                 peersForgotten++;
-                stats.onPeerForgotten(trackedPeer.peer.id());
+                stats.onPeerForgotten(tracked.id());
             } else {
-                kept[at++] = trackedPeer;
+                peers[kept++] = tracked;
             }
         }
-        peers = kept;
+        if (kept < peers.length) {
+            peers = Arrays.copyOf(peers, kept);
+        }
     }
 
     private void notifyPeerUp(Peer peer) {
@@ -1371,8 +1318,8 @@ public final class ElectionNode implements MessageHandler {
      * Whether a peer is currently answering probes.
      */
     public boolean isReachable(int peerId) {
-        TrackedPeer trackedPeer = trackedPeer(peerId);
-        return trackedPeer != null && trackedPeer.reachability == Reachability.UP;
+        TrackedPeer tracked = trackedPeer(peerId);
+        return tracked != null && tracked.reachability == Reachability.UP;
     }
 
     /**
@@ -1392,37 +1339,15 @@ public final class ElectionNode implements MessageHandler {
         if (needed <= 0) {
             return clock.nanoTime();
         }
-        if (confirmationScratch.length < peers.length) {
-            confirmationScratch = new long[peers.length];
+        for (int i = 0; i < peers.length; i++) {
+            confirmationScratch[i] = peers[i].lastConfirmedNanos;
         }
-        int count = 0;
-        for (TrackedPeer trackedPeer : peers) {
-            confirmationScratch[count++] = trackedPeer.lastConfirmedNanos;
-        }
-        if (count < needed) {
-            return Long.MIN_VALUE;
-        }
-        long confirmed = nthLatest(confirmationScratch, count, needed);
-        return confirmed == NO_READING ? Long.MIN_VALUE : confirmed;
+        return nthLatest(confirmationScratch, needed);
     }
 
     private long quorumContactDeadlineNanos() {
-        return Math.max(leadershipConfirmedNanos(), leaderSinceNanos) + electionTimeoutMinNanos;
-    }
-
-    private boolean hasQuorumContact(long now) {
         // From the win, not the vote requests the lease counts from: a first heartbeat cannot be answered any sooner.
-        if (now - leaderSinceNanos < electionTimeoutMinNanos) {
-            return true;
-        }
-        int inContact = 1;
-        for (TrackedPeer trackedPeer : peers) {
-            long confirmed = trackedPeer.lastConfirmedNanos;
-            if (confirmed != NO_READING && now - confirmed < electionTimeoutMinNanos) {
-                inContact++;
-            }
-        }
-        return quorum.isReached(inContact);
+        return Math.max(leadershipConfirmedNanos(), leaderSinceNanos) + electionTimeoutMinNanos;
     }
 
     private void relinquishLeadership() {
@@ -1434,16 +1359,8 @@ public final class ElectionNode implements MessageHandler {
                 timings.electionTimeoutMin().toMillis());
 
         setRole(Role.FOLLOWER);
-        setLeader(-1);
-        votesGranted.clear();
-        forgetQuorumContact();
+        setLeader(NO_LEADER);
         resetElectionTimer();
-    }
-
-    private void forgetQuorumContact() {
-        for (TrackedPeer trackedPeer : peers) {
-            trackedPeer.lastConfirmedNanos = NO_READING;
-        }
     }
 
     private void resetElectionTimer() {
@@ -1456,16 +1373,20 @@ public final class ElectionNode implements MessageHandler {
     }
 
     private void send(int peerId, ByteBuffer datagram) {
+        SendDropReason dropped;
         try {
-            transport.send(peerId, datagram);
+            dropped = transport.send(peerId, datagram);
         } catch (RuntimeException e) {
-            log.debug("node {} could not send to {}: {}", config.nodeId(), peerId, e.toString());
+            dropped = SendDropReason.SOCKET_ERROR;
+            if (log.isDebugEnabled()) {
+                log.debug("node {} could not send to {}: {}", config.nodeId(), peerId, e.toString());
+            }
+        }
+        if (dropped != null) {
+            stats.onSendDropped(dropped);
         }
     }
 
-    /**
-     * Refuses a turn of the loop taken before the store has been read.
-     */
     private void requireStarted() {
         if (!started) {
             throw new IllegalStateException("node " + config.nodeId() + " has not been started");
@@ -1496,14 +1417,18 @@ public final class ElectionNode implements MessageHandler {
         private Reachability reachability = Reachability.UNKNOWN;
         private long lastHeardNanos = NO_READING;
         private boolean timingsMatch = true;
-        private long lastConfirmedNanos = NO_READING;
+        private long lastConfirmedNanos;
         /**
          * What its last heartbeat reply in this node's leadership said; standing until one says otherwise.
          */
-        private boolean candidate = true;
+        private boolean electable = true;
 
         private TrackedPeer(Peer peer) {
             this.peer = peer;
+        }
+
+        private int id() {
+            return peer.id();
         }
     }
 }

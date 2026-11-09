@@ -22,7 +22,7 @@ package org.lolaf.primos.wire;
  * allocates nothing without needing any machinery to arrange it.
  *
  * <p>Every method gets the sender and the term, because the rule that a message bearing a higher
- * term means "adopt it and step down" applies to all six alike.
+ * term means "adopt it and step down" applies to all of them alike.
  */
 public interface MessageHandler {
 
@@ -30,6 +30,9 @@ public interface MessageHandler {
      * A vote request. When {@code preVote} is set the caller is asking whether a vote
      * <em>would</em> be granted, and answering must not touch {@code currentTerm} or
      * {@code votedFor}, so it costs no fsync, and a partitioned node cannot inflate its term.
+     *
+     * @param handover the candidate is campaigning on its leader's own {@code TimeoutNow}, so a voter that has just
+     *                 heard from that leader does not refuse it
      */
     void onRequestVote(int senderId, long term, boolean preVote, boolean handover);
 
@@ -47,10 +50,10 @@ public interface MessageHandler {
     /**
      * A heartbeat acknowledgement. Its arrival is also what feeds CheckQuorum.
      *
-     * @param candidate whether the sender stands for election
+     * @param electable whether the sender stands for election
      * @param sentNanos when the answered heartbeat was sent, on this node's clock
      */
-    void onAppendEntriesReply(int senderId, long term, boolean success, boolean candidate, long sentNanos);
+    void onAppendEntriesReply(int senderId, long term, boolean success, boolean electable, long sentNanos);
 
     /**
      * A reachability probe, to be answered with the same sequence number.
@@ -58,12 +61,12 @@ public interface MessageHandler {
     void onPing(int senderId, long term, long sequence);
 
     /**
-     * A probe reply. Ignore it if the sequence is older than the failure threshold allows.
+     * A probe reply. Counted only if it answers the probe still outstanding to that peer.
      */
     void onPingReply(int senderId, long term, long sequence);
 
     /**
-     * A leader that is shutting down cleanly, telling this node to campaign immediately.
+     * A leader handing over, on its way out or in a transfer, telling this node to campaign immediately.
      *
      * <p>Raft thesis §3.10. The alternative is silence: a leader that simply stops leaves the
      * cluster without one until somebody's election timeout expires, and this turns that wait into
