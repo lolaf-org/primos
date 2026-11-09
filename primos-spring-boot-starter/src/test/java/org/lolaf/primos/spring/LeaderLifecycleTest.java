@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.lolaf.primos.Role;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -133,6 +134,27 @@ class LeaderLifecycleTest {
             eventually(() -> assertThat(gated.isRunning())
                     .as("a stop from term 5 must not switch off a leader of term 6")
                     .isTrue());
+        });
+    }
+
+    /**
+     * A child context's refresh event reaches its parent's listeners too. A management port or a Feign client's context
+     * created at first use would otherwise quiesce the beans of a node that is already leading, with no transition to
+     * start them again. Its twin is {@link #a_gated_bean_that_auto_starts_is_stopped_before_the_node_can_lead}.
+     */
+    @Test
+    void a_child_context_refreshing_does_not_switch_off_a_running_leader() {
+        runner().withUserConfiguration(AnnotatedBean.class).run(context -> {
+            AutoStartingBean gated = context.getBean(AutoStartingBean.class);
+            context.getBean(LeaderLifecycleController.class).onRoleChanged(Role.CANDIDATE, Role.LEADER, 4);
+            eventually(() -> assertThat(gated.isRunning()).isTrue());
+
+            try (AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext()) {
+                child.setParent(context.getSourceApplicationContext());
+                child.refresh();
+            }
+
+            assertThat(gated.isRunning()).isTrue();
         });
     }
 

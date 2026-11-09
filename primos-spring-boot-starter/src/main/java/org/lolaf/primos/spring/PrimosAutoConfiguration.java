@@ -29,6 +29,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -226,9 +227,10 @@ public class PrimosAutoConfiguration {
     @Bean
     public PrimosNodeLifecycle primosNodeLifecycle(PrimosNode node,
                                                    PrimosProperties properties,
-                                                   ObjectProvider<LeaderLifecycleController> gating) {
+                                                   ObjectProvider<LeaderLifecycleController> gating,
+                                                   ApplicationContext context) {
         return new PrimosNodeLifecycle(node, properties.lifecycle(),
-                properties.leaderLifecycle().enabled(), gating.getIfAvailable());
+                properties.leaderLifecycle().enabled(), gating.getIfAvailable(), context);
     }
 
     @Bean

@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.spring.PrimosProperties.NodeLifecycle;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
@@ -51,17 +52,20 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
     private final NodeLifecycle mode;
     private final boolean gatingEnabled;
     private final LeaderLifecycleController controller;
+    private final ApplicationContext context;
 
     private volatile boolean running;
 
     PrimosNodeLifecycle(PrimosNode node,
                         NodeLifecycle mode,
                         boolean gatingEnabled,
-                        LeaderLifecycleController controller) {
+                        LeaderLifecycleController controller,
+                        ApplicationContext context) {
         this.node = node;
         this.mode = mode;
         this.gatingEnabled = gatingEnabled;
         this.controller = controller;
+        this.context = context;
     }
 
     /**
@@ -72,8 +76,12 @@ public class PrimosNodeLifecycle implements SmartLifecycle {
      * is stopped <em>before</em> anything can tell this node it is in charge. Quiescing happens in
      * both modes, because a manually started node is started later, not never.
      */
-    @EventListener(ContextRefreshedEvent.class)
-    void onContextRefreshed() {
+    @EventListener
+    void onContextRefreshed(ContextRefreshedEvent event) {
+        // A child context's refresh reaches this listener too, and would quiesce a running leader's beans.
+        if (event.getApplicationContext() != context) {
+            return;
+        }
         if (controller != null) {
             controller.prepare();
         }
