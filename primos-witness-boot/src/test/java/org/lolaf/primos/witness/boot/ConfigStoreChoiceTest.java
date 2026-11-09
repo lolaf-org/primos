@@ -34,6 +34,7 @@ import org.lolaf.primos.Peer;
 import org.lolaf.primos.Timings;
 import org.lolaf.primos.witness.ConfigStore;
 import org.lolaf.primos.witness.FileConfigStore;
+import org.lolaf.primos.witness.WitnessKey;
 import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -114,6 +115,24 @@ class ConfigStoreChoiceTest {
                             + " the whole mapping and not just the name list")
                     .isTrue();
         }
+    }
+
+    @Test
+    void a_key_claiming_everything_claims_nothing_here_too() {
+        start(propertiesStore("primos.witness.keys.wild.value=also-general",
+                "primos.witness.keys.wild.applications=*"));
+
+        assertThat(context.getBean(ConfigStore.class).current().settings().keyring().candidatesFor("payments"))
+                .as("otherwise one '*' entry silently takes every unscoped key out of use")
+                .extracting(WitnessKey::name)
+                .containsExactlyInAnyOrder("shared", "wild");
+    }
+
+    @Test
+    void a_pattern_no_application_name_could_match_is_refused_here_too() {
+        assertThatStartupFails(propertiesStore("primos.witness.keys.bad.value=x",
+                "primos.witness.keys.bad.applications=not a name"))
+                .contains("key 'bad' claims 'not a name'");
     }
 
     @Test

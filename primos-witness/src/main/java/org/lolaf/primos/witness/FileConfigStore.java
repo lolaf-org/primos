@@ -215,46 +215,8 @@ public final class FileConfigStore implements ConfigStore {
         }
     }
 
-    /**
-     * The application patterns a key claims, validated as far as they can be before anything runs.
-     *
-     * <p>A bare {@code *} is treated as claiming nothing, which is the same thing as omitting the
-     * setting. Otherwise it would be a trap: a claimed name is verified <em>only</em> by the keys
-     * claiming it, so one {@code *} entry would silently take every unscoped key in the file out of
-     * use.
-     */
-    private static List<String> patterns(String keyName, String raw) {
-        if (raw == null || raw.trim().isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<String> patterns = new ArrayList<>();
-        for (String piece : raw.split(",")) {
-            String pattern = piece.trim();
-            if (pattern.isEmpty()) {
-                continue;
-            }
-            if ("*".equals(pattern)) {
-                // Claims everything, which is the same intent as claiming nothing.
-                return Collections.emptyList();
-            }
-            int literal = ApplicationNames.literalLength(pattern);
-            if (literal > ClusterConfig.APPLICATION_NAME_MAX_BYTES) {
-                throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
-                        + "', whose " + literal + " literal characters cannot fit the "
-                        + ClusterConfig.APPLICATION_NAME_MAX_BYTES
-                        + "-byte name field, so it can never match anything");
-            }
-            for (int i = 0; i < pattern.length(); i++) {
-                char c = pattern.charAt(i);
-                if (c != '*' && !ClusterConfig.isApplicationNameCharacter(c)) {
-                    throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
-                            + "', which contains a character no application name may carry;"
-                            + " patterns match names, and a name is printable ASCII without spaces");
-                }
-            }
-            patterns.add(pattern);
-        }
-        return patterns;
+    private static List<String> splitPatterns(String raw) {
+        return raw == null ? Collections.emptyList() : Arrays.asList(raw.split(","));
     }
 
     private static byte[] secretValue(Properties properties, String key, Path base) {
@@ -352,7 +314,7 @@ public final class FileConfigStore implements ConfigStore {
             }
             keys.add(new WitnessKey(name, secret,
                     properties.getProperty(KEY_PREFIX + name + ".algorithm"),
-                    patterns(name, properties.getProperty(KEY_PREFIX + name + ".applications"))));
+                    splitPatterns(properties.getProperty(KEY_PREFIX + name + ".applications"))));
         }
         return new Keyring(keys);
     }

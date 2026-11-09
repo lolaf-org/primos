@@ -18,8 +18,10 @@ package org.lolaf.primos.witness;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import org.lolaf.primos.ClusterConfig;
 import org.lolaf.primos.wire.MessageAuthenticator;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -76,9 +78,46 @@ public final class WitnessKey {
         this.secret = Objects.requireNonNull(secret, "secret").clone();
         this.algorithm = algorithm == null || algorithm.trim().isEmpty()
                 ? MessageAuthenticator.DEFAULT_ALGORITHM : algorithm.trim();
-        this.applications = applications == null
-                ? Collections.emptyList() : Collections.unmodifiableList(new java.util.ArrayList<>(applications));
+        this.applications = claimedPatterns(name, applications);
         requireUsable();
+    }
+
+    private static List<String> claimedPatterns(String keyName, List<String> configured) {
+        if (configured == null) {
+            return Collections.emptyList();
+        }
+        List<String> patterns = new ArrayList<>(configured.size());
+        for (String entry : configured) {
+            String pattern = entry.trim();
+            if ("*".equals(pattern)) {
+                // A claimed name is verified only by its claimants, so claiming everything would
+                // silently take every unscoped key out of use. Same intent as claiming nothing.
+                return Collections.emptyList();
+            }
+            if (!pattern.isEmpty()) {
+                requireMatchable(keyName, pattern);
+                patterns.add(pattern);
+            }
+        }
+        return Collections.unmodifiableList(patterns);
+    }
+
+    private static void requireMatchable(String keyName, String pattern) {
+        int literal = ApplicationNames.literalLength(pattern);
+        if (literal > ClusterConfig.APPLICATION_NAME_MAX_BYTES) {
+            throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
+                    + "', whose " + literal + " literal characters cannot fit the "
+                    + ClusterConfig.APPLICATION_NAME_MAX_BYTES
+                    + "-byte name field, so it can never match anything");
+        }
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (c != '*' && !ClusterConfig.isApplicationNameCharacter(c)) {
+                throw new IllegalArgumentException("key '" + keyName + "' claims '" + pattern
+                        + "', which contains a character no application name may carry;"
+                        + " patterns match names, and a name is printable ASCII without spaces");
+            }
+        }
     }
 
     private void requireUsable() {
