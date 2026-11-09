@@ -49,7 +49,7 @@ public class ClusterConfig {
      * Set through {@link ClusterConfigBuilder#asWitness()} rather than by naming the type, so that declaring a
      * witness is one named decision.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     private final PeerType nodeType = PeerType.APPLICATION;
 
     /**
@@ -83,7 +83,7 @@ public class ClusterConfig {
      * Election, heartbeat, probe and advertisement intervals. Keep them uniform across a cluster,
      * witness included.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     private final Timings timings = Timings.lan();
 
     /**
@@ -98,7 +98,7 @@ public class ClusterConfig {
      * <p>Turn it off for a deployment that elects often enough for the lines to be noise, or one
      * whose log ingestion is charged by the line. The decisions are still logged at DEBUG.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     boolean voteLogging = true;
 
     /**

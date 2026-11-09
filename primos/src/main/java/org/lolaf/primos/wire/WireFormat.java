@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos.wire;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * The byte layout every primos datagram follows.
  *
@@ -42,6 +45,7 @@ package org.lolaf.primos.wire;
  * <p>Big-endian throughout, which is both network byte order and {@link java.nio.ByteBuffer}'s
  * default, so nothing ever calls {@code order()}.
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class WireFormat {
 
     /**
@@ -102,7 +106,4 @@ public final class WireFormat {
      * heard from that leader does not refuse it.
      */
     public static final int FLAG_HANDOVER = 0x0004;
-
-    private WireFormat() {
-    }
 }

@@ -15,11 +15,15 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 import java.util.Locale;
 
 /**
  * Checks on an application name that only the witness server needs.
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class ApplicationNames {
 
     /**
@@ -28,9 +32,6 @@ final class ApplicationNames {
      * estate are one edit apart.
      */
     private static final int MIN_LENGTH_FOR_NEAR_MISS = 4;
-
-    private ApplicationNames() {
-    }
 
     /**
      * Whether a name can be a single directory name, which the state layout requires.

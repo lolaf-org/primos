@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.witness.boot;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -41,15 +43,11 @@ import java.util.Set;
  * tolerates zero failures) so a probe that can be wrong is a mechanism for causing the outage it
  * is watching for. Readiness is fine and useful; liveness is not.
  */
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public class WitnessHealthIndicator implements HealthIndicator {
 
     private final WitnessServer server;
     private final WitnessServerLifecycle lifecycle;
-
-    WitnessHealthIndicator(WitnessServer server, WitnessServerLifecycle lifecycle) {
-        this.server = server;
-        this.lifecycle = lifecycle;
-    }
 
     @Override
     public Health health() {

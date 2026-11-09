@@ -69,7 +69,7 @@ public class PropertiesConfigStore implements ConfigStore {
                     + " already voted in and elect two leaders: the exact failure it was deployed"
                     + " to prevent.");
         }
-        WitnessSettings.Builder settings = WitnessSettings.builder()
+        WitnessSettings.WitnessSettingsBuilder settings = WitnessSettings.builder()
                 .stateDirectory(properties.stateDirectory())
                 .configSource(configSource(properties))
                 .clusterApplicationLimit(properties.clusterApplicationLimit())

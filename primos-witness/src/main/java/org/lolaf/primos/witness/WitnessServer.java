@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
@@ -1096,6 +1098,7 @@ public final class WitnessServer implements AutoCloseable {
     /**
      * Builds a {@link WitnessServer}.
      */
+    @NoArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class Builder {
 
         /**
@@ -1153,9 +1156,6 @@ public final class WitnessServer implements AutoCloseable {
          */
         private Function<String, PrimosStatsListener> statsListeners =
                 application -> PrimosStatsListener.NONE;
-
-        private Builder() {
-        }
 
         /**
          * Registers a {@link PrimosStatsListener} per served application.

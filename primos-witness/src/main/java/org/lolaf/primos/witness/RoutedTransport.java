@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.witness;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.transport.DatagramHandler;
@@ -54,6 +56,7 @@ import java.util.*;
  * <p>Owned by the server thread, like every other transport here.
  */
 @Slf4j
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class RoutedTransport implements Transport {
 
     /**
@@ -90,12 +93,6 @@ final class RoutedTransport implements Transport {
 
     private volatile long sendFailures;
     private volatile long sendsWhileClosed;
-
-    RoutedTransport(String application, DatagramChannel channel, Selector selector) {
-        this.application = application;
-        this.channel = channel;
-        this.selector = selector;
-    }
 
     /**
      * Queues a datagram the server has routed here, copying it out of the shared receive buffer, unless the inbox

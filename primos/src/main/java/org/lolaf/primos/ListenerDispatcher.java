@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.time.MonotonicClock;
 
@@ -31,23 +33,15 @@ import java.util.function.Consumer;
  * logged and swallowed, so it can neither kill the node nor stop the other listeners hearing about the event.
  */
 @Slf4j
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class ListenerDispatcher implements PrimosListener {
 
     private final List<PrimosListener> listeners = new CopyOnWriteArrayList<>();
+    private final String cluster;
+    private final int nodeId;
     private final MonotonicClock clock;
     private final Executor executor;
     private final long slowCallbackNanos;
-    private final String cluster;
-    private final int nodeId;
-
-    ListenerDispatcher(String cluster, int nodeId, MonotonicClock clock, Executor executor,
-                       long slowCallbackNanos) {
-        this.cluster = cluster;
-        this.nodeId = nodeId;
-        this.clock = clock;
-        this.executor = executor;
-        this.slowCallbackNanos = slowCallbackNanos;
-    }
 
     void add(PrimosListener listener) {
         listeners.add(listener);

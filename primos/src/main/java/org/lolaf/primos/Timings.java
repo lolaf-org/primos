@@ -94,20 +94,20 @@ public class Timings {
      * <p>Not to be confused with {@link #probeInterval()}, which measures reachability, or
      * {@link #advertisementInterval()}, which reports configuration. See the table on this class.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration heartbeatInterval = Duration.ofMillis(50);
 
     /**
      * The low end of the range an election timeout is drawn from, afresh on every reset.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration electionTimeoutMin = Duration.ofMillis(300);
 
     /**
      * The high end of that range. The width between the two is what stops nodes campaigning in
      * lockstep, so it is never zero.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration electionTimeoutMax = Duration.ofMillis(600);
 
     /**
@@ -123,7 +123,7 @@ public class Timings {
      * <p>Capped at {@link #MAX_PROBE_INTERVAL}: symmetric probing is what holds a NAT or firewall
      * pinhole open to a witness on another network.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration probeInterval = Duration.ofSeconds(1);
 
     /**
@@ -145,7 +145,7 @@ public class Timings {
      * <p>Never shorter than {@link #probeInterval()}. Restating unchanging values more often than a
      * node checks whether its peers are alive at all is pure traffic.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     Duration advertisementInterval = Duration.ofSeconds(30);
 
     /**
@@ -155,7 +155,7 @@ public class Timings {
      * anyone says so, and on the JVM that product has to clear the worst stop-the-world pause,
      * because a collecting process is indistinguishable from a dead one.
      */
-    @lombok.Builder.Default
+    @Builder.Default
     int failureThreshold = 3;
 
     /**

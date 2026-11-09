@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.spring;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import org.lolaf.primos.Leader;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.PeerDownReason;
@@ -30,10 +32,8 @@ import java.util.Optional;
  * node: dispatch happens off the node thread, so by the time a listener runs the answer may have
  * moved on. That is not a race to be fixed: it is why the term is on the event.
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class PrimosEvents {
-
-    private PrimosEvents() {
-    }
 
     /**
      * This node's role changed.

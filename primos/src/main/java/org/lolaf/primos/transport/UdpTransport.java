@@ -15,7 +15,9 @@
  */
 package org.lolaf.primos.transport;
 
+import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
@@ -338,6 +340,7 @@ public final class UdpTransport implements Transport {
     /**
      * Builds a {@link UdpTransport}.
      */
+    @NoArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class Builder implements Supplier<Transport> {
 
         /**
@@ -373,9 +376,6 @@ public final class UdpTransport implements Transport {
          */
         @Setter
         private String clusterName = "primos";
-
-        private Builder() {
-        }
 
         /**
          * Binds the socket and resolves every peer.

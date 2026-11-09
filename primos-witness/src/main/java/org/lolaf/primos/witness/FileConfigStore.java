@@ -488,7 +488,7 @@ public final class FileConfigStore implements ConfigStore {
 
     private WitnessSettings readSettings() {
         Properties properties = load(directory.resolve(SETTINGS_FILE), true);
-        WitnessSettings.Builder builder = WitnessSettings.builder()
+        WitnessSettings.WitnessSettingsBuilder builder = WitnessSettings.builder()
                 .stateDirectory(directory.resolve("state"));
 
         String host = properties.getProperty("bind.host", "0.0.0.0");

@@ -15,6 +15,8 @@
  */
 package org.lolaf.primos.spring;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import org.lolaf.primos.PrimosNode;
 import org.lolaf.primos.Role;
 import org.lolaf.primos.RoleAndTerm;
@@ -34,13 +36,10 @@ import org.springframework.boot.health.contributor.HealthIndicator;
  * ready) but it must not read as an ordinary follower, because a deployment that forgot to start
  * its node looks identical to a healthy one from every other angle.
  */
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public class PrimosHealthIndicator implements HealthIndicator {
 
     private final PrimosNode node;
-
-    PrimosHealthIndicator(PrimosNode node) {
-        this.node = node;
-    }
 
     @Override
     public Health health() {

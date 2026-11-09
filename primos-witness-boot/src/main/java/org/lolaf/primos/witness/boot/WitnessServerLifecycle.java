@@ -15,6 +15,7 @@
  */
 package org.lolaf.primos.witness.boot;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.witness.WitnessServer;
 import org.springframework.context.SmartLifecycle;
@@ -43,6 +44,7 @@ import java.time.Duration;
  * be killed at the instant it finishes.
  */
 @Slf4j
+@RequiredArgsConstructor
 public class WitnessServerLifecycle implements SmartLifecycle {
 
     private final WitnessServer server;
@@ -53,11 +55,6 @@ public class WitnessServerLifecycle implements SmartLifecycle {
      * answered from whichever thread asks: an actuator endpoint, most often.
      */
     private volatile Thread thread;
-
-    public WitnessServerLifecycle(WitnessServer server, Duration stopTimeout) {
-        this.server = server;
-        this.stopTimeout = stopTimeout;
-    }
 
     @Override
     public void start() {

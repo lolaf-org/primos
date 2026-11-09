@@ -15,6 +15,9 @@
  */
 package org.lolaf.primos;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+
 /**
  * Fans one event out to several sinks, for {@link PrimosStatsListener#of}.
  *
@@ -22,13 +25,10 @@ package org.lolaf.primos;
  * run on the node thread and one of them runs per dropped datagram: an iterator per event is
  * exactly the allocation this whole SPI is shaped to avoid.
  */
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class CompositeStatsListener implements PrimosStatsListener {
 
     private final PrimosStatsListener[] sinks;
-
-    CompositeStatsListener(PrimosStatsListener[] sinks) {
-        this.sinks = sinks;
-    }
 
     @Override
     public void onElectionWon(long term, long campaignNanos) {
