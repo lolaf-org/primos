@@ -42,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * What a witness reports about itself: counters per served application, and which tenants it has
  * stopped serving.
  *
- * <p>Both exist for something outside this artifact to read — {@code primos-micrometer} for the
- * first and a health endpoint for the second — and both have a failure that is silent. Counters
+ * <p>Both exist for something outside this artifact to read ({@code primos-micrometer} for the
+ * first and a health endpoint for the second) and both have a failure that is silent. Counters
  * summed across tenants are a number nobody can act on; a quarantined tenant reported as an
  * unhealthy witness takes every other tenant's witness away with it.
  */
@@ -78,7 +78,7 @@ class WitnessObservabilityTest {
     /**
      * The reason the SPI is a function of the name rather than one sink: a witness runs an election
      * per served cluster, so one tenant's dropped datagrams added to another's would be a number
-     * nobody could act on — and it would look perfectly plausible on a dashboard.
+     * nobody could act on, and it would look perfectly plausible on a dashboard.
      */
     @Test
     void counters_are_recorded_against_the_application_that_produced_them() {
@@ -130,7 +130,7 @@ class WitnessObservabilityTest {
      * The SPI already promises that a listener which throws is caught and logged rather than
      * killing the node. On a witness that promise is worth more than it is anywhere else: the
      * catch-all it would otherwise reach marks the node {@code FAILED}, and a failed node here is a
-     * quarantined tenant — so a bug in a counter would take a cluster's tie-breaker away from it.
+     * quarantined tenant, so a bug in a counter would take a cluster's tie-breaker away from it.
      */
     @Test
     void a_listener_that_throws_does_not_cost_its_tenant_the_witness() {
@@ -198,7 +198,7 @@ class WitnessObservabilityTest {
     /**
      * The shape a health endpoint needs. One tenant whose disk can no longer make a vote durable
      * stops being served; every other tenant keeps its tie-breaker, and the witness is still doing
-     * its job for all of them — which is why this is a set of names to put in a health detail and
+     * its job for all of them, which is why this is a set of names to put in a health detail and
      * not a verdict about the server.
      */
     @Test
@@ -348,7 +348,7 @@ class WitnessObservabilityTest {
     }
 
     /**
-     * Durable by its own account and unable to write — a disk that has gone bad rather than one
+     * Durable by its own account and unable to write: a disk that has gone bad rather than one
      * that was never asked to be durable, which the server refuses outright at startup.
      */
     private static final class UnwritableStateStore implements StateStore {
@@ -376,7 +376,7 @@ class WitnessObservabilityTest {
 
     /**
      * What the other tenant runs on. {@code MemoryStateStore} reports itself non-durable and the
-     * server refuses it, quite rightly — this one is that lie told deliberately, in a test that is
+     * server refuses it, quite rightly: this one is that lie told deliberately, in a test that is
      * about what happens to the tenants beside a broken one.
      */
     private static final class InMemoryDurableStateStore implements StateStore {

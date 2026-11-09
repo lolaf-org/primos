@@ -63,7 +63,7 @@ public final class PrimosNodeBuilder {
      *
      * <p>A built {@link ClusterConfig} rather than a set of fields proxied through this builder,
      * because the two halves are genuinely different questions. That one describes the cluster and
-     * is the same shape on every node; this one wires up one node's runtime — where its state
+     * is the same shape on every node; this one wires up one node's runtime, where its state
      * lives, how it reaches the network, who listens. Keeping them apart also means there is one
      * place that validates a cluster's shape rather than two ways to express it.
      */
@@ -81,7 +81,7 @@ public final class PrimosNodeBuilder {
     private Supplier<Transport> transports;
 
     /**
-     * Where the counters go. One sink, fixed here, because some of these fire per datagram — see
+     * Where the counters go. One sink, fixed here, because some of these fire per datagram; see
      * {@link PrimosStatsListener} for why there is no list and no executor.
      */
     @Setter

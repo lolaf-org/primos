@@ -19,7 +19,7 @@ package org.lolaf.primos.store;
  * Keeps the term and vote in a field.
  *
  * <p>For the deterministic simulation and for tests. The simulation models a crash by discarding
- * everything not yet made durable, and this store makes that trivial — but it also means a real
+ * everything not yet made durable, and this store makes that trivial, but it also means a real
  * cluster running on it is unsafe after any restart, which is why {@link #isDurable()} says so.
  */
 public final class MemoryStateStore implements StateStore {

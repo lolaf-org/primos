@@ -22,7 +22,7 @@ import java.util.OptionalLong;
  * One application instance's membership of a cluster: it starts, joins, and can answer
  * <em>am I the leader?</em> at any moment.
  *
- * <p>Leader election only. There is no replicated log and no state machine — your application
+ * <p>Leader election only. There is no replicated log and no state machine: your application
  * keeps its own state, and primos only tells it who is currently in charge.
  *
  * <p><strong>Using it safely.</strong> There is always a window in which this node believes it
@@ -50,7 +50,7 @@ public interface PrimosNode extends AutoCloseable {
      * <p>Returns once the node is running, <em>not</em> once a leader exists: the node returns as a
      * follower, and an election takes at least one election timeout.
      *
-     * <p><strong>Idempotent</strong>, for the same reason {@link #stop()} is — both end up in
+     * <p><strong>Idempotent</strong>, for the same reason {@link #stop()} is: both end up in
      * lifecycle callbacks and shutdown hooks, where a caller cannot always know what has already
      * happened, and where throwing turns an ordering it could not control into a failure.
      *
@@ -96,7 +96,7 @@ public interface PrimosNode extends AutoCloseable {
      * real and common state rather than an error.
      *
      * <p>A {@link Leader} rather than a bare id, so that a follower asking where to forward work
-     * is answered rather than pointed at a lookup — and so that this node holding leadership is
+     * is answered rather than pointed at a lookup, and so that this node holding leadership is
      * distinguishable from nobody holding it. See {@link Leader}.
      */
     Optional<Leader> leader();
@@ -171,7 +171,7 @@ public interface PrimosNode extends AutoCloseable {
      *
      * <p>Distinguishes <em>not started yet</em> from every other state, which nothing else here
      * does: a node that has never joined reports {@link Role#FOLLOWER} exactly like a healthy one
-     * that has. That matters wherever the start is deferred — a framework integration that hands
+     * that has. That matters wherever the start is deferred: a framework integration that hands
      * the application a built node and lets it choose when to join has no other way to tell a
      * deliberate wait from an application that forgot, and the second is silent.
      *

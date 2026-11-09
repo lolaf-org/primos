@@ -74,7 +74,7 @@ class ConfigStoreChoiceTest {
         application("billing");
 
         assertThat(awaitServing(server, "billing"))
-                .as("a file drop, no restart — the whole reason the configuration is not bound"
+                .as("a file drop, no restart: the whole reason the configuration is not bound"
                         + " from Spring properties")
                 .isTrue();
         try (WitnessTestClient voter = new WitnessTestClient("billing", 1, SECRET, WITNESS_ID,
@@ -138,7 +138,7 @@ class ConfigStoreChoiceTest {
 
     /**
      * The intervals are the file store's, in Spring's spelling: a profile, or every value named,
-     * and never a mixture — the rule that stops a half-overridden profile becoming a custom set
+     * and never a mixture: the rule that stops a half-overridden profile becoming a custom set
      * whose author never saw the other values.
      */
     @Test
@@ -196,8 +196,8 @@ class ConfigStoreChoiceTest {
 
     /**
      * The witness-wide value is a default rather than something a served node runs, and it has two
-     * consumers: an application that names no intervals of its own, and — the one that only exists
-     * here — an application auto-registered under {@code config.source=cluster}, which has no file
+     * consumers: an application that names no intervals of its own, and (the one that only exists
+     * here) an application auto-registered under {@code config.source=cluster}, which has no file
      * to fall back to. Leaving it unset would silently give those the LAN profile instead of what
      * the operator configured.
      */

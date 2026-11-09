@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
  * Receives whole datagrams from a {@link Transport}.
  *
  * <p>The buffer belongs to the transport and is valid only for the duration of the call. Anything
- * worth keeping must be copied out — which nothing does, because the decoder reads the fields it
+ * worth keeping must be copied out, which nothing does, because the decoder reads the fields it
  * needs and hands them on as primitives.
  */
 @FunctionalInterface

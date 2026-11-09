@@ -56,12 +56,12 @@ public final class WitnessKey {
      * The application-name patterns this key covers, or empty when it covers anything unclaimed.
      *
      * <p>{@code *} is the only metacharacter and matches any run of characters, so {@code orders-*}
-     * covers a family of clusters without naming its members — which is what makes scoping usable
+     * covers a family of clusters without naming its members, which is what makes scoping usable
      * at all under {@link ConfigSource#CLUSTER}, where the members are not known in advance.
      *
      * <p>Deliberately <strong>not</strong> a regular expression. As one, {@code orders-*} means
      * "orders followed by zero or more hyphens" and matches {@code orders--} but not
-     * {@code orders-prod} — a difference nobody reads in a properties file, failing silently in
+     * {@code orders-prod}: a difference nobody reads in a properties file, failing silently in
      * both directions: too narrow and the tenant cannot register, too broad and a key covers
      * clusters nobody meant it to.
      */

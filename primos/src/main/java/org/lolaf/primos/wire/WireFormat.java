@@ -22,7 +22,7 @@ package org.lolaf.primos.wire;
  * validation work: one length comparison rejects every truncated, padded or malformed datagram
  * before a field is read, and the parser contains no loops, so there is nothing in it to attack.
  *
- * <p>There is no length prefix and no framing state machine, because UDP gives us the frame — a
+ * <p>There is no length prefix and no framing state machine, because UDP gives us the frame: a
  * datagram arrives whole or not at all.
  *
  * <pre>

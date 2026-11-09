@@ -67,7 +67,7 @@ class GoldenVectorsTest {
                     + "0000000000000000000000000000002a000000030000000000000007";
 
     /**
-     * Header, then heartbeat 50ms, election 300-600ms, probe 1000ms, failure threshold 3 — the LAN
+     * Header, then heartbeat 50ms, election 300-600ms, probe 1000ms, failure threshold 3: the LAN
      * profile, as five big-endian {@code u32}s.
      */
     private static final String NODE_CONFIG =

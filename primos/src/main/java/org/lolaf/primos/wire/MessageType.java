@@ -81,8 +81,9 @@ public enum MessageType {
      * interval and the failure threshold. The application name it belongs to is already in the
      * header, as it is on every message, so this carries a whole cluster's timing configuration.
      *
-     * <p><strong>Between nodes it is purely diagnostic</strong> — a receiver compares the values
-     * with its own, says so when they differ, and changes no decision whatever it finds. A mismatch
+     * <p><strong>Between nodes the values are purely diagnostic</strong>: a receiver compares them
+     * with its own, says so when they differ, and changes no decision whatever it finds. Its term
+     * is handled like any other message's. A mismatch
      * that refused a vote would turn a rolling timing change into a partition, which is a worse
      * failure than the silent slowness it detects. A witness server is the one exception, and only
      * when its operator has asked for it: see {@code ConfigSource}.

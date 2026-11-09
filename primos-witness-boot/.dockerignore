@@ -15,7 +15,7 @@
 #
 
 # The build context is this module directory, and the image needs exactly one file out of it: the
-# repackaged, layered jar. Narrowing it here does two jobs — it keeps target/classes, target/delombok
+# repackaged, layered jar. Narrowing it here does two jobs: it keeps target/classes, target/delombok
 # and the test output from being uploaded to the daemon on every build, and it leaves `target/*.jar`
 # in the Dockerfile matching one file rather than three, since the sources and javadoc jars sit in
 # the same directory.

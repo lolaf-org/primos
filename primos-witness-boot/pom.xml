@@ -33,7 +33,7 @@
                 SpringExtension, so the estate's own JUnit is fine there; this module runs the
                 Spring TestContext framework, and spring-test is version-locked to the JUnit it was
                 built against. With the estate's JUnit winning, every @SpringBootTest here died on a
-                NoSuchMethodError inside JUnit's own extension API — a failure that says nothing
+                NoSuchMethodError inside JUnit's own extension API: a failure that says nothing
                 whatever about the cause.
             -->
             <dependency>
@@ -58,7 +58,7 @@
             inherits the choice: that module is a library and must leave an application its own
             backend, while this is an application and nobody depends on it. It is the same argument
             that puts slf4j-simple in primos-witness-cli, reaching the same answer for a packaging
-            whose selling point is configuration from the environment — logging.level.* and Boot's
+            whose selling point is configuration from the environment: logging.level.* and Boot's
             structured logging are worth having in a container, and slf4j-simple honours neither.
         -->
         <dependency>
@@ -68,7 +68,7 @@
         <!--
             The endpoint an operator and a readiness check read. It brings a web server with it,
             which is a real cost on a process whose startup window is the window its two-node
-            clusters tolerate zero failures — and it is also most of why this packaging exists, so
+            clusters tolerate zero failures, and it is also most of why this packaging exists, so
             it is paid deliberately and measured rather than assumed. What it must NOT be wired to
             is a liveness probe: restarting a witness is the one genuinely risky operation in its
             lifecycle, so a probe that can be wrong is a mechanism for causing the outage it is
@@ -111,7 +111,7 @@
         <plugins>
             <!--
                 The parent pins annotationProcessorPaths for Lombok, and that switch turns OFF
-                discovery of processors on the classpath — so spring-boot-configuration-processor,
+                discovery of processors on the classpath, so spring-boot-configuration-processor,
                 declared as a dependency below, silently never ran and this artifact shipped no
                 configuration metadata at all. In the packaging whose selling point is configuration
                 from the environment, that is the IDE completion an operator most wants. Naming both
@@ -151,7 +151,7 @@
                     </layers>
                     <!--
                         Lombok is `provided` in the parent, and repackage keeps provided-scope jars
-                        in BOOT-INF/lib — so a compile-time annotation processor was shipping inside
+                        in BOOT-INF/lib, so a compile-time annotation processor was shipping inside
                         the runnable jar and the container image built from it. spring-boot-starter-parent
                         excludes it for exactly this reason, and this project does not inherit from it.
                     -->
@@ -177,7 +177,7 @@
     <profiles>
         <!--
             The image's integration test, and it is a profile because ./mvnw verify must stay green
-            on a machine with no Docker daemon — the same reason nothing in the ordinary build talks
+            on a machine with no Docker daemon: the same reason nothing in the ordinary build talks
             to one. Nothing here builds the image either: it is named, so that what is tested is
             whatever was actually built and is about to be pushed.
 

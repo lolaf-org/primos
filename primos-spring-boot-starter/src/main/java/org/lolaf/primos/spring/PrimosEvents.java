@@ -28,7 +28,7 @@ import java.util.Optional;
  *
  * <p>Every event carries its own term. Use the value you are handed rather than re-reading the
  * node: dispatch happens off the node thread, so by the time a listener runs the answer may have
- * moved on. That is not a race to be fixed — it is why the term is on the event.
+ * moved on. That is not a race to be fixed: it is why the term is on the event.
  */
 public final class PrimosEvents {
 
@@ -55,7 +55,7 @@ public final class PrimosEvents {
     /**
      * Who the cluster's leader is, as far as this node knows.
      *
-     * @param leader the leader, or empty when none is currently known — which is a real and common
+     * @param leader the leader, or empty when none is currently known, which is a real and common
      *               state during an election, not an error
      * @param term   the term this belief belongs to
      */

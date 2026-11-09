@@ -45,7 +45,7 @@ import java.util.function.Supplier;
  *
  * <p>Inactive until {@code primos.application-name} is set, so the module can sit on a classpath
  * doing nothing. Every bean it contributes backs off if the application defines its own, which is
- * the escape hatch for anything this configuration does not express — custom {@link Timings}, a
+ * the escape hatch for anything this configuration does not express: custom {@link Timings}, a
  * different {@link StateStore}, a {@link Transport} built by hand.
  */
 @AutoConfiguration
@@ -71,37 +71,15 @@ public class PrimosAutoConfiguration {
         if (explicit.isEmpty()) {
             return Timings.lan();
         }
-        // The two bounds are a pair: setting one against the other's default is how an invalid
-        // range gets built. Timings rejects that at build(), but naming the property is a better
-        // error than naming a Java field, so it is caught here first.
-        boolean hasMin = timings.electionTimeoutMin() != null;
-        boolean hasMax = timings.electionTimeoutMax() != null;
-        if (hasMin != hasMax) {
-            throw new IllegalStateException("primos.timings.election-timeout-"
-                    + (hasMin ? "min" : "max") + " is set without its pair. The election timeout is"
-                    + " a range drawn from afresh on every reset, and setting one end against the"
-                    + " other's default is how an invalid or too-narrow range is built. Set both.");
-        }
-        Timings.TimingsBuilder builder = Timings.builder();
-        if (timings.heartbeatInterval() != null) {
-            builder.heartbeatInterval(timings.heartbeatInterval());
-        }
-        if (hasMin) {
-            builder.electionTimeoutMin(timings.electionTimeoutMin());
-            builder.electionTimeoutMax(timings.electionTimeoutMax());
-        }
-        if (timings.probeInterval() != null) {
-            builder.probeInterval(timings.probeInterval());
-        }
-        if (timings.advertisementInterval() != null) {
-            builder.advertisementInterval(timings.advertisementInterval());
-        }
-        if (timings.failureThreshold() != null) {
-            builder.failureThreshold(timings.failureThreshold());
-        }
-        // Every relationship between these — the election timeout above five heartbeats, the range
-        // wider than one heartbeat, the probe ceiling — is checked in here, with its own message.
-        return builder.build();
+        Timings.requireElectionBoundsTogether(timings.electionTimeoutMin(), timings.electionTimeoutMax(),
+                "primos.timings.election-timeout-min", "primos.timings.election-timeout-max");
+        return Timings.builder()
+                .heartbeatIntervalIfSet(timings.heartbeatInterval())
+                .electionTimeoutIfSet(timings.electionTimeoutMin(), timings.electionTimeoutMax())
+                .probeIntervalIfSet(timings.probeInterval())
+                .advertisementIntervalIfSet(timings.advertisementInterval())
+                .failureThresholdIfSet(timings.failureThreshold())
+                .build();
     }
 
     private static byte[] secretBytes(PrimosProperties properties) {
@@ -120,7 +98,7 @@ public class PrimosAutoConfiguration {
      * The name is passed through untouched, including when it is null.
      *
      * <p>{@link Peer} already turns a missing name into {@code node-<id>} or {@code witness-<id>},
-     * and substituting anything here — the bare id, say — would give a peer configured through
+     * and substituting anything here (the bare id, say) would give a peer configured through
      * Spring a different default from the identical peer configured through the library.
      */
     private static Peer toPeer(PeerProperties peer, boolean witness) {
@@ -131,7 +109,7 @@ public class PrimosAutoConfiguration {
 
     /**
      * The intervals governing elections and failure detection, from a named profile or from values
-     * spelled out — and never from both.
+     * spelled out, and never from both.
      *
      * <p>Assembled here rather than validated during binding, because a failure at bind time is
      * wrapped in a {@code BindException} that buries the reason. This way an operator gets the
@@ -169,13 +147,7 @@ public class PrimosAutoConfiguration {
     }
 
     /**
-     * Where the term and vote are kept.
-     *
-     * <p>The bean is closed by Spring rather than only by the node. The node closes its store when
-     * it stops, but {@code stop()} on a node that was never started is a no-op — so under
-     * {@code primos.lifecycle=manual} an application that never starts one would otherwise hold the
-     * state directory's exclusive lock until the JVM exited. Both closes are idempotent, so the
-     * ordinary path closing twice costs nothing.
+     * Makes the store the term and vote are kept in, one for each start of the node, which closes it.
      */
     @Bean
     @ConditionalOnMissingBean(name = "primosStateStores")
@@ -191,9 +163,6 @@ public class PrimosAutoConfiguration {
 
     /**
      * How this node reaches its peers.
-     *
-     * <p>Closed by Spring for the same reason as the store: the socket is bound when the bean is
-     * built, and a node that is never started never closes it.
      */
     @Bean
     @ConditionalOnMissingBean(name = "primosTransports")
@@ -250,8 +219,8 @@ public class PrimosAutoConfiguration {
     }
 
     /**
-     * The controller is passed in rather than looked up, so the order that matters — quiesce the
-     * gated beans, then start the node — is a direct call that cannot be undone by someone
+     * The controller is passed in rather than looked up, so the order that matters (quiesce the
+     * gated beans, then start the node) is a direct call that cannot be undone by someone
      * reordering event listeners.
      */
     @Bean

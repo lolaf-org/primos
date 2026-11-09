@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Who each node can actually reach, and what it tells the application about it.
  *
  * <p>Every node probes every peer rather than relaying the leader's opinion, so these answers stay
- * meaningful during an election, during a partition, and when there is no leader at all — which is
+ * meaningful during an election, during a partition, and when there is no leader at all, which is
  * precisely when somebody is asking.
  */
 class ReachabilityTest {

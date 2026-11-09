@@ -203,7 +203,7 @@ class MessageAuthenticatorTest {
                         + " instant, which is why secrets go unrotated for years")
                 .isTrue();
         assertThat(rotating.verify(tagged(onlyNew))).isTrue();
-        assertThat(rotating.hasPreviousSecret()).isTrue();
+        assertThat(rotating.keyCount()).isEqualTo(2);
     }
 
     @Test
@@ -236,7 +236,7 @@ class MessageAuthenticatorTest {
                 .as("a compromised old secret works until the second edit, and that is the whole"
                         + " reason the window is meant to be closed rather than left open")
                 .isFalse();
-        assertThat(afterRotation.hasPreviousSecret()).isFalse();
+        assertThat(afterRotation.keyCount()).isEqualTo(1);
     }
 
     @Test
@@ -279,7 +279,7 @@ class MessageAuthenticatorTest {
 
     /**
      * The selection is a cache, not a commitment. Pinning an application to the key it was first
-     * seen with would reject the new one on the day it changed — the day a ring exists for.
+     * seen with would reject the new one on the day it changed: the day a ring exists for.
      */
     @Test
     void a_key_that_stops_matching_falls_back_to_the_rest_of_the_ring() {

@@ -12,7 +12,7 @@ services:
 
     # RULE 1: never more than one. No `deploy.replicas: 2`, no second service pointed at the same
     # volume, no `docker compose up --scale witness=2`. Two witnesses answering for one cluster is
-    # a double vote by construction — each grants its own vote in the same term, and two nodes each
+    # a double vote by construction: each grants its own vote in the same term, and two nodes each
     # believe they have a majority. It is invisible from the outside: both look healthy.
     #
     # If you want the witness itself to be highly available, the answer is that you do not. Losing
@@ -23,7 +23,7 @@ services:
 
     ports:
       # RULE 2: /udp. `- "7420:7420"` publishes TCP, and the witness is then never spoken to at
-      # all — silence that is indistinguishable from a partition, which is the one thing a witness
+      # all: silence that is indistinguishable from a partition, which is the one thing a witness
       # exists to survive, so nothing about it will look wrong.
       - "7420:7420/udp"
       # The actuator. Bind it to an address your monitoring can reach and nothing else can; it is
@@ -39,16 +39,16 @@ services:
       # never writes them.
       - ./conf:/etc/primos-witness:ro
 
-    # The secret is the whole of the gate — the witness learns its voters from traffic and cannot
+    # The secret is the whole of the gate: the witness learns its voters from traffic and cannot
     # check a sender against a configured peer set the way a node does. Keep it out of the file that
     # is committed: witness.properties reads `secret.platform.value=env:PRIMOS_WITNESS_SECRET`,
-    # which is the store's own indirection — `file:` and `base64:` are the other two.
+    # which is the store's own indirection: `file:` and `base64:` are the other two.
     environment:
       PRIMOS_WITNESS_SECRET: ${PRIMOS_WITNESS_SECRET:?set PRIMOS_WITNESS_SECRET}
 
     # Longer than spring.lifecycle.timeout-per-shutdown-phase, which defaults to 30s. Compose's
-    # default is 10s: a clean stop — the Leaving datagram to every served cluster, then the state
-    # stores closed — can be SIGKILLed at the instant it finishes, and each of those clusters then
+    # default is 10s: a clean stop (the Leaving datagram to every served cluster, then the state
+    # stores closed) can be SIGKILLed at the instant it finishes, and each of those clusters then
     # waits out a probe timeout for a peer that had already gone.
     stop_grace_period: 45s
 
@@ -69,8 +69,8 @@ services:
 
     mem_limit: 512m
     # The heap is 65% of this (see JDK_JAVA_OPTIONS in the Dockerfile); the rest is metaspace,
-    # thread stacks, code cache and Tomcat. Sizing this to the tarball's -Xmx128m — a process with
-    # no framework in it — is an OOM kill that looks like a crash.
+    # thread stacks, code cache and Tomcat. Sizing this to the tarball's -Xmx128m (a process with
+    # no framework in it) is an OOM kill that looks like a crash.
 
     security_opt:
       - no-new-privileges:true

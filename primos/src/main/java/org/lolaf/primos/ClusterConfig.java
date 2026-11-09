@@ -57,7 +57,7 @@ public class ClusterConfig {
      *
      * <p><strong>Leaving this empty is a one-node cluster, and a one-node cluster leads
      * itself.</strong> Quorum is one, so the node elects itself about an election timeout after
-     * starting and stays leader for as long as it runs — nothing can depose it, because there is no
+     * starting and stays leader for as long as it runs: nothing can depose it, because there is no
      * majority for it to lose contact with. That is deliberate and supported: it makes development
      * trivial and lets an application run the same code path in a non-clustered deployment instead
      * of branching around primos entirely.
@@ -92,7 +92,7 @@ public class ClusterConfig {
      * <p>An election is the one moment a cluster makes a collective decision, and afterwards the
      * only evidence left is which node ended up leading. Who asked, who agreed, who refused and why
      * is what turns "the failover took eight seconds" into an answer, and none of it is
-     * reconstructable later — so it is on by default and costs nothing while a leader is healthy,
+     * reconstructable later, so it is on by default and costs nothing while a leader is healthy,
      * because a cluster that is not electing says nothing at all.
      *
      * <p>Turn it off for a deployment that elects often enough for the lines to be noise, or one
@@ -105,8 +105,8 @@ public class ClusterConfig {
      * Whether a character may appear in an application name: printable ASCII with no space, which
      * is {@code '!'} through {@code '~'}.
      *
-     * <p>Public because three places have to agree on it — names are validated here, read back off
-     * the wire by the decoder, and taken from filenames by the witness's config store — and a name
+     * <p>Public because three places have to agree on it (names are validated here, read back off
+     * the wire by the decoder, and taken from filenames by the witness's config store) and a name
      * one of them accepted and another refused would be a cluster that can be configured and not
      * reached.
      *
@@ -129,7 +129,7 @@ public class ClusterConfig {
     }
 
     /**
-     * Whether the cluster has a witness — either configured as a peer, or this node being it.
+     * Whether the cluster has a witness: either configured as a peer, or this node being it.
      */
     public boolean hasWitness() {
         return witness != null || nodeType.isWitness();
@@ -185,7 +185,7 @@ public class ClusterConfig {
      * Every rule, checked before a {@link ClusterConfig} escapes its builder.
      *
      * <p>Called from {@link ClusterConfigBuilder#build()} rather than from a constructor, because the
-     * constructor is Lombok's now — which is why the generated build method is named
+     * constructor is Lombok's, which is why the generated build method is named
      * {@code buildUnvalidated} and wrapped.
      */
     private ClusterConfig validate() {
@@ -246,7 +246,7 @@ public class ClusterConfig {
 
         private static String requireAndTrimApplicationName(String name) {
             Objects.requireNonNull(name, "applicationName");
-            String trimmed = getTrimmed(name);
+            String trimmed = trimAndRequirePrintable(name);
             int bytes = trimmed.getBytes(StandardCharsets.UTF_8).length;
             if (bytes > APPLICATION_NAME_MAX_BYTES) {
                 throw new IllegalArgumentException(
@@ -255,7 +255,7 @@ public class ClusterConfig {
             return trimmed;
         }
 
-        private static String getTrimmed(String name) {
+        private static String trimAndRequirePrintable(String name) {
             String trimmed = name.trim();
             if (trimmed.isEmpty()) {
                 throw new IllegalArgumentException("applicationName must not be blank");
@@ -276,7 +276,7 @@ public class ClusterConfig {
          * never campaigns and never leads. Its peers are the application nodes.
          *
          * <p>A named decision rather than {@code nodeType(WITNESS)}, which the generated setter
-         * also allows — this is the one that says what it means.
+         * also allows: this is the one that says what it means.
          */
         public ClusterConfigBuilder asWitness() {
             return nodeType(PeerType.WITNESS);
@@ -286,7 +286,7 @@ public class ClusterConfig {
          * Declares that this witness's voters are not configured but learned from traffic.
          *
          * <p>For the standalone witness server, and only for it. That server holds no addresses in
-         * configuration — only application names and secrets — because a witness that learns the
+         * configuration (only application names and secrets) because a witness that learns the
          * applications it serves cannot know their nodes ahead of time, and even when it is told
          * them, listing every node of every tenant on shared infrastructure is a burden nobody
          * would accept. So it
@@ -312,7 +312,7 @@ public class ClusterConfig {
          * Declares that something outside this node applies the intervals its peers state.
          *
          * <p>For a witness server told to follow the clusters it serves, and only for it. It
-         * changes nothing this node does — the node still acts on no advertisement, and the value
+         * changes nothing this node does: the node still acts on no advertisement, and the value
          * it runs is still the one it was built with. What it changes is what gets <em>said</em>:
          * a difference between this node's intervals and a peer's is normally an error worth
          * shouting about, because somebody's failover is slower than they believe and nothing else

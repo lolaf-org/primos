@@ -124,7 +124,7 @@ public final class PrimosMetrics implements PrimosStatsListener {
      * <p>The peer tag is resolved from the configured peer set here, once, and an id that is not in
      * it is counted under {@code peer=other}. A witness server learns its voters from traffic, so
      * there is no configured set to resolve against and every peer-scoped meter collapses to
-     * {@code peer=learned} — an unbounded label set driven by whatever arrives on the socket is the
+     * {@code peer=learned}: an unbounded label set driven by whatever arrives on the socket is the
      * metrics version of a memory leak an attacker controls.
      */
     public static PrimosMetrics create(MeterRegistry registry, ClusterConfig cluster) {

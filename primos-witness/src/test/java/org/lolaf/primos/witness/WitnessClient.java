@@ -127,7 +127,7 @@ final class WitnessClient implements AutoCloseable {
      *
      * <p>Anything else that arrives meanwhile is ignored rather than mistaken for the answer. The
      * witness probes every voter it has learned about, so a probe landing between the request and
-     * its reply is entirely normal — and reading one as a refused vote is exactly the kind of
+     * its reply is entirely normal, and reading one as a refused vote is exactly the kind of
      * quietly-passing test this suite is meant not to have.
      */
     private Reply exchange(WitnessServer server, ByteBuffer datagram) {

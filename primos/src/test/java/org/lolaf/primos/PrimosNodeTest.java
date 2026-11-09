@@ -136,7 +136,7 @@ class PrimosNodeTest {
 
         assertThat(node.isRunning()).isTrue();
         assertThat(recorded.electionsWon.get())
-                .as("the running node was left alone, not torn down and rebuilt — a replacement"
+                .as("the running node was left alone, not torn down and rebuilt: a replacement"
                         + " would have had to win an election of its own")
                 .isEqualTo(wonBefore);
     }
@@ -569,7 +569,7 @@ class PrimosNodeTest {
             public void onRoleChanged(Role previous, Role current, long term) {
                 if (current == Role.LEADER) {
                     // A callback runs on the node thread, mid-turn, and reads the node's own
-                    // published role — which is what it is doing now, not last turn.
+                    // published role, which is what it is doing now, not last turn.
                     seen.set(node[0].role());
                 }
             }

@@ -33,7 +33,7 @@ import java.util.*;
  * queued for the same instant are delivered in send order, so a run can be replayed exactly.
  *
  * <p>Nothing here advances time. The harness owns the clock and calls {@link Transport#poll},
- * which delivers whatever has come due — so a partition lasting four election timeouts costs no
+ * which delivers whatever has come due, so a partition lasting four election timeouts costs no
  * wall-clock time at all.
  */
 public final class SimulatedNetwork {
@@ -219,7 +219,7 @@ public final class SimulatedNetwork {
      * than sloppy: tests routinely assert on what a node <em>sent</em> to a peer that never had a
      * transport of its own, calling {@link #transportFor} afterwards to read it. A simulated
      * network has no address table, so unlike a real transport it has no notion of an id it cannot
-     * reach — the only send it drops is one from a closed transport.
+     * reach: the only send it drops is one from a closed transport.
      */
     private void enqueue(int from, int to, ByteBuffer datagram) {
         sent++;

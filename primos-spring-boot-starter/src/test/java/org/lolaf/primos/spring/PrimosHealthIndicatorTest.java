@@ -67,8 +67,8 @@ class PrimosHealthIndicatorTest {
     }
 
     /**
-     * Not started is not a failure — under {@code primos.lifecycle=manual} it is the expected state
-     * until the application is ready — but it must not read as an ordinary follower, because a
+     * Not started is not a failure (under {@code primos.lifecycle=manual} it is the expected state
+     * until the application is ready) but it must not read as an ordinary follower, because a
      * deployment that forgot to start its node looks identical to a healthy one from every other
      * angle.
      */

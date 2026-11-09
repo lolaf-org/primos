@@ -327,7 +327,7 @@ class FileConfigStoreTest {
      * The reason these moved out of {@code witness.properties}: a witness serves clusters it does
      * not own, and one of them being on another network must not decide the intervals for all of
      * them. Before this, a witness serving a LAN cluster and a WAN one was configured wrongly for
-     * whichever it was not — and, since nodes advertise their intervals, said so in an error
+     * whichever it was not, and, since nodes advertise their intervals, said so in an error
      * nobody could act on.
      */
     @Test
@@ -471,7 +471,7 @@ class FileConfigStoreTest {
     }
 
     /**
-     * Onboarding a tenant, or moving one to another network, must not need a witness restart —
+     * Onboarding a tenant, or moving one to another network, must not need a witness restart:
      * that is the one genuinely risky operation in its lifecycle, since every two-node cluster it
      * serves tolerates zero failures while it is down.
      */
@@ -599,7 +599,7 @@ class FileConfigStoreTest {
 
     /**
      * A witness in full cluster mode needs exactly one file. Keys are in the keyring, timings come
-     * from the clusters, applications create themselves — so the per-tenant directory that cannot
+     * from the clusters, applications create themselves, so the per-tenant directory that cannot
      * fit a single Kubernetes ConfigMap need not exist at all.
      */
     @Test
@@ -653,7 +653,7 @@ class FileConfigStoreTest {
      *
      * <p>A Kubernetes ConfigMap volume is a symlink farm: an update writes a new timestamped
      * directory, points {@code ..data} at it and deletes the old one. A watch registered on the
-     * resolved directory is then watching something deleted — it never fires again and nothing
+     * resolved directory is then watching something deleted: it never fires again and nothing
      * says so. Reading through the link sees the new bytes like any other edit.
      */
     @Test

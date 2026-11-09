@@ -29,7 +29,7 @@ public interface MessageHandler {
     /**
      * A vote request. When {@code preVote} is set the caller is asking whether a vote
      * <em>would</em> be granted, and answering must not touch {@code currentTerm} or
-     * {@code votedFor} — so it costs no fsync, and a partitioned node cannot inflate its term.
+     * {@code votedFor}, so it costs no fsync, and a partitioned node cannot inflate its term.
      */
     void onRequestVote(int senderId, long term, boolean preVote, boolean handover);
 
@@ -84,8 +84,8 @@ public interface MessageHandler {
      * A peer stating its own configuration: the intervals it is running.
      *
      * <p>Every value is milliseconds. <strong>Between nodes: report, never act.</strong> The timings of a cluster
-     * must match for failover to be prompt — a node with a longer {@code electionTimeoutMin} is
-     * proportionally more reluctant to grant the pre-vote a failover waits on — but nothing about a
+     * must match for failover to be prompt (a node with a longer {@code electionTimeoutMin} is
+     * proportionally more reluctant to grant the pre-vote a failover waits on) but nothing about a
      * mismatch is unsafe, and a node that changed its behaviour on seeing one would turn a rolling
      * configuration change into a partition.
      */

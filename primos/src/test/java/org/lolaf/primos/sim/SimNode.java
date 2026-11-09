@@ -21,7 +21,7 @@ import org.lolaf.primos.Role;
  * What the simulation needs from a node: something it can drive, observe and kill.
  *
  * <p>Deliberately small. The harness must not know how a node works, only when it wants to run,
- * what state it is in, and how to stop it existing — otherwise the harness starts encoding the
+ * what state it is in, and how to stop it existing: otherwise the harness starts encoding the
  * algorithm's assumptions and stops being able to catch the algorithm being wrong.
  */
 public interface SimNode {

@@ -45,11 +45,11 @@ import java.util.List;
  *                        reply is a route to a leader no majority elected.
  * @param macAlgorithm    which JCE {@code Mac} signs datagrams; defaults to HMAC-SHA256. Local
  *                        policy every member must share.
- * @param timings         a named profile, or the intervals spelled out — see {@link TimingsProperties}
+ * @param timings         a named profile, or the intervals spelled out; see {@link TimingsProperties}
  * @param voteLogging     whether who voted for whom is logged at INFO rather than DEBUG. On by
  *                        default, and silent while a leader is healthy, because a cluster that is
  *                        not electing says nothing at all.
- * @param lifecycle       when the node itself starts — see {@link NodeLifecycle}
+ * @param lifecycle       when the node itself starts; see {@link NodeLifecycle}
  * @param leaderLifecycle whether leadership starts and stops beans, and which ones
  */
 @ConfigurationProperties("primos")
@@ -84,7 +84,7 @@ public record PrimosProperties(
 
         /**
          * The node bean is built and <em>not</em> started; the application calls
-         * {@link org.lolaf.primos.PrimosNode#start()} when it is genuinely ready — after a cache
+         * {@link org.lolaf.primos.PrimosNode#start()} when it is genuinely ready, after a cache
          * warm, a migration, a first sync.
          *
          * <p>Stopping is not symmetric: Spring still stops the node on context close, because that
@@ -108,14 +108,14 @@ public record PrimosProperties(
      *
      * <p>Refusing the mixture is deliberate. A profile is a set of values chosen to hold Raft's
      * governing inequality together, so "{@code wan} but with a different heartbeat" is not a
-     * profile any more — it is a custom set whose author has not seen the other four numbers, and
+     * profile any more: it is a custom set whose author has not seen the other four numbers, and
      * the failures that follow are slow rather than loud. Naming all five is a small price for
      * knowing what you configured.
      *
      * <p>Every value is nullable, because the question this record has to answer is not "what is
      * it" but "<em>was it set</em>". Anything left out of a custom set falls back to the
      * {@link org.lolaf.primos.Timings} builder's own default, and the relationships between them
-     * are validated there — one place, with the messages already written.
+     * are validated there: one place, with the messages already written.
      *
      * @param profile            {@code lan} or {@code wan}
      * @param heartbeatInterval  how often a leader asserts itself

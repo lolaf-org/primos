@@ -15,8 +15,6 @@
  */
 package org.lolaf.primos.witness;
 
-import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.lolaf.primos.Peer;
 import org.lolaf.primos.transport.DatagramHandler;
@@ -36,11 +34,11 @@ import java.util.*;
  * <p>The server owns one {@link DatagramChannel} for every cluster it serves, because binding a
  * port per tenant would make onboarding a firewall change. So the socket cannot be handed to an
  * {@code ElectionNode} directly: a node expects a transport that delivers only its own traffic.
- * This is that transport — an inbox the server pushes into after reading the application name, and
+ * This is that transport: an inbox the server pushes into after reading the application name, and
  * a {@code send} that writes back to the shared channel.
  *
  * <p><strong>Addresses are learned, never configured.</strong> The witness holds no addresses at
- * all — only application names and secrets — so the only way it can reply to anybody is to
+ * all (only application names and secrets) so the only way it can reply to anybody is to
  * remember where they spoke from. Learning happens in {@link #confirmSender}, which the node calls
  * only after a datagram has passed authentication, because learning from an unverified one would
  * let a single spoofed packet redirect a node's traffic and partition it without forging any
@@ -50,7 +48,7 @@ import java.util.*;
  * and buys the thing that matters on shared infrastructure: a datagram delivered inside
  * {@code runOnce}, where a node's own catch-all contains a failure to that node. Delivering
  * straight from the server's read loop would let one tenant's broken disk throw through the server
- * and take down every other tenant with it. The bound is the other half of the same argument —
+ * and take down every other tenant with it. The bound is the other half of the same argument:
  * one noisy cluster must not be able to grow the server's heap.
  *
  * <p>Owned by the server thread, like every other transport here.
@@ -77,21 +75,21 @@ final class RoutedTransport implements Transport {
     private InetSocketAddress currentSource;
     private boolean closed;
 
-    private long overflowed;
+    // Volatile for the metrics thread reading the totals; the server thread is the only writer.
+    private volatile long overflowed;
 
     /**
      * Replies this application could not address to anybody.
      *
      * <p>Expected to stay at zero. A witness only ever answers, and an answer is addressed to the
-     * source of the datagram being answered even before that node has been learned — so anything
+     * source of the datagram being answered even before that node has been learned, so anything
      * counted here means a send went looking for a node outside a reply, which a witness has no
      * reason to do.
      */
-    @Getter(AccessLevel.PACKAGE)
-    private long undeliverable;
+    private volatile long undeliverable;
 
-    private long sendFailures;
-    private long sendsWhileClosed;
+    private volatile long sendFailures;
+    private volatile long sendsWhileClosed;
 
     RoutedTransport(String application, DatagramChannel channel, Selector selector) {
         this.application = application;
@@ -135,14 +133,12 @@ final class RoutedTransport implements Transport {
         InetSocketAddress target = endpoints.get(peerId);
         if (target == null) {
             // The first datagram a node ever sends is answered here, and it has to be. The node
-            // only becomes known through confirmSender, which the decoder calls *after* dispatch —
-            // so while the reply to a node's first request is being written there is still no
-            // learned address for it, and without this the very first request from every node
-            // would go unanswered and cost an election timeout to retry.
+            // only becomes known through confirmSender, which runs after the message is handled, so
+            // while the reply to its first request is being written there is no learned address
+            // for it, and without this that request would cost an election timeout to retry.
             //
-            // Replying to the source of the datagram currently being handled is safe for the same
-            // reason confirmSender is: a handler only runs once the tag has been verified, so
-            // currentSource here is an authenticated peer's address rather than a claimed one.
+            // A handler runs only once the tag has verified, so this answers whoever sent a
+            // verified datagram. The tag does not cover the source address, so that is all it proves.
             target = currentSource;
         }
         if (target == null) {
@@ -155,8 +151,8 @@ final class RoutedTransport implements Transport {
             channel.send(datagram, target);
         } catch (IOException | RuntimeException e) {
             // Routine on UDP, and an ICMP port-unreachable can surface here long after the fact.
-            // The algorithm's timers are the retry mechanism, so this must never become a failure
-            // — but it is counted, because a reply this witness never managed to send is the
+            // The algorithm's timers are the retry mechanism, so this must never become a failure,
+            //but it is counted, because a reply this witness never managed to send is the
             // difference between a cluster failing over and a cluster waiting.
             sendFailures++;
             if (log.isDebugEnabled()) {

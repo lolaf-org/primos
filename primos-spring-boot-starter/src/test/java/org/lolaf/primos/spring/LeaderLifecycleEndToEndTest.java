@@ -38,7 +38,7 @@ import static org.awaitility.Awaitility.await;
  * transition executor, and the gated beans.
  *
  * <p>A single-node cluster, so quorum is one and the node elects itself within an election timeout.
- * That is a legitimate configuration rather than a test fixture — it is what lets an application run
+ * That is a legitimate configuration rather than a test fixture: it is what lets an application run
  * the same code path in a non-clustered deployment.
  */
 class LeaderLifecycleEndToEndTest {

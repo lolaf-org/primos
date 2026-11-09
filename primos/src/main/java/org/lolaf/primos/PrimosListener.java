@@ -42,7 +42,7 @@ public interface PrimosListener {
     }
 
     /**
-     * The cluster's leader changed, which is not the same event as this node's role changing — a
+     * The cluster's leader changed, which is not the same event as this node's role changing: a
      * follower needs this to know where to forward work. Empty means no leader is currently known,
      * which is a real and common state during an election, not an error.
      *

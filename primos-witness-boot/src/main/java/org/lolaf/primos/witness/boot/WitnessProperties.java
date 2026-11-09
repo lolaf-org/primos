@@ -38,7 +38,7 @@ import java.util.Map;
  * and that is a rule rather than an omission.
  *
  * <p>Spring binds once, at boot. A key expressed in both places would be silently frozen at the
- * value Spring read while an operator edited the file and watched nothing happen — and the file is
+ * value Spring read while an operator edited the file and watched nothing happen, and the file is
  * re-read on purpose, because <em>restarting a witness is the one genuinely risky operation in its
  * lifecycle</em>: while it is down, every two-node cluster it serves tolerates zero failures. The
  * keyring settles it on its own: a secret bound at boot cannot be rotated without the restart this
@@ -53,7 +53,7 @@ import java.util.Map;
  * {@code PrimosProperties} gives in the other Spring module: this project configures Lombok with
  * fluent accessors, and Spring's JavaBean binder would not find {@code nodeId()}.
  *
- * @param configStore              where the served set comes from — see {@link Store}
+ * @param configStore              where the served set comes from; see {@link Store}
  * @param configDirectory          where {@code witness.properties} and {@code applications/} live,
  *                                 under {@link Store#FILE}. The tarball's {@code --config}, and the
  *                                 same default.
@@ -73,12 +73,12 @@ import java.util.Map;
  * @param clusterApplicationLimit  {@link Store#PROPERTIES} only. How many applications
  *                                 {@code cluster} may create.
  * @param timings                  {@link Store#PROPERTIES} only. The intervals every served
- *                                 application runs, unless it names its own — see
+ *                                 application runs, unless it names its own; see
  *                                 {@link TimingsProperties}.
  * @param voteLogging              {@link Store#PROPERTIES} only. Who voted for whom, at INFO.
  * @param applications             {@link Store#PROPERTIES} only. What is served, and the intervals
- *                                 each one runs — see {@link ApplicationProperties}.
- * @param keys                     {@link Store#PROPERTIES} only. The keyring — see {@link KeyProperties}
+ *                                 each one runs; see {@link ApplicationProperties}.
+ * @param keys                     {@link Store#PROPERTIES} only. The keyring; see {@link KeyProperties}
  */
 @ConfigurationProperties("primos.witness")
 public record WitnessProperties(
@@ -113,7 +113,7 @@ public record WitnessProperties(
 
         /**
          * Spring properties, bound once at boot. For a single-tenant deployment whose served set
-         * genuinely never changes — and it costs hot reload, which is not a small thing: adding a
+         * genuinely never changes, and it costs hot reload, which is not a small thing: adding a
          * cluster then means restarting the witness, and while it is down every two-node cluster it
          * serves tolerates zero failures.
          */
@@ -124,7 +124,7 @@ public record WitnessProperties(
      * Where to listen, when the environment rather than the file is saying.
      *
      * <p>Split in two, as {@code bind.host} and {@code bind.port} are in the file, so that a
-     * container can set the port alone — which is the common case — without having to restate the
+     * container can set the port alone (which is the common case) without having to restate the
      * host. Either may be given by itself; whichever is missing comes from the file.
      *
      * @param host the local address, or the wildcard when neither this nor the file names one
@@ -142,7 +142,7 @@ public record WitnessProperties(
      *
      * <p>A list of objects rather than a list of names, because <strong>intervals belong per
      * application</strong>. A witness serves clusters it does not own, and one of them sitting on
-     * another network must not decide the intervals for all of them — which is exactly why the file
+     * another network must not decide the intervals for all of them, which is exactly why the file
      * store keeps a file per application rather than one timings block in
      * {@code witness.properties}. A single-tenant deployment simply never fills this in and takes
      * the witness-wide default.
@@ -156,7 +156,7 @@ public record WitnessProperties(
     /**
      * A profile <strong>or</strong> the intervals spelled out, never both.
      *
-     * <p>A profile is a set of values chosen so the relationships between them hold — the election
+     * <p>A profile is a set of values chosen so the relationships between them hold: the election
      * timeout an order of magnitude above the round trip, and so on. Overriding part of one leaves a
      * custom set whose author has not seen the other values, so the mixture is refused rather than
      * merged.
@@ -164,13 +164,13 @@ public record WitnessProperties(
      * <p>Durations rather than the file's {@code .millis} integers, and that is not a second
      * vocabulary for the sake of it: under this store there is no {@code witness.properties} to be
      * consistent with, Spring parses {@code 250ms} and {@code 2s} for free, and
-     * {@code primos-spring-boot-starter} — the other place a primos cluster is configured from
-     * Spring — already spells them exactly this way.
+     * {@code primos-spring-boot-starter} (the other place a primos cluster is configured from
+     * Spring) already spells them exactly this way.
      *
      * <p><strong>Whatever is set must match the clusters this witness serves.</strong> A node
      * refuses a pre-vote while it has heard from a leader within {@code electionTimeoutMin}, so a
      * witness with a longer one is proportionally more reluctant to agree to the failover its vote
-     * is needed for — and for a two-node pair the witness's vote is the one everything waits on.
+     * is needed for, and for a two-node pair the witness's vote is the one everything waits on.
      * Nothing detects the mismatch; failover just gets slower.
      *
      * @param profile              {@code lan} or {@code wan}
@@ -237,7 +237,7 @@ public record WitnessProperties(
      * @param value        the shared secret
      * @param algorithm    the JCE {@code Mac}, or null for HMAC-SHA256
      * @param applications the name patterns this key may speak for, {@code *} matching any run of
-     *                     characters. Empty means it covers whatever no other key claims — and a
+     *                     characters. Empty means it covers whatever no other key claims, and a
      *                     name that any key claims is verified <em>only</em> by the keys claiming
      *                     it.
      */

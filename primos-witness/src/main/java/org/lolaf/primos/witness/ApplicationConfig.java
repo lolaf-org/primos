@@ -39,15 +39,12 @@ public final class ApplicationConfig {
     /**
      * The intervals the nodes of this cluster run, which its witness has to match.
      *
-     * <p>Per application, because a witness
-     * serves clusters it does not own, and one of them moving to a WAN profile must not be a flag
-     * day for every other tenant. It used to be witness-wide, which meant a witness serving a LAN
-     * cluster and a WAN one was configured wrongly for whichever it was not — and, since nodes
-     * advertise their intervals, said so in an error nobody could act on.
+     * <p>Per application, because a witness serves clusters it does not own, and one of them moving
+     * to a WAN profile must not be a flag day for every other tenant.
      *
      * <p>A node refuses a pre-vote while it has heard from a leader within
      * {@link org.lolaf.primos.Timings#electionTimeoutMin()}, so a witness with a longer one is
-     * proportionally more reluctant to grant the vote a failover waits on — and for a two-node
+     * proportionally more reluctant to grant the vote a failover waits on, and for a two-node
      * pair the witness's vote is the one everything waits on.
      */
     private final Timings timings;

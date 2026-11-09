@@ -145,7 +145,7 @@ public final class Invariants {
      * One vote per term, remembered across a crash.
      *
      * <p>This is the invariant a missing fsync breaks. A node that grants a vote, dies before
-     * persisting it and comes back will happily grant a second one in the same term — and the two
+     * persisting it and comes back will happily grant a second one in the same term, and the two
      * candidates each collect a majority. The check deliberately keeps its record across crashes,
      * because that is exactly the window being tested.
      */
@@ -189,7 +189,7 @@ public final class Invariants {
      *
      * <p>The invariant that makes primos safe to answer <em>am I the leader?</em> at all. Without
      * it a partitioned leader keeps saying yes while the other side elects a replacement, and both
-     * applications go active — which is the failure the library exists to prevent, produced by the
+     * applications go active, which is the failure the library exists to prevent, produced by the
      * library itself.
      *
      * <p>Reachability is judged from the simulated network rather than from anything the node
@@ -197,7 +197,7 @@ public final class Invariants {
      * leader needs its heartbeats to arrive as much as it needs the replies.
      *
      * @param bound how long a leader may go on claiming leadership after losing quorum contact.
-     *              Generous on purpose — the point is that the window is bounded, not that it is
+     *              Generous on purpose: the point is that the window is bounded, not that it is
      *              any particular length.
      */
     public static Invariant leaderStandsDownWithoutQuorum(Duration bound) {

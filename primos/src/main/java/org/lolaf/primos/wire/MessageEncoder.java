@@ -146,7 +146,7 @@ public final class MessageEncoder {
     }
 
     /**
-     * States this node's own configuration — the intervals it is running.
+     * States this node's own configuration: the intervals it is running.
      *
      * <p>Milliseconds as {@code u32} rather than nanoseconds as {@code u64}: milliseconds are the
      * unit every one of these is configured in, and 32 bits carries seven weeks of them.

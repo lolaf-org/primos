@@ -71,7 +71,7 @@ class WitnessServerTest {
      * intervals for all of them.
      *
      * <p>Asserted through the advertisement rather than by reaching inside the server, because that
-     * is the mechanism this exists to serve — a node compares what the witness sends against its
+     * is the mechanism this exists to serve: a node compares what the witness sends against its
      * own, and before this change one of these two tenants would always have been told the wrong
      * thing, in an error nobody could act on.
      */
@@ -371,7 +371,7 @@ class WitnessServerTest {
 
     @Test
     void intervals_that_do_not_hold_together_are_ignored_rather_than_adopted() {
-        // The advertisement interval is not on the wire, so a witness keeps its own — and this
+        // The advertisement interval is not on the wire, so a witness keeps its own, and this
         // test needs two of them. Both profiles here are deliberately fast so it does not spend
         // thirty seconds waiting for the second.
         settings(String.join("\n", "config.source=cluster", "secret.shared.value=" + SECRET,

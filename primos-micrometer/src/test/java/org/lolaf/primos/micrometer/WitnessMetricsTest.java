@@ -90,7 +90,7 @@ class WitnessMetricsTest {
 
     /**
      * The tenants here are configured in a file, so the server's own constructor opens them and the
-     * stats-listener factory runs during {@code build()} — before {@code bind}. Their gauges have
+     * stats-listener factory runs during {@code build()}, before {@code bind}. Their gauges have
      * to arrive anyway, which is why binding registers what it finds already open.
      */
     @Test

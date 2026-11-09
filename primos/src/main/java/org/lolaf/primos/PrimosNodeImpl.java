@@ -33,7 +33,7 @@ import java.util.function.Supplier;
  * A node with a thread: the election algorithm, run for real.
  *
  * <p>Exactly one thread, and it is a daemon, so a forgotten node never holds a JVM open. It blocks
- * in one place — the transport's poll, bounded by the next timer deadline — which is what lets the
+ * in one place (the transport's poll, bounded by the next timer deadline) which is what lets the
  * whole design be single-threaded without busy-waiting.
  *
  * <p>{@link #role()} is answerable from any thread because the node publishes an immutable
@@ -243,11 +243,6 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return requestTransfer(targetId);
     }
 
-    /**
-     * Waits for the node thread to serve the request, bounded by the stop timeout in case the
-     * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
-     * the transport under it, and one caller at a time uses the single request slot.
-     */
     private boolean requestTransfer(int target) {
         if (Thread.currentThread() == thread) {
             throw new IllegalStateException("transferLeadership() waits for the node thread, so it cannot be called on"
@@ -257,6 +252,11 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
         return awaitTransfer(target);
     }
 
+    /**
+     * Waits for the node thread to serve the request, bounded by the stop timeout in case the
+     * thread is gone. Synchronized like {@link #publishChange()}, so {@link #stop()} cannot close
+     * the transport under it, and one caller at a time uses the single request slot.
+     */
     private synchronized boolean awaitTransfer(int target) {
         synchronized (transfer) {
             if (!running) {
@@ -386,7 +386,7 @@ final class PrimosNodeImpl implements PrimosNode, PrimosListener {
     }
 
     private void loop() {
-        log.info("cluster '{}': node {} is rejoining the cluster", config.applicationName(), config.nodeId());
+        log.info("cluster '{}': node {} is joining the cluster", config.applicationName(), config.nodeId());
         try {
             while (running) {
                 // No bound of our own: runOnce waits only until the next deadline, and stop() wakes

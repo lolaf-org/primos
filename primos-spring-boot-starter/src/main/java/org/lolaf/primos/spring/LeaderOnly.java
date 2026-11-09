@@ -26,7 +26,7 @@ import java.lang.annotation.Target;
  * is the leader.
  *
  * <p>Has an effect only when {@code primos.leader-lifecycle.enabled} is true and the scope is
- * {@code beans} with no explicit bean list set — an explicit list wins, so that an application can
+ * {@code beans} with no explicit bean list set: an explicit list wins, so that an application can
  * override the annotations without editing them.
  *
  * <p><strong>It makes leadership convenient, not safe.</strong> Between losing leadership and the

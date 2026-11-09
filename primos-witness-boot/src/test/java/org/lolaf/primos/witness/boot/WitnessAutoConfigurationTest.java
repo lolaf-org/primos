@@ -99,7 +99,7 @@ class WitnessAutoConfigurationTest {
 
     /**
      * The rule stated as a test: what Spring does not bind is not merely absent from
-     * {@link WitnessProperties}, it is still live in the file — which is what keeps it re-readable.
+     * {@link WitnessProperties}, it is still live in the file, which is what keeps it re-readable.
      */
     @Test
     void everything_spring_does_not_bind_is_still_read_from_the_file() {

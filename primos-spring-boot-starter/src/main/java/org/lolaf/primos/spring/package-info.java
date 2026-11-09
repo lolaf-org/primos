@@ -21,7 +21,7 @@
  * <p>Public and supported. Set {@code primos.application-name} and the rest follows; every bean
  * backs off if the application defines its own.
  *
- * <p>Two settings carry most of the meaning. {@code primos.lifecycle} decides when the node joins —
+ * <p>Two settings carry most of the meaning. {@code primos.lifecycle} decides when the node joins:
  * with the context, or when the application says so. {@code primos.leader-lifecycle} decides
  * whether leadership starts and stops beans, and which ones. Read
  * {@link org.lolaf.primos.spring.LeaderLifecycleController} before turning the second on: it makes

@@ -288,7 +288,7 @@ class UdpTransportTest extends TransportContractTest {
             learning.poll(TimeUnit.SECONDS.toNanos(2), buffer -> {
                 // Inside the handler, deliberately: the transport only knows where the datagram
                 // it is currently delivering came from. In production the node calls this from
-                // the same place, once the datagram has passed every check — learning from an
+                // the same place, once the datagram has passed every check: learning from an
                 // unverified one would let a spoofed packet redirect a peer's traffic.
                 learning.confirmSender(NODE_B);
                 learning.confirmSender(NODE_B);

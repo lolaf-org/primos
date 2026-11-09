@@ -19,8 +19,8 @@ package org.lolaf.primos.store;
  * Where a node's term and vote are kept.
  *
  * <p>The contract that matters is timing: {@link #save} must not return until the values are on
- * stable storage. A node persists before it acts — before granting a vote, before starting an
- * election, and before replying to anything that raised its term — so a store that returns early
+ * stable storage. A node persists before it acts (before granting a vote, before starting an
+ * election, and before replying to anything that raised its term) so a store that returns early
  * silently converts a durable protocol into a lossy one.
  *
  * <p>Both fields are written in one call. There is deliberately no {@code setTerm} and no
@@ -34,7 +34,7 @@ public interface StateStore extends AutoCloseable {
      * Reads the state back, once, at startup.
      *
      * @return {@link PersistentState#fresh()} if this node has never run
-     * @throws StateStoreException if state exists but cannot be trusted — which must never be
+     * @throws StateStoreException if state exists but cannot be trusted, which must never be
      *                             quietly treated as a fresh node, since that is how a vote is
      *                             forgotten and a second leader elected
      */

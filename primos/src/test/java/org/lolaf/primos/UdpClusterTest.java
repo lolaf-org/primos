@@ -37,7 +37,7 @@ import static org.awaitility.Awaitility.await;
  *
  * <p>A sanity check rather than the safety net. The deterministic simulation is what proves the
  * algorithm; this proves the algorithm is wired to a socket correctly, which is a different and
- * much shallower question — but one no amount of simulation can answer.
+ * much shallower question, but one no amount of simulation can answer.
  */
 class UdpClusterTest {
 
@@ -74,7 +74,7 @@ class UdpClusterTest {
     }
 
     /**
-     * The id of the node this one believes is leading, or -1 while none is known — the shape an
+     * The id of the node this one believes is leading, or -1 while none is known: the shape an
      * awaited condition wants, without an Optional per poll.
      */
     private static int leaderId(PrimosNode node) {
@@ -146,7 +146,7 @@ class UdpClusterTest {
         await().atMost(15, TimeUnit.SECONDS).until(() -> drops.probeRoundTrips.size() >= 2);
 
         assertThat(drops.probeRoundTrips)
-                .as("real round trips on loopback, measured — every sample rather than the last")
+                .as("real round trips on loopback, measured: every sample rather than the last")
                 .isNotEmpty()
                 .allMatch(nanos -> nanos > 0, "a positive round trip");
     }
@@ -289,7 +289,7 @@ class UdpClusterTest {
         assertThat(successor).isNotSameAs(leader);
         assertThat(drops.handoversAccepted.get())
                 .as("the successor campaigned because it was told to, not because it timed out"
-                        + " waiting — the timeout would have replaced the leader too, just later")
+                        + " waiting: the timeout would have replaced the leader too, just later")
                 .isEqualTo(1);
     }
 
@@ -340,7 +340,7 @@ class UdpClusterTest {
         PrimosNode three = start(3, ports, null, new MemoryStateStore(), ports[2]);
         await().atMost(15, TimeUnit.SECONDS).until(() -> leaders(one, two, three) == 1);
 
-        // A follower, so nothing about leadership is in play — only the reporting.
+        // A follower, so nothing about leadership is in play: only the reporting.
         PrimosNode follower = one.role() == Role.LEADER ? two : one;
         PrimosNode watcher = follower == one ? two : one;
         int departing = follower.config().nodeId();

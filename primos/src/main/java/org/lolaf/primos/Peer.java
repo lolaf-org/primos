@@ -42,7 +42,7 @@ public class Peer {
     /**
      * Highest permitted node id.
      *
-     * <p>This bounds the id <em>value</em>, not the size of a cluster — see
+     * <p>This bounds the id <em>value</em>, not the size of a cluster; see
      * {@link Quorum#MAX_RECOMMENDED_VOTERS} for that, which is far smaller. Ids may be sparse, so
      * an operator is free to use a scheme that means something, such as {@code 101, 102, 201}
      * for two datacentres.

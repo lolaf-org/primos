@@ -24,7 +24,7 @@ import org.lolaf.primos.Role;
 import org.lolaf.primos.Timings;
 
 /**
- * Graceful leadership handover on a clean stop — Raft thesis §3.10.
+ * Graceful leadership handover on a clean stop: Raft thesis §3.10.
  *
  * <p>A leader that simply stops leaves the cluster without one until somebody's election timeout
  * expires, because a timeout is how a follower notices silence. Telling one follower to campaign
@@ -84,7 +84,7 @@ class HandoverTest {
 
         assertThat(cluster.leader().get().currentTerm())
                 .as("skipping the pre-vote costs exactly one term, the one the successor campaigns"
-                        + " in — not the runaway inflation pre-vote exists to prevent")
+                        + " in, not the runaway inflation pre-vote exists to prevent")
                 .isEqualTo(termBefore + 1);
         assertThat(cluster.leaderCount()).isEqualTo(1);
     }
@@ -179,7 +179,7 @@ class HandoverTest {
      *
      * <p>Long on purpose, and not a strawman: a stop-the-world collection is indistinguishable
      * from a dead process, so operators raise this precisely so a garbage collection is not
-     * reported as a failure. Every test below is about the gap that tuning opens — a node that
+     * reported as a failure. Every test below is about the gap that tuning opens: a node that
      * shut down politely would otherwise be reported alive for this entire window.
      */
     private static final Timings GC_TOLERANT = Timings.builder()
@@ -266,7 +266,7 @@ class HandoverTest {
         long term = leader.currentTerm();
 
         // Straight at the handler, twice, as a forgery or a replay would arrive. CheckQuorum reads
-        // lastRoundTripNanos, which this must not touch — otherwise a captured datagram would be a
+        // lastConfirmedNanos, which this must not touch: otherwise a captured datagram would be a
         // way to depose a healthy leader.
         for (ElectionCluster.NodeUnderTest peer : cluster.nodes()) {
             if (peer.id() != leader.id()) {
@@ -304,7 +304,7 @@ class HandoverTest {
      * Elects a leader and then waits for the probes to have actually established reachability.
      *
      * <p>Necessary because the probe interval here is deliberately long. A peer starts out
-     * neither up nor down, and only becomes "up" when its first probe reply lands — so without
+     * neither up nor down, and only becomes "up" when its first probe reply lands, so without
      * this the tests below would be asserting a transition away from a state nothing had reached.
      */
     private static void settleWithReachability(Simulation simulation, ElectionCluster cluster) {

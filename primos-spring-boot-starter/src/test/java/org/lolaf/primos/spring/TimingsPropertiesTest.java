@@ -119,7 +119,7 @@ class TimingsPropertiesTest {
 
     /**
      * Partial custom is allowed, and the library's own validation is what catches an incoherent
-     * result — a better error than demanding all five keys would give.
+     * result: a better error than demanding all five keys would give.
      */
     @Test
     void an_incoherent_custom_set_fails_with_the_librarys_own_message() {

@@ -23,13 +23,13 @@
  *
  * <p>They are {@code public} only because {@code primos-witness} is a separate artifact driving the
  * same state machine, and primos ships an {@code Automatic-Module-Name} rather than a module
- * descriptor — so there is no way to export a package to one consumer without exporting it to
+ * descriptor, so there is no way to export a package to one consumer without exporting it to
  * everyone. Read the modifier as a limitation of the packaging, not as an invitation.
  *
  * <p>{@link org.lolaf.primos.core.ElectionNode} is the whole package: terms, votes, randomised
  * election timeouts, heartbeats, CheckQuorum, PreVote, the graceful handover and the departure
  * announcement. It owns no thread. {@code runOnce} is called by the node's own loop in production
- * and by the deterministic simulation in tests, so both drive identical code — which is what makes
+ * and by the deterministic simulation in tests, so both drive identical code, which is what makes
  * the simulation evidence about the real thing rather than about a copy of it.
  */
 package org.lolaf.primos.core;

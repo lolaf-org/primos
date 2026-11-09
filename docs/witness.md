@@ -265,8 +265,8 @@ restarting a witness is the one genuinely risky operation in its lifecycle: whil
 serves is back to tolerating zero failures.
 
 - **Every few seconds the configuration is checksummed**, and nothing further happens unless a file has actually
-  changed. There is no file watcher.
-- **There used to be one, and it was deleted because it could stop working silently.** On a Kubernetes ConfigMap the
+  changed.
+- **There is no file watcher, because one can stop working silently.** On a Kubernetes ConfigMap the
   volume is a symlink farm: an update writes a new timestamped directory, swaps `..data` atomically and deletes the old
   one, so a watch registered on the resolved directory is watching something deleted. It never fires again and nothing
   says so. A check that always runs is worth more than a notification that might have stopped.

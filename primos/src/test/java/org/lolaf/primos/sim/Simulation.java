@@ -42,7 +42,7 @@ import org.lolaf.primos.transport.SimulatedNetwork;
  * costs no wall-clock time, and a run covering an hour of cluster life finishes in milliseconds.
  *
  * <p>Everything is deterministic given the seed. Nodes are ticked in id order, the network delivers
- * in a defined order, and the same seed produces a byte-identical trace — which is what makes a
+ * in a defined order, and the same seed produces a byte-identical trace, which is what makes a
  * checked-in regression seed worth anything.
  */
 public final class Simulation {
@@ -187,7 +187,7 @@ public final class Simulation {
      * A fingerprint of everything that happened, byte-identical across runs of the same seed.
      *
      * <p>Two simulations built from one seed must produce the same string. If they do not, some
-     * hidden source of nondeterminism — a hash iteration order, a wall-clock read, a thread — has
+     * hidden source of nondeterminism (a hash iteration order, a wall-clock read, a thread) has
      * crept in, and every regression seed in the suite has quietly stopped meaning anything.
      */
     public String traceDigest() {

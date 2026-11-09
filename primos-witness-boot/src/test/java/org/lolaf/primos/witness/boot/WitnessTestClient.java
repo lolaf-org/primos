@@ -32,7 +32,7 @@ import java.time.Duration;
  *
  * <p>Deliberately not the witness module's own client, which drives {@code runOnce} between sends:
  * here the loop is Spring's to run, so the whole point is to wait for datagrams that arrive without
- * this thread turning any handle. That is also what makes these tests the production path — nothing
+ * this thread turning any handle. That is also what makes these tests the production path: nothing
  * here reaches into the server.
  */
 final class WitnessTestClient implements AutoCloseable {

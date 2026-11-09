@@ -88,7 +88,7 @@ public final class FileConfigStore implements ConfigStore {
      * argument, because {@link ConfigStore#poll(long)} is called from the server's own loop and
      * takes that loop's reading. Only the first rescan deadline has nobody to be given one by.
      *
-     * @throws IllegalArgumentException if the initial configuration cannot be read at all — a
+     * @throws IllegalArgumentException if the initial configuration cannot be read at all: a
      *                                  server that cannot be configured must not start
      */
     public FileConfigStore(Path directory, MonotonicClock clock) {
@@ -104,7 +104,7 @@ public final class FileConfigStore implements ConfigStore {
      * The intervals the served nodes run with: <strong>either</strong> a named profile
      * <strong>or</strong> the values spelled out, never both.
      *
-     * <p>A profile is a set of intervals chosen so the relationships between them hold — the
+     * <p>A profile is a set of intervals chosen so the relationships between them hold: the
      * election timeout an order of magnitude above the round trip, and so on. Overriding part of
      * one leaves a custom set whose author has not seen the other values, so the mixture is refused
      * rather than merged.
@@ -112,7 +112,7 @@ public final class FileConfigStore implements ConfigStore {
      * <p><strong>Whatever is set here must match the clusters this witness serves.</strong> A node
      * refuses a pre-vote while it has heard from a leader within {@code electionTimeoutMin}, so a
      * witness with a longer one is proportionally more reluctant to agree to the failover its vote
-     * is needed for — and for a two-node pair the witness's vote is the one everything waits on.
+     * is needed for, and for a two-node pair the witness's vote is the one everything waits on.
      * Nothing detects the mismatch; failover just gets slower.
      *
      * <p>Durations are milliseconds rather than {@code 250ms} strings, because this file is parsed
@@ -121,11 +121,11 @@ public final class FileConfigStore implements ConfigStore {
     private static Timings timings(Properties properties, Timings fallback) {
         String profile = properties.getProperty("timings.profile");
         List<String> explicit = new ArrayList<>(5);
-        Integer heartbeat = optionalInt(properties, "timings.heartbeat.millis", explicit);
-        Integer electionMin = optionalInt(properties, "timings.election.min.millis", explicit);
-        Integer electionMax = optionalInt(properties, "timings.election.max.millis", explicit);
-        Integer probe = optionalInt(properties, "timings.probe.millis", explicit);
-        Integer advertisement = optionalInt(properties, "timings.advertisement.millis", explicit);
+        Duration heartbeat = optionalMillis(properties, "timings.heartbeat.millis", explicit);
+        Duration electionMin = optionalMillis(properties, "timings.election.min.millis", explicit);
+        Duration electionMax = optionalMillis(properties, "timings.election.max.millis", explicit);
+        Duration probe = optionalMillis(properties, "timings.probe.millis", explicit);
+        Duration advertisement = optionalMillis(properties, "timings.advertisement.millis", explicit);
         Integer failureThreshold = optionalInt(properties, "timings.failure.threshold", explicit);
 
         if (profile != null && !profile.trim().isEmpty() && !explicit.isEmpty()) {
@@ -141,35 +141,15 @@ public final class FileConfigStore implements ConfigStore {
         if (explicit.isEmpty()) {
             return fallback;
         }
-        // The two bounds are a pair: setting one against the other's default is how an invalid
-        // range is built. Timings rejects that at build(), but naming the property is a better
-        // error than naming a Java field, so it is caught here first.
-        if ((electionMin == null) != (electionMax == null)) {
-            throw new IllegalArgumentException("timings.election."
-                    + (electionMin != null ? "min" : "max") + ".millis is set without its pair. The"
-                    + " election timeout is a range drawn from afresh on every reset, and setting"
-                    + " one end against the other's default is how an invalid or too-narrow range"
-                    + " is built. Set both.");
-        }
-        Timings.TimingsBuilder builder = Timings.builder();
-        if (heartbeat != null) {
-            builder.heartbeatInterval(Duration.ofMillis(heartbeat));
-        }
-        if (electionMin != null) {
-            builder.electionTimeoutMin(Duration.ofMillis(electionMin));
-            builder.electionTimeoutMax(Duration.ofMillis(electionMax));
-        }
-        if (probe != null) {
-            builder.probeInterval(Duration.ofMillis(probe));
-        }
-        if (advertisement != null) {
-            builder.advertisementInterval(Duration.ofMillis(advertisement));
-        }
-        if (failureThreshold != null) {
-            builder.failureThreshold(failureThreshold);
-        }
-        // Every relationship between these is validated in here, with its own message.
-        return builder.build();
+        Timings.requireElectionBoundsTogether(electionMin, electionMax,
+                "timings.election.min.millis", "timings.election.max.millis");
+        return Timings.builder()
+                .heartbeatIntervalIfSet(heartbeat)
+                .electionTimeoutIfSet(electionMin, electionMax)
+                .probeIntervalIfSet(probe)
+                .advertisementIntervalIfSet(advertisement)
+                .failureThresholdIfSet(failureThreshold)
+                .build();
     }
 
     private static Timings timingsProfile(String profile) {
@@ -185,7 +165,7 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     /**
-     * Reads an optional integer, recording the key in {@code explicit} when it was actually set —
+     * Reads an optional integer, recording the key in {@code explicit} when it was actually set,
      * which is the question the exclusivity check has to answer, and the reason this cannot simply
      * default.
      */
@@ -202,6 +182,11 @@ public final class FileConfigStore implements ConfigStore {
                     + (key.endsWith(".millis") ? "milliseconds" : "probes") + ", but was '"
                     + raw.trim() + "'", e);
         }
+    }
+
+    private static Duration optionalMillis(Properties properties, String key, List<String> explicit) {
+        Integer millis = optionalInt(properties, key, explicit);
+        return millis == null ? null : Duration.ofMillis(millis);
     }
 
     /**
@@ -313,15 +298,10 @@ public final class FileConfigStore implements ConfigStore {
     }
 
     /**
-     * Says so when an application file still carries key material, which no longer lives there.
-     *
-     * <p>Refused rather than ignored. Every other stale key in this estate is read and dropped with
-     * a line saying so, and this one is not, because the failure it would otherwise produce is the
-     * worst kind available here: an operator who believes a tenant has its own secret, and a
-     * witness verifying it with whatever the keyring happens to offer. A configuration that is
-     * wrong about who can speak for whom must not start.
+     * Refused rather than ignored, because an operator would believe a tenant has its own secret
+     * while the witness verifies it with whatever the keyring offers.
      */
-    private static void warnIfKeysHere(String name, Properties properties) {
+    private static void refuseKeysHere(String name, Properties properties) {
         for (String property : properties.stringPropertyNames()) {
             if (property.equals("secret") || property.startsWith(KEY_PREFIX)) {
                 throw new IllegalArgumentException("application '" + name + "' sets '" + property
@@ -337,8 +317,8 @@ public final class FileConfigStore implements ConfigStore {
      * Every {@code secret.<name>.value} in the file, with its algorithm and the names it claims.
      *
      * <p>Sorted by key name, so the ring's order does not depend on {@code Properties} hashing.
-     * Order decides nothing about correctness — a datagram is authentic if any candidate accepts
-     * it — but a configuration that reads differently on two runs is not one anybody can reason
+     * Order decides nothing about correctness (a datagram is authentic if any candidate accepts
+     * it) but a configuration that reads differently on two runs is not one anybody can reason
      * about.
      */
     private Keyring readKeyring(Properties properties) {
@@ -427,10 +407,7 @@ public final class FileConfigStore implements ConfigStore {
             return false;
         }
         ConfigSnapshot previous = current;
-        // Both halves, because the settings are half the file. Comparing only the applications
-        // left a settings-only edit parsed and then discarded: the snapshot was never swapped, so
-        // config.source, config.cluster.limit and the two reload intervals were read from disk
-        // every rescan and never took effect.
+        // Both halves: an edit to witness.properties alone changes no application.
         boolean settingsChanged = !previous.settings().equals(candidate.settings());
         boolean applicationsChanged = !previous.applications().equals(candidate.applications());
         if (!settingsChanged && !applicationsChanged) {
@@ -453,7 +430,7 @@ public final class FileConfigStore implements ConfigStore {
      * cannot: the socket is bound once, the state directory is opened once, and vote logging is
      * taken by the server when it starts. Publishing the new snapshot without saying so would leave
      * the file on disk disagreeing with the running process, with nothing anywhere to say which one
-     * was winning — and the witness manual has promised this line since it was written.
+     * was winning, and the witness manual has promised this line since it was written.
      */
     private void reportRestartRequired(WitnessSettings previous, WitnessSettings candidate) {
         warnIfChanged("bind.host/bind.port", previous.bindAddress(), candidate.bindAddress());
@@ -492,28 +469,10 @@ public final class FileConfigStore implements ConfigStore {
     /**
      * A checksum over every file the configuration is made of, names included.
      *
-     * <p>This replaced a {@code WatchService} on 2026-09-02, and the reason is that the watcher was
-     * never the mechanism — the periodic re-read below it always ran regardless, so the watcher only
-     * ever bought latency. It bought it in the one currency this file will not spend: it could stop
-     * working without saying so. On a Kubernetes ConfigMap it does exactly that. The volume is a
-     * symlink farm; an update writes a new timestamped directory, swaps {@code ..data} atomically
-     * and deletes the old one — so a watch registered on the resolved directory is now watching
-     * something deleted, never fires again, and says nothing. On macOS the JDK has no native backend
-     * and polls every few seconds anyway; on NFS it does nothing at all. Now bare metal, a network
-     * filesystem, macOS and a ConfigMap are one code path, with no environment in which the
-     * mechanism quietly does less than it claims.
-     *
-     * <p><strong>Content rather than size and modification time</strong>, which is what this was
-     * first written as. A test caught it immediately: changing {@code bind.port} from 9999 to 8888
-     * is the same length, and filesystem timestamps are coarse enough that two writes can share
-     * one — so an entirely ordinary edit was invisible. Reading the files is affordable precisely
-     * because this replaced something more expensive: the old design parsed every file every thirty
-     * seconds, and this reads a few kilobytes every five and parses only when something moved.
-     *
-     * <p>{@link CRC32} for the same reason {@code FileStateStore} uses it — this detects an edit,
-     * it does not defend against one. The whole directory is re-listed each time rather than only
-     * the files already known, because a file being dropped in is the case this exists for, and
-     * names are folded into the sum so that a rename with identical content still counts.
+     * <p>Not a {@code WatchService}, which stops firing without saying so on a Kubernetes ConfigMap
+     * and does nothing on NFS. Content rather than size and modification time, because an edit can
+     * keep the length and land on the same coarse timestamp. {@link CRC32} because this detects an
+     * edit, it does not defend against one.
      */
     private long stamp() {
         CRC32 sum = new CRC32();
@@ -588,7 +547,7 @@ public final class FileConfigStore implements ConfigStore {
         warnIfWorldReadable(file);
         Properties properties = load(file, false);
 
-        warnIfKeysHere(name, properties);
+        refuseKeysHere(name, properties);
         // Per application, falling back to the witness-wide value. A tenant that says nothing gets
         // what the witness was told; a tenant on another network says so in its own file, without
         // touching anyone else's.
@@ -602,7 +561,7 @@ public final class FileConfigStore implements ConfigStore {
      *
      * <p>Under that setting a cluster states its own profile and the witness follows it, so
      * whatever is written here is read, parsed, and then replaced by the first thing its nodes
-     * say. One source or the other, never a merge of the two — but a key that is quietly ignored
+     * say. One source or the other, never a merge of the two, but a key that is quietly ignored
      * is worse than one that is refused, so it is said out loud, once per application.
      */
     private void warnIfTimingsIgnored(String name, Properties properties, WitnessSettings settings) {
@@ -622,7 +581,7 @@ public final class FileConfigStore implements ConfigStore {
 
     /**
      * The application name comes from the filename, and is held to the same rules as the field it
-     * travels in — a name too long to fit on the wire would be served here and unreachable there.
+     * travels in: a name too long to fit on the wire would be served here and unreachable there.
      */
     private String applicationNameOf(Path file) {
         String fileName = file.getFileName().toString();
@@ -684,7 +643,7 @@ public final class FileConfigStore implements ConfigStore {
      *
      * <p>Under {@link ConfigSource#CLUSTER} an empty {@code applications/} is the intended shape,
      * not a mistake: applications are created from the config messages their nodes send, timings
-     * come from those messages, and keys live in the keyring — so a plug-and-play witness needs
+     * come from those messages, and keys live in the keyring, so a plug-and-play witness needs
      * that directory not to exist at all. Warning there would put a line in every startup log of a
      * correct deployment, which is how a warning stops being read.
      */

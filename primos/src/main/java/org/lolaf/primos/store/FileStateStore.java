@@ -46,7 +46,7 @@ import java.util.zip.CRC32;
  * a loud failure needing a human, never a recoverable warning.
  *
  * <p>An exclusive lock is held on a separate lock file for the store's lifetime. Two processes
- * sharing one state directory — a botched restart, a container that did not actually die — would
+ * sharing one state directory (a botched restart, a container that did not actually die) would
  * otherwise each vote independently from the same identity, which is a double vote by construction
  * and completely invisible from outside. The lock is on its own file rather than on the state file
  * because the state file is replaced by rename, so its identity changes under any lock held on it.

@@ -32,7 +32,7 @@ class ApplicationNamesTest {
     void the_transposition_that_the_whole_mechanism_exists_for_is_caught() {
         assertThat(ApplicationNames.nearMiss("ordres", SERVED))
                 .as("two nodes named 'orders' and 'ordres' cannot see each other, each asks the"
-                        + " witness, which grants a vote from each bucket under CLUSTER — two"
+                        + " witness, which grants a vote from each bucket under CLUSTER: two"
                         + " leaders out of one typo, with nothing else in the system able to see it")
                 .isEqualTo("orders");
     }

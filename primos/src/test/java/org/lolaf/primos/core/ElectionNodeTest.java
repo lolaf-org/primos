@@ -276,8 +276,8 @@ class ElectionNodeTest {
      * Not a tidiness check, which is why it is worth a test and worth its place on the loop path.
      *
      * <p>{@link ElectionNode#start()} is what reads {@code currentTerm} and {@code votedFor} back
-     * from the store. A turn of the loop taken without it would run on term 0 with no vote — a node
-     * that has forgotten what it promised in a previous life — and would then time out, campaign
+     * from the store. A turn of the loop taken without it would run on term 0 with no vote (a node
+     * that has forgotten what it promised in a previous life) and would then time out, campaign
      * and vote for itself in a term it may already have voted in. That is the double-vote bug,
      * reached by calling two methods in the wrong order.
      *
@@ -520,7 +520,7 @@ class ElectionNodeTest {
 
     /**
      * The whole safety argument for this message. A mismatch makes failover slower, never unsafe,
-     * so acting on one would turn an ordinary rolling timing change into a partition — a worse
+     * so acting on one would turn an ordinary rolling timing change into a partition: a worse
      * failure than the one being detected, and one nobody could roll forward out of.
      */
     @Test
@@ -553,7 +553,7 @@ class ElectionNodeTest {
 
     /**
      * One statement every thirty seconds is the right steady state and the wrong bootstrap: this is
-     * UDP, and the case where the first is dropped is the case that most needs it — a witness taking
+     * UDP, and the case where the first is dropped is the case that most needs it: a witness taking
      * its configuration from the cluster cannot serve one it has never heard state itself.
      */
     @Test
@@ -570,7 +570,7 @@ class ElectionNodeTest {
 
     /**
      * The negative pair, and without it the test above passes on a node that simply states itself
-     * constantly — which would be the same bug wearing the fix's clothes.
+     * constantly, which would be the same bug wearing the fix's clothes.
      */
     @Test
     void it_settles_to_the_advertisement_interval_once_every_peer_has_answered() {
@@ -618,7 +618,7 @@ class ElectionNodeTest {
 
     /**
      * The pair to the tests above: a witness told to follow reports nothing, because there is
-     * nothing to report — the difference it sees is the value it is about to be rebuilt with, so
+     * nothing to report: the difference it sees is the value it is about to be rebuilt with, so
      * an ERROR on every retune would describe a state lasting one turn as a fault.
      */
     @Test
@@ -781,7 +781,7 @@ class ElectionNodeTest {
 
     /**
      * Delivers a real datagram rather than calling the handler, so the decoder, the size check and
-     * {@code runOnce}'s wrapping are all on the path — which is the only way this is the production
+     * {@code runOnce}'s wrapping are all on the path, which is the only way this is the production
      * path rather than a shape that resembles it.
      */
     private void advertise(int fromPeer, ElectionNode to, int heartbeat, int electionMin,

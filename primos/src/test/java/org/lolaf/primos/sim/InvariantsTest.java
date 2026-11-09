@@ -28,7 +28,7 @@ import org.lolaf.primos.time.VirtualClock;
  * Proves each invariant actually fires.
  *
  * <p>An invariant that has never failed is a comment, not a check. Every safety property here is
- * given a node that deliberately breaks it, and is asserted to notice — otherwise the whole
+ * given a node that deliberately breaks it, and is asserted to notice: otherwise the whole
  * simulation could be quietly asserting nothing while thousands of seeds go green.
  */
 class InvariantsTest {
