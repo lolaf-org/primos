@@ -264,8 +264,8 @@ The configuration directory is re-read while the witness runs. **This is the poi
 restarting a witness is the one genuinely risky operation in its lifecycle: while it is down, every two-node cluster it
 serves is back to tolerating zero failures.
 
-- **Every few seconds the configuration is checksummed**, and nothing further happens unless a file has actually
-  changed.
+- **Every few seconds the configuration is checksummed**, `file:` secrets included, and nothing further happens unless
+  a file has actually changed.
 - **There is no file watcher, because one can stop working silently.** On a Kubernetes ConfigMap the
   volume is a symlink farm: an update writes a new timestamped directory, swaps `..data` atomically and deletes the old
   one, so a watch registered on the resolved directory is watching something deleted. It never fires again and nothing

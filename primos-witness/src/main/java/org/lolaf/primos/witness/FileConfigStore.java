@@ -60,6 +60,7 @@ public final class FileConfigStore implements ConfigStore {
     private static final String SETTINGS_FILE = "witness.properties";
     private static final String SUFFIX = ".properties";
     private static final String KEY_PREFIX = "secret.";
+    private static final String FILE_SECRET = "file:";
 
     private final Path directory;
     private final Path applicationsDirectory;
@@ -270,8 +271,8 @@ public final class FileConfigStore implements ConfigStore {
             }
             return fromEnvironment.getBytes(StandardCharsets.UTF_8);
         }
-        if (value.startsWith("file:")) {
-            Path path = base.getFileSystem().getPath(value.substring(5));
+        if (value.startsWith(FILE_SECRET)) {
+            Path path = secretFile(value, base);
             try {
                 return Files.readAllBytes(path);
             } catch (IOException e) {
@@ -283,6 +284,10 @@ public final class FileConfigStore implements ConfigStore {
             return Base64.getDecoder().decode(value.substring(7));
         }
         return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static Path secretFile(String value, Path base) {
+        return base.getFileSystem().getPath(value.substring(FILE_SECRET.length()));
     }
 
     private static void absorb(CRC32 sum, Path file) {
@@ -477,6 +482,7 @@ public final class FileConfigStore implements ConfigStore {
     private long stamp() {
         CRC32 sum = new CRC32();
         absorb(sum, directory.resolve(SETTINGS_FILE));
+        secretFiles().forEach(file -> absorb(sum, file));
         if (Files.isDirectory(applicationsDirectory)) {
             List<Path> files = new ArrayList<>();
             try (DirectoryStream<Path> stream =
@@ -494,6 +500,23 @@ public final class FileConfigStore implements ConfigStore {
             }
         }
         return sum.getValue();
+    }
+
+    private List<Path> secretFiles() {
+        try {
+            Properties properties = load(directory.resolve(SETTINGS_FILE), true);
+            List<Path> files = new ArrayList<>();
+            for (String key : new TreeSet<>(properties.stringPropertyNames())) {
+                String value = properties.getProperty(key).trim();
+                if (key.startsWith(KEY_PREFIX) && key.endsWith(".value") && value.startsWith(FILE_SECRET)) {
+                    files.add(secretFile(value, directory));
+                }
+            }
+            return files;
+        } catch (IllegalArgumentException malformed) {
+            // The file's own bytes are already in the sum, and the read that follows reports this.
+            return Collections.emptyList();
+        }
     }
 
     private ConfigSnapshot read() {

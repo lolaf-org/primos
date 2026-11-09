@@ -184,6 +184,32 @@ class FileConfigStoreTest {
     }
 
     @Test
+    void a_secret_file_replaced_in_place_is_picked_up() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "before-rotation".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:" + secretFile);
+
+        try (FileConfigStore store = open()) {
+            Files.write(secretFile, "after-rotation!".getBytes(StandardCharsets.UTF_8));
+
+            assertThat(rescan(store)).isTrue();
+            assertThat(new String(store.current().settings().keyring().keys().get(0).secret(),
+                    StandardCharsets.UTF_8)).isEqualTo("after-rotation!");
+        }
+    }
+
+    @Test
+    void a_secret_file_left_alone_is_not_a_change() throws IOException {
+        Path secretFile = directory.resolve("orders.key");
+        Files.write(secretFile, "unchanged".getBytes(StandardCharsets.UTF_8));
+        settings("secret.orders.value = file:" + secretFile);
+
+        try (FileConfigStore store = open()) {
+            assertThat(rescan(store)).isFalse();
+        }
+    }
+
+    @Test
     void a_key_without_a_secret_is_refused() throws IOException {
         settings("secret.orders.algorithm = HmacSHA512");
 
