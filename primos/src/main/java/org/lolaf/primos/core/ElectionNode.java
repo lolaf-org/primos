@@ -229,7 +229,7 @@ public final class ElectionNode implements MessageHandler {
         // are not configured, so it has nothing to compare an id against and the authentication
         // tag is the whole of its admission control. See ClusterConfig.ClusterConfigBuilder#learnedMembership.
         this.decoder = new MessageDecoder(config.applicationName(), authenticator,
-                config.isLearnedMembership() ? id -> true : this::isConfiguredPeer, this.stats);
+                config.isLearnedMembership() ? Peer::isValidId : this::isConfiguredPeer, this.stats);
     }
 
     private static boolean isSilentTooLong(TrackedPeer trackedPeer, long now, long silence) {
@@ -680,7 +680,7 @@ public final class ElectionNode implements MessageHandler {
      * pre-vote refused is <em>why no election happened</em>, and no other signal says so.
      *
      * <p>Deliberately <strong>not</strong> hooked into {@link #abandonPreVote()}, which reads as
-     * the place a campaign ends and is not: {@link #startElection()} calls it on the way from a
+     * the place a campaign ends and is not: {@link #startElection(boolean)} calls it on the way from a
      * <em>won</em> pre-vote into the real election, so ending the campaign there would report every
      * successful failover as a lost one. A campaign ends when this node leads, or when it steps
      * down without leading.

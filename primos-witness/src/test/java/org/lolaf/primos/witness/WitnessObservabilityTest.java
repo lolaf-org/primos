@@ -256,6 +256,57 @@ class WitnessObservabilityTest {
         return recorders.computeIfAbsent(application, name -> new RecordingStats());
     }
 
+    @Test
+    void an_impossible_sender_id_costs_a_keyed_tenant_nothing() {
+        application("orders");
+        server = builder().build();
+
+        assertImpossibleSendersAreDropped(SECRET);
+
+        try (WitnessClient valid = new WitnessClient("orders", 1, SECRET, WITNESS_ID, server.boundAddress())) {
+            assertThat(valid.requestVote(server, 1L)).isTrue();
+        }
+    }
+
+    @Test
+    void an_impossible_sender_id_costs_an_unkeyed_tenant_nothing() {
+        write(directory.resolve("witness.properties"), "");
+        application("orders");
+        server = builder().build();
+
+        assertImpossibleSendersAreDropped(null);
+    }
+
+    @Test
+    void the_first_and_the_last_usable_ids_are_still_served() {
+        application("orders");
+        server = builder().build();
+
+        for (int id : new int[] {Peer.MIN_ID, Peer.MAX_ID - 1}) {
+            try (WitnessClient edge = new WitnessClient("orders", id, SECRET, WITNESS_ID, server.boundAddress())) {
+                assertThat(edge.requestVote(server, id + 1L)).as("id %s", id).isTrue();
+            }
+        }
+        assertThat(recorder("orders").drops(DropReason.UNKNOWN_PEER)).isZero();
+        assertThat(server.quarantinedApplications()).isEmpty();
+    }
+
+    private void assertImpossibleSendersAreDropped(String secret) {
+        int[] impossible = {Peer.MAX_ID + 1, 5000, Integer.MAX_VALUE, Peer.MIN_ID - 1, Integer.MIN_VALUE};
+        for (int id : impossible) {
+            try (WitnessClient sender = new WitnessClient("orders", id, secret, WITNESS_ID, server.boundAddress())) {
+                sender.fireAndForget(server, 9L);
+            }
+        }
+
+        assertThat(server.quarantinedApplications())
+                .as("one datagram must not be able to take a cluster's witness away")
+                .isEmpty();
+        assertThat(server.currentTerm("orders")).isZero();
+        assertThat(server.votedFor("orders")).as("no vote spent on a node that cannot exist").isEqualTo(-1);
+        assertThat(recorder("orders").drops(DropReason.UNKNOWN_PEER)).isEqualTo(impossible.length);
+    }
+
     /**
      * One datagram for 'orders' carrying a tag from the wrong key, which is dropped and counted.
      */
