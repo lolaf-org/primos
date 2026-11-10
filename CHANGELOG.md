@@ -14,7 +14,7 @@ between releases. A section is written when the version it belongs to is being c
 carries the right number and date the first time and the workflow's check has exactly one heading it
 could mean.
 
-## [0.9.0] - 2026-11-09
+## [0.9.0] - 2026-11-10
 
 First public release. Primos runs the leader-election half of Raft inside a Java application, so a set of instances
 elect a leader among themselves and each is told the moment that changes. It is an ordinary library, over UDP, with
@@ -61,12 +61,13 @@ state.
   clusters, each with its own state, with keys that can be shared by a fleet or dedicated to one tenant, rotated
   without a restart, and configuration re-read while it runs. A tenant whose storage fails is quarantined and the
   others carry on.
-  - `primos-witness-cli-0.9.0.tar.gz` on the GitHub Release, a plain process to run under systemd.
-  - `ghcr.io/lolaf-org/primos-witness:0.9.0`, the same witness as a Spring Boot application with a health endpoint and
-    metrics.
-  - `primos-witness` on Maven Central, to embed the witness in your own process.
+    - `primos-witness-cli-0.9.0.tar.gz` on the GitHub Release, a plain process to run under systemd.
+    - `ghcr.io/lolaf-org/primos-witness:0.9.0`, the same witness as a Spring Boot application with a health endpoint and
+      metrics.
+    - `primos-witness` on Maven Central, to embed the witness in your own process.
 - **Observability.** `PrimosStatsListener` reports elections and how long they took, how long a cluster had no
-  leader, handovers, probe round trips, dropped datagrams and datagrams it could not send as they happen, at no allocation cost.
+  leader, handovers, probe round trips, dropped datagrams and datagrams it could not send as they happen, at no
+  allocation cost.
   `primos-micrometer` binds a node or a witness onto a Micrometer `MeterRegistry`.
 - **Spring Boot.** `primos-spring-boot-starter` configures a node from `application.properties`, publishes leadership
   changes as Spring events, reports health, and can start and stop your beans as this node gains and loses
