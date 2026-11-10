@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.lolaf.primos</groupId>
         <artifactId>primos-parent</artifactId>
-        <version>0.9.0</version>
+        <version>0.9.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>primos-witness-boot</artifactId>
