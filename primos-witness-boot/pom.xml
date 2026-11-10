@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.lolaf.primos</groupId>
         <artifactId>primos-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.9.0</version>
     </parent>
 
     <artifactId>primos-witness-boot</artifactId>
@@ -220,7 +220,7 @@
                 <!-- Empty unless -D names one, so an unset property interpolates to nothing rather
                      than to the literal ${docker.image}, which would match the IT's guard
                      and start a container called that. -->
-                <docker.image/>
+                <docker.image />
             </properties>
             <build>
                 <plugins>

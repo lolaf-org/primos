@@ -4,7 +4,7 @@
 
     <groupId>org.lolaf.primos</groupId>
     <artifactId>primos-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.9.0</version>
     <packaging>pom</packaging>
 
     <name>Primos</name>
@@ -40,7 +40,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Reproducible builds -->
-        <project.build.outputTimestamp>2026-08-28T00:00:00Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-11-10T20:26:35Z</project.build.outputTimestamp>
         <!-- release, not source/target: it compiles against the real Java 11 API, so building on a
              newer JDK cannot silently use a method that fails at runtime on 11. -->
         <maven.compiler.release>11</maven.compiler.release>
@@ -68,7 +68,7 @@
         <central-publishing-maven-plugin.version>0.12.0</central-publishing-maven-plugin.version>
         <maven-release-plugin.version>3.3.1</maven-release-plugin.version>
         <!-- Appended to what maven-release-plugin passes to its forked builds -->
-        <release.extraArguments/>
+        <release.extraArguments />
         <lombok-maven-plugin.version>1.18.20.0</lombok-maven-plugin.version>
         <license-maven-plugin.version>5.1.2</license-maven-plugin.version>
 
@@ -79,7 +79,7 @@
             -Xshare:off
             ${surefire.argLine.extra}
         </surefire.argLine>
-        <surefire.argLine.extra/>
+        <surefire.argLine.extra />
 
         <automatic.module.name>org.lolaf.primos.MODULE.NAME.NOT.SET</automatic.module.name>
         <license.source.dir>${project.basedir}/..</license.source.dir>
@@ -97,13 +97,11 @@
         <module>primos-spring-boot-starter</module>
     </modules>
 
-    <scm child.scm.connection.inherit.append.path="false"
-         child.scm.developerConnection.inherit.append.path="false"
-         child.scm.url.inherit.append.path="false">
+    <scm child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">
         <connection>scm:git:https://github.com/lolaf-org/primos.git</connection>
         <developerConnection>scm:git:https://github.com/lolaf-org/primos.git</developerConnection>
         <url>https://github.com/lolaf-org/primos</url>
-        <tag>HEAD</tag>
+        <tag>v0.9.0</tag>
     </scm>
 
     <issueManagement>
